@@ -23,7 +23,7 @@
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/Mutex.h"
 
-#ifdef MOZILLA_INTERNAL_API
+#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
 #include "GeckoProfiler.h"
 #endif //MOZILLA_INTERNAL_API
 
@@ -459,7 +459,7 @@ ReentrantMonitor::Wait(PRIntervalTime aInterval)
   mChainPrev = 0;
 
   nsresult rv;
-#ifdef MOZILLA_INTERNAL_API
+#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
   {
     GeckoProfilerSleepRAII profiler_sleep;
 #endif //MOZILLA_INTERNAL_API
@@ -468,7 +468,7 @@ ReentrantMonitor::Wait(PRIntervalTime aInterval)
     rv = PR_Wait(mReentrantMonitor, aInterval) == PR_SUCCESS ? NS_OK :
                                                                NS_ERROR_FAILURE;
 
-#ifdef MOZILLA_INTERNAL_API
+#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
   }
 #endif //MOZILLA_INTERNAL_API
 
