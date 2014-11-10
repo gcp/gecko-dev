@@ -91,6 +91,19 @@ public:
     return true;
   }
 
+  virtual bool CachedReadAt(int64_t aOffset, void* aBuffer, size_t aCount,
+                            size_t* aBytesRead) MOZ_OVERRIDE
+  {
+    nsresult rv = mResource->ReadFromCache(reinterpret_cast<char*>(aBuffer),
+                                           aOffset, aCount);
+    if (NS_FAILED(rv)) {
+      *aBytesRead = 0;
+      return false;
+    }
+    *aBytesRead = aCount;
+    return true;
+  }
+
   virtual bool Length(int64_t* aSize) MOZ_OVERRIDE
   {
     if (mResource->GetLength() < 0)
@@ -395,10 +408,6 @@ MP4Reader::ReadMetadata(MediaInfo* aInfo,
     NS_ENSURE_TRUE(mAudio.mDecoder != nullptr, NS_ERROR_FAILURE);
     nsresult rv = mAudio.mDecoder->Init();
     NS_ENSURE_SUCCESS(rv, rv);
-
-    // Decode one audio frame to detect potentially incorrect channels count or
-    // sampling rate from demuxer.
-    Decode(kAudio);
   }
 
   if (HasVideo()) {
@@ -429,6 +438,12 @@ MP4Reader::ReadMetadata(MediaInfo* aInfo,
   UpdateIndex();
 
   return NS_OK;
+}
+
+void
+MP4Reader::ReadUpdatedMetadata(MediaInfo* aInfo)
+{
+  *aInfo = mInfo;
 }
 
 bool
@@ -755,14 +770,15 @@ MP4Reader::DecodeVideoFrame(bool &aKeyframeSkip,
   return rv;
 }
 
-nsresult
+void
 MP4Reader::Seek(int64_t aTime,
                 int64_t aStartTime,
                 int64_t aEndTime,
                 int64_t aCurrentTime)
 {
   if (!mDecoder->GetResource()->IsTransportSeekable() || !mDemuxer->CanSeek()) {
-    return NS_ERROR_FAILURE;
+    GetCallback()->OnSeekCompleted(NS_ERROR_FAILURE);
+    return;
   }
 
   mQueuedVideoSample = nullptr;
@@ -775,21 +791,14 @@ MP4Reader::Seek(int64_t aTime,
       mQueuedVideoSample ? mQueuedVideoSample->composition_timestamp : aTime);
   }
 
-  return NS_OK;
+  GetCallback()->OnSeekCompleted(NS_OK);
 }
 
 void
 MP4Reader::NotifyDataArrived(const char* aBuffer, uint32_t aLength,
                              int64_t aOffset)
 {
-  if (NS_IsMainThread()) {
-    if (GetTaskQueue()) {
-      GetTaskQueue()->Dispatch(
-        NS_NewRunnableMethod(this, &MP4Reader::UpdateIndex));
-    }
-  } else {
-    UpdateIndex();
-  }
+  UpdateIndex();
 }
 
 void

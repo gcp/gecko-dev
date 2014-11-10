@@ -2523,13 +2523,6 @@ LIRGenerator::visitTypedObjectProto(MTypedObjectProto *ins)
 }
 
 bool
-LIRGenerator::visitTypedObjectUnsizedLength(MTypedObjectUnsizedLength *ins)
-{
-    MOZ_ASSERT(ins->type() == MIRType_Int32);
-    return define(new(alloc()) LTypedObjectUnsizedLength(useRegisterAtStart(ins->object())), ins);
-}
-
-bool
 LIRGenerator::visitTypedObjectElements(MTypedObjectElements *ins)
 {
     MOZ_ASSERT(ins->type() == MIRType_Elements);
@@ -2713,6 +2706,30 @@ LIRGenerator::visitLoadElementHole(MLoadElementHole *ins)
     if (ins->needsNegativeIntCheck() && !assignSnapshot(lir, Bailout_NegativeIndex))
         return false;
     return defineBox(lir, ins);
+}
+
+bool
+LIRGenerator::visitLoadUnboxedObjectOrNull(MLoadUnboxedObjectOrNull *ins)
+{
+    MOZ_ASSERT(ins->elements()->type() == MIRType_Elements);
+    MOZ_ASSERT(ins->index()->type() == MIRType_Int32);
+    MOZ_ASSERT(ins->type() == MIRType_Value);
+
+    LLoadUnboxedPointerV *lir = new(alloc()) LLoadUnboxedPointerV(useRegister(ins->elements()),
+                                                                  useRegisterOrConstant(ins->index()));
+    return defineBox(lir, ins);
+}
+
+bool
+LIRGenerator::visitLoadUnboxedString(MLoadUnboxedString *ins)
+{
+    MOZ_ASSERT(ins->elements()->type() == MIRType_Elements);
+    MOZ_ASSERT(ins->index()->type() == MIRType_Int32);
+    MOZ_ASSERT(ins->type() == MIRType_String);
+
+    LLoadUnboxedPointerT *lir = new(alloc()) LLoadUnboxedPointerT(useRegister(ins->elements()),
+                                                                  useRegisterOrConstant(ins->index()));
+    return define(lir, ins);
 }
 
 bool

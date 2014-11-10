@@ -35,7 +35,6 @@ let AboutReader = function(doc, win) {
   Services.obs.addObserver(this, "Reader:FaviconReturn", false);
   Services.obs.addObserver(this, "Reader:Added", false);
   Services.obs.addObserver(this, "Reader:Removed", false);
-  Services.obs.addObserver(this, "Reader:ListStatusReturn", false);
   Services.obs.addObserver(this, "Gesture:DoubleTap", false);
 
   this._article = null;
@@ -130,13 +129,7 @@ let AboutReader = function(doc, win) {
 
   let url = queryArgs.url;
   let tabId = queryArgs.tabId;
-  if (tabId) {
-    dump("Loading from tab with ID: " + tabId + ", URL: " + url);
-    this._loadFromTab(tabId, url);
-  } else {
-    dump("Fetching page with URL: " + url);
-    this._loadFromURL(url);
-  }
+  this._loadArticle(url, tabId);
 }
 
 AboutReader.prototype = {
@@ -211,23 +204,6 @@ AboutReader.prototype = {
         break;
       }
 
-      case "Reader:ListStatusReturn": {
-        let args = JSON.parse(aData);
-        if (args.url == this._article.url) {
-          if (this._isReadingListItem != args.inReadingList) {
-            let isInitialStateChange = (this._isReadingListItem == -1);
-            this._isReadingListItem = args.inReadingList;
-            this._updateToggleButton();
-
-            // Display the toolbar when all its initial component states are known
-            if (isInitialStateChange) {
-              this._setToolbarVisibility(true);
-            }
-          }
-        }
-        break;
-      }
-
       case "Gesture:DoubleTap": {
         let args = JSON.parse(aData);
         let scrollBy;
@@ -281,7 +257,6 @@ AboutReader.prototype = {
       case "unload":
         Services.obs.removeObserver(this, "Reader:Added");
         Services.obs.removeObserver(this, "Reader:Removed");
-        Services.obs.removeObserver(this, "Reader:ListStatusReturn");
         Services.obs.removeObserver(this, "Gesture:DoubleTap");
         break;
     }
@@ -309,9 +284,23 @@ AboutReader.prototype = {
   },
 
   _requestReadingListStatus: function Reader_requestReadingListStatus() {
-    Messaging.sendRequest({
+    Messaging.sendRequestForResult({
       type: "Reader:ListStatusRequest",
       url: this._article.url
+    }).then((data) => {
+      let args = JSON.parse(data);
+      if (args.url == this._article.url) {
+        if (this._isReadingListItem != args.inReadingList) {
+          let isInitialStateChange = (this._isReadingListItem == -1);
+          this._isReadingListItem = args.inReadingList;
+          this._updateToggleButton();
+
+          // Display the toolbar when all its initial component states are known
+          if (isInitialStateChange) {
+            this._setToolbarVisibility(true);
+          }
+        }
+      }
     });
   },
 
@@ -515,27 +504,16 @@ AboutReader.prototype = {
     });
   },
 
-  _loadFromURL: function Reader_loadFromURL(url) {
+  _loadArticle: Task.async(function* (url, tabId) {
     this._showProgressDelayed();
 
-    gChromeWin.Reader.parseDocumentFromURL(url, function(article) {
-      if (article)
-        this._showContent(article);
-      else
-        this._win.location.href = url;
-    }.bind(this));
-  },
-
-  _loadFromTab: function Reader_loadFromTab(tabId, url) {
-    this._showProgressDelayed();
-
-    gChromeWin.Reader.getArticleForTab(tabId, url, function(article) {
-      if (article)
-        this._showContent(article);
-      else
-        this._showError(gStrings.GetStringFromName("aboutReader.loadError"));
-    }.bind(this));
-  },
+    let article = yield gChromeWin.Reader.getArticle(url, tabId);
+    if (article) {
+      this._showContent(article);
+    } else {
+      this._win.location.href = url;
+    }
+  }),
 
   _requestFavicon: function Reader_requestFavicon() {
     Messaging.sendRequest({
