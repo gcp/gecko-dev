@@ -308,4 +308,14 @@ typedef MozRefCountType nsrefcnt;
 #define MOZ_SEH_EXCEPT(expr)  else
 #endif
 
+/*
+ * Standalone XPCOM lib support
+ */
+#if defined(MOZILLA_XPCOMRT_API)
+#undef MOZ_DUMP_ASSERTION_STACK
+#undef MOZ_CRASHREPORTER
+#undef MOZ_DMD
+#undef NS_BUILD_REFCNT_LOGGING
+#endif
+
 #endif /* nscore_h___ */
