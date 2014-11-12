@@ -18,7 +18,7 @@ loop.conversation = (function(mozL10n) {
 
   var OutgoingConversationView = loop.conversationViews.OutgoingConversationView;
   var CallIdentifierView = loop.conversationViews.CallIdentifierView;
-  var DesktopRoomView = loop.roomViews.DesktopRoomView;
+  var DesktopRoomConversationView = loop.roomViews.DesktopRoomConversationView;
 
   var IncomingCallView = React.createClass({
     mixins: [sharedMixins.DropdownMenuMixin, sharedMixins.AudioMixin],
@@ -584,9 +584,10 @@ loop.conversation = (function(mozL10n) {
           />);
         }
         case "room": {
-          return (<DesktopRoomView
-            mozLoop={navigator.mozLoop}
+          return (<DesktopRoomConversationView
+            dispatcher={this.props.dispatcher}
             roomStore={this.props.roomStore}
+            dispatcher={this.props.dispatcher}
           />);
         }
         case "failed": {
@@ -642,7 +643,8 @@ loop.conversation = (function(mozL10n) {
     });
     var activeRoomStore = new loop.store.ActiveRoomStore({
       dispatcher: dispatcher,
-      mozLoop: navigator.mozLoop
+      mozLoop: navigator.mozLoop,
+      sdkDriver: sdkDriver
     });
     var roomStore = new loop.store.RoomStore({
       dispatcher: dispatcher,

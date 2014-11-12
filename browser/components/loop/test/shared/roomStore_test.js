@@ -19,6 +19,7 @@ describe("loop.store.RoomStore", function () {
   "use strict";
 
   var sharedActions = loop.shared.actions;
+  var sharedUtils = loop.shared.utils;
   var sandbox, dispatcher;
 
   var fakeRoomList = [{
@@ -273,6 +274,20 @@ describe("loop.store.RoomStore", function () {
       });
     });
 
+    describe("#emailRoomUrl", function() {
+      it("should call composeCallUrlEmail to email the url", function() {
+        sandbox.stub(sharedUtils, "composeCallUrlEmail");
+
+        store.emailRoomUrl(new sharedActions.EmailRoomUrl({
+          roomUrl: "http://invalid"
+        }));
+
+        sinon.assert.calledOnce(sharedUtils.composeCallUrlEmail);
+        sinon.assert.calledWithExactly(sharedUtils.composeCallUrlEmail,
+          "http://invalid");
+      });
+    });
+
     describe("#setStoreState", function() {
       it("should update store state data", function() {
         store.setStoreState({pendingCreation: true});
@@ -370,7 +385,8 @@ describe("loop.store.RoomStore", function () {
       beforeEach(function() {
         activeRoomStore = new loop.store.ActiveRoomStore({
           dispatcher: dispatcher,
-          mozLoop: fakeMozLoop
+          mozLoop: fakeMozLoop,
+          sdkDriver: {}
         });
         store = new loop.store.RoomStore({
           dispatcher: dispatcher,

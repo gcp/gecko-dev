@@ -205,6 +205,8 @@
   <string name="pref_font_size_set">&pref_font_size_set;</string>
   <string name="pref_font_size_adjust_char">&pref_font_size_adjust_char;</string>
   <string name="pref_font_size_preview_text">&pref_font_size_preview_text;</string>
+  <string name="pref_media_autoplay_enabled">&pref_media_autoplay_enabled;</string>
+  <string name="pref_media_autoplay_enabled_summary">&pref_media_autoplay_enabled_summary;</string>
   <string name="pref_reflow_on_zoom">&pref_reflow_on_zoom4;</string>
   <string name="pref_restore">&pref_restore;</string>
   <string name="pref_restore_always">&pref_restore_always;</string>
@@ -412,6 +414,9 @@
   <string name="loaded_mixed_content_message">&loaded_mixed_content_message;</string>
   <string name="blocked_mixed_content_message_top">&blocked_mixed_content_message_top;</string>
   <string name="blocked_mixed_content_message_bottom">&blocked_mixed_content_message_bottom;</string>
+  <string name="loaded_tracking_content_message">&loaded_tracking_content_message;</string>
+  <string name="blocked_tracking_content_message_top">&blocked_tracking_content_message_top;</string>
+  <string name="blocked_tracking_content_message_bottom">&blocked_tracking_content_message_bottom;</string>
   <string name="learn_more">&learn_more;</string>
   <string name="enable_protection">&enable_protection;</string>
   <string name="disable_protection">&disable_protection;</string>
@@ -431,8 +436,6 @@
   <string name="webapp_generic_name">&webapp_generic_name;</string>
 
   <string name="searchable_description">&searchable_description;</string>
-
-  <string name="devtools_remote_debugging_forward">&devtools_remote_debugging_forward;</string>
 
   <!-- Updater notifications -->
   <string name="updater_start_title">&updater_start_title2;</string>

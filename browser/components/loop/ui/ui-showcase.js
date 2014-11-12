@@ -21,6 +21,7 @@
   var IncomingCallView = loop.conversation.IncomingCallView;
   var DesktopPendingConversationView = loop.conversationViews.PendingConversationView;
   var CallFailedView = loop.conversationViews.CallFailedView;
+  var DesktopRoomConversationView = loop.roomViews.DesktopRoomConversationView;
 
   // 2. Standalone webapp
   var HomeView = loop.webapp.HomeView;
@@ -36,6 +37,9 @@
   var ConversationToolbar = loop.shared.views.ConversationToolbar;
   var ConversationView = loop.shared.views.ConversationView;
   var FeedbackView = loop.shared.views.FeedbackView;
+
+  // Room constants
+  var ROOM_STATES = loop.store.ROOM_STATES;
 
   // Local helpers
   function returnTrue() {
@@ -57,6 +61,11 @@
   );
 
   var dispatcher = new loop.Dispatcher();
+  var activeRoomStore = new loop.store.ActiveRoomStore({
+    dispatcher: dispatcher,
+    mozLoop: navigator.mozLoop,
+    sdkDriver: {}
+  });
   var roomStore = new loop.store.RoomStore({
     dispatcher: dispatcher,
     mozLoop: navigator.mozLoop
@@ -523,6 +532,28 @@
             Example({summary: "Standalone Unsupported Device"}, 
               React.DOM.div({className: "standalone"}, 
                 UnsupportedDeviceView(null)
+              )
+            )
+          ), 
+
+          Section({name: "DesktopRoomConversationView"}, 
+            Example({summary: "Desktop room conversation (invitation)", dashed: "true", 
+                     style: {width: "260px", height: "265px"}}, 
+              React.DOM.div({className: "fx-embedded"}, 
+                DesktopRoomConversationView({
+                  roomStore: roomStore, 
+                  dispatcher: dispatcher, 
+                  roomState: ROOM_STATES.INIT})
+              )
+            ), 
+
+            Example({summary: "Desktop room conversation", dashed: "true", 
+                     style: {width: "260px", height: "265px"}}, 
+              React.DOM.div({className: "fx-embedded"}, 
+                DesktopRoomConversationView({
+                  roomStore: roomStore, 
+                  dispatcher: dispatcher, 
+                  roomState: ROOM_STATES.HAS_PARTICIPANTS})
               )
             )
           ), 

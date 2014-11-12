@@ -108,7 +108,7 @@ loop.shared.views = (function(_, OT, l10n) {
       var cx = React.addons.classSet;
       return (
         React.DOM.ul({className: "conversation-toolbar"}, 
-          React.DOM.li({className: "conversation-toolbar-btn-box"}, 
+          React.DOM.li({className: "conversation-toolbar-btn-box btn-hangup-entry"}, 
             React.DOM.button({className: "btn btn-hangup", onClick: this.handleClickHangup, 
                     title: l10n.get("hangup_button_title")}, 
               l10n.get("hangup_button_caption2")
@@ -728,7 +728,8 @@ loop.shared.views = (function(_, OT, l10n) {
         React.DOM.button({onClick: this.props.onClick, 
                 disabled: this.props.disabled, 
                 className: cx(classObject)}, 
-          this.props.caption
+          React.DOM.span({className: "button-caption"}, this.props.caption), 
+          this.props.children
         )
       )
     }
