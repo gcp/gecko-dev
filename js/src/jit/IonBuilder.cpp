@@ -6533,12 +6533,12 @@ ClassHasResolveHook(CompileCompartment *comp, const Class *clasp, PropertyName *
     if (clasp->resolve == JS_ResolveStub)
         return false;
 
-    if (clasp->resolve == (JSResolveOp)str_resolve) {
+    if (clasp->resolve == str_resolve) {
         // str_resolve only resolves integers, not names.
         return false;
     }
 
-    if (clasp->resolve == (JSResolveOp)fun_resolve)
+    if (clasp->resolve == fun_resolve)
         return FunctionHasResolveHook(comp->runtime()->names(), name);
 
     return true;
@@ -7235,8 +7235,6 @@ IonBuilder::getElemTryTypedObject(bool *emitted, MDefinition *obj, MDefinition *
     if (elemPrediction.isUseless())
         return true;
 
-    MOZ_ASSERT(TypeDescr::isSized(elemPrediction.kind()));
-
     int32_t elemSize;
     if (!elemPrediction.hasKnownSize(&elemSize))
         return true;
@@ -7247,7 +7245,7 @@ IonBuilder::getElemTryTypedObject(bool *emitted, MDefinition *obj, MDefinition *
         return true;
 
       case type::Struct:
-      case type::SizedArray:
+      case type::Array:
         return getElemTryComplexElemOfTypedObject(emitted,
                                                   obj,
                                                   index,
@@ -7263,10 +7261,11 @@ IonBuilder::getElemTryTypedObject(bool *emitted, MDefinition *obj, MDefinition *
                                                  elemSize);
 
       case type::Reference:
-        return true;
-
-      case type::UnsizedArray:
-        MOZ_CRASH("Unsized arrays cannot be element types");
+        return getElemTryReferenceElemOfTypedObject(emitted,
+                                                    obj,
+                                                    index,
+                                                    objPrediction,
+                                                    elemPrediction);
     }
 
     MOZ_CRASH("Bad kind");
@@ -7300,12 +7299,6 @@ IonBuilder::checkTypedObjectIndexInBounds(int32_t elemSize,
         types::TypeObjectKey *globalType = types::TypeObjectKey::get(&script()->global());
         if (globalType->hasFlags(constraints(), types::OBJECT_FLAG_TYPED_OBJECT_NEUTERED))
             return false;
-    } else if (objPrediction.kind() == type::UnsizedArray) {
-        // Note: unsized arrays will have their length set to zero if they are
-        // neutered, so we don't need to make sure that no neutering has
-        // occurred which affects this object.
-        length = MTypedObjectUnsizedLength::New(alloc(), obj);
-        current->add(length->toInstruction());
     } else {
         return false;
     }
@@ -7340,12 +7333,34 @@ IonBuilder::getElemTryScalarElemOfTypedObject(bool *emitted,
     if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset))
         return true;
 
-    return pushScalarLoadFromTypedObject(emitted, obj, indexAsByteOffset, elemType);
+    *emitted = true;
+
+    return pushScalarLoadFromTypedObject(obj, indexAsByteOffset, elemType);
 }
 
 bool
-IonBuilder::pushScalarLoadFromTypedObject(bool *emitted,
-                                          MDefinition *obj,
+IonBuilder::getElemTryReferenceElemOfTypedObject(bool *emitted,
+                                                 MDefinition *obj,
+                                                 MDefinition *index,
+                                                 TypedObjectPrediction objPrediction,
+                                                 TypedObjectPrediction elemPrediction)
+{
+    MOZ_ASSERT(objPrediction.ofArrayKind());
+
+    ReferenceTypeDescr::Type elemType = elemPrediction.referenceType();
+    size_t elemSize = ReferenceTypeDescr::size(elemType);
+
+    MDefinition *indexAsByteOffset;
+    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset))
+        return true;
+
+    *emitted = true;
+
+    return pushReferenceLoadFromTypedObject(obj, indexAsByteOffset, elemType);
+}
+
+bool
+IonBuilder::pushScalarLoadFromTypedObject(MDefinition *obj,
                                           MDefinition *offset,
                                           ScalarTypeDescr::Type elemType)
 {
@@ -7378,8 +7393,44 @@ IonBuilder::pushScalarLoadFromTypedObject(bool *emitted,
     // no useful additional info.
     load->setResultType(knownType);
 
-    *emitted = true;
     return true;
+}
+
+bool
+IonBuilder::pushReferenceLoadFromTypedObject(MDefinition *typedObj,
+                                             MDefinition *byteOffset,
+                                             ReferenceTypeDescr::Type type)
+{
+    // Find location within the owner object.
+    MDefinition *elements, *scaledOffset;
+    size_t alignment = ReferenceTypeDescr::alignment(type);
+    loadTypedObjectElements(typedObj, byteOffset, alignment, &elements, &scaledOffset);
+
+    types::TemporaryTypeSet *observedTypes = bytecodeTypes(pc);
+
+    MInstruction *load;
+    BarrierKind barrier = BarrierKind::NoBarrier;
+    switch (type) {
+      case ReferenceTypeDescr::TYPE_ANY:
+        load = MLoadElement::New(alloc(), elements, scaledOffset, false, false);
+        if (!observedTypes->unknown())
+            barrier = BarrierKind::TypeSet;
+        break;
+      case ReferenceTypeDescr::TYPE_OBJECT:
+        load = MLoadUnboxedObjectOrNull::New(alloc(), elements, scaledOffset);
+        if (!observedTypes->unknownObject() || !observedTypes->hasType(types::Type::NullType()))
+            barrier = BarrierKind::TypeSet;
+        break;
+      case ReferenceTypeDescr::TYPE_STRING:
+        load = MLoadUnboxedString::New(alloc(), elements, scaledOffset);
+        observedTypes->addType(types::Type::StringType(), alloc().lifoAlloc());
+        break;
+    }
+
+    current->add(load);
+    current->push(load);
+
+    return pushTypeBarrier(load, observedTypes, barrier);
 }
 
 bool
@@ -8140,8 +8191,6 @@ IonBuilder::setElemTryTypedObject(bool *emitted, MDefinition *obj,
     if (elemPrediction.isUseless())
         return true;
 
-    MOZ_ASSERT(TypeDescr::isSized(elemPrediction.kind()));
-
     int32_t elemSize;
     if (!elemPrediction.hasKnownSize(&elemSize))
         return true;
@@ -8165,8 +8214,7 @@ IonBuilder::setElemTryTypedObject(bool *emitted, MDefinition *obj,
                                                  elemSize);
 
       case type::Struct:
-      case type::SizedArray:
-      case type::UnsizedArray:
+      case type::Array:
         // Not yet optimized.
         return true;
     }
@@ -8658,8 +8706,6 @@ IonBuilder::jsop_length_fastPath()
             if (prediction.hasKnownArrayLength(&sizedLength)) {
                 obj->setImplicitlyUsedUnchecked();
                 length = MConstant::New(alloc(), Int32Value(sizedLength));
-            } else if (prediction.kind() == type::UnsizedArray) {
-                length = MTypedObjectUnsizedLength::New(alloc(), obj);
             } else {
                 return false;
             }
@@ -9382,15 +9428,12 @@ IonBuilder::getPropTryTypedObject(bool *emitted,
         return true;
 
     switch (fieldPrediction.kind()) {
-      case type::Reference:
-        return true;
-
       case type::Simd:
         // FIXME (bug 894104): load into a MIRType_float32x4 etc
         return true;
 
       case type::Struct:
-      case type::SizedArray:
+      case type::Array:
         return getPropTryComplexPropOfTypedObject(emitted,
                                                   obj,
                                                   fieldOffset,
@@ -9398,15 +9441,19 @@ IonBuilder::getPropTryTypedObject(bool *emitted,
                                                   fieldIndex,
                                                   resultTypes);
 
+      case type::Reference:
+        return getPropTryReferencePropOfTypedObject(emitted,
+                                                    obj,
+                                                    fieldOffset,
+                                                    fieldPrediction,
+                                                    resultTypes);
+
       case type::Scalar:
         return getPropTryScalarPropOfTypedObject(emitted,
                                                  obj,
                                                  fieldOffset,
                                                  fieldPrediction,
                                                  resultTypes);
-
-      case type::UnsizedArray:
-        MOZ_CRASH("Field of unsized array type");
     }
 
     MOZ_CRASH("Bad kind");
@@ -9426,8 +9473,26 @@ IonBuilder::getPropTryScalarPropOfTypedObject(bool *emitted, MDefinition *typedO
     if (globalType->hasFlags(constraints(), types::OBJECT_FLAG_TYPED_OBJECT_NEUTERED))
         return true;
 
-    // OK, perform the optimization.
-    return pushScalarLoadFromTypedObject(emitted, typedObj, constantInt(fieldOffset), fieldType);
+    *emitted = true;
+
+    return pushScalarLoadFromTypedObject(typedObj, constantInt(fieldOffset), fieldType);
+}
+
+bool
+IonBuilder::getPropTryReferencePropOfTypedObject(bool *emitted, MDefinition *typedObj,
+                                                 int32_t fieldOffset,
+                                                 TypedObjectPrediction fieldPrediction,
+                                                 types::TemporaryTypeSet *resultTypes)
+{
+    ReferenceTypeDescr::Type fieldType = fieldPrediction.referenceType();
+
+    types::TypeObjectKey *globalType = types::TypeObjectKey::get(&script()->global());
+    if (globalType->hasFlags(constraints(), types::OBJECT_FLAG_TYPED_OBJECT_NEUTERED))
+        return true;
+
+    *emitted = true;
+
+    return pushReferenceLoadFromTypedObject(typedObj, constantInt(fieldOffset), fieldType);
 }
 
 bool
@@ -10082,8 +10147,7 @@ IonBuilder::setPropTryTypedObject(bool *emitted, MDefinition *obj,
                                                  value, fieldPrediction);
 
       case type::Struct:
-      case type::SizedArray:
-      case type::UnsizedArray:
+      case type::Array:
         return true;
     }
 

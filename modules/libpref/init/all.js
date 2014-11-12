@@ -233,6 +233,13 @@ pref("print.shrink-to-fit.scale-limit-percent", 20);
 
 // Media cache size in kilobytes
 pref("media.cache_size", 512000);
+// When a network connection is suspended, don't resume it until the
+// amount of buffered data falls below this threshold (in seconds).
+pref("media.cache_resume_threshold", 999999);
+// Stop reading ahead when our buffered data is this many seconds ahead
+// of the current playback position. This limit can stop us from using arbitrary
+// amounts of network bandwidth prefetching huge videos.
+pref("media.cache_readahead_limit", 999999);
 
 // Master HTML5 media volume scale.
 pref("media.volume_scale", "1.0");
@@ -391,10 +398,10 @@ pref("media.getusermedia.screensharing.enabled", true);
 #endif
 
 #ifdef RELEASE_BUILD
-pref("media.getusermedia.screensharing.allowed_domains", "webex.com,*.webex.com,collaborate.com,*.collaborate.com,projectsquared.com,*.projectsquared.com,room.co,beta.talky.io,talky.io,example.com");
+pref("media.getusermedia.screensharing.allowed_domains", "webex.com,*.webex.com,collaborate.com,*.collaborate.com,projectsquared.com,*.projectsquared.com,*.room.co,room.co,beta.talky.io,talky.io,example.com");
 #else
  // temporary value, not intended for release - bug 1049087
-pref("media.getusermedia.screensharing.allowed_domains", "mozilla.github.io,webex.com,*.webex.com,collaborate.com,*.collaborate.com,projectsquared.com,*.projectsquared.com,room.co,beta.talky.io,talky.io,example.com");
+pref("media.getusermedia.screensharing.allowed_domains", "mozilla.github.io,webex.com,*.webex.com,collaborate.com,*.collaborate.com,projectsquared.com,*.projectsquared.com,*.room.co,room.co,beta.talky.io,talky.io,example.com");
 #endif
 // OS/X 10.6 and XP have screen/window sharing off by default due to various issues - Caveat emptor
 pref("media.getusermedia.screensharing.allow_on_old_platforms", false);
@@ -411,6 +418,14 @@ pref("media.track.enabled", false);
 pref("media.mediasource.enabled", false);
 #else
 pref("media.mediasource.enabled", true);
+#endif
+
+#ifdef MOZ_WIDGET_GONK
+pref("media.mediasource.mp4.enabled", false);
+pref("media.mediasource.webm.enabled", false);
+#else
+pref("media.mediasource.mp4.enabled", false);
+pref("media.mediasource.webm.enabled", true);
 #endif
 
 #ifdef MOZ_WEBSPEECH
@@ -1493,8 +1508,9 @@ pref("network.IDN.whitelist.xn--zckzah", true);
 // If a domain includes any of the following characters, it may be a spoof
 // attempt and so we always display the domain name as punycode. This would
 // override the settings "network.IDN_show_punycode" and
-// "network.IDN.whitelist.*".
-pref("network.IDN.blacklist_chars", "\u0020\u00A0\u00BC\u00BD\u00BE\u01C3\u02D0\u0337\u0338\u0589\u05C3\u05F4\u0609\u060A\u066A\u06D4\u0701\u0702\u0703\u0704\u115F\u1160\u1735\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u2024\u2027\u2028\u2029\u202F\u2039\u203A\u2041\u2044\u2052\u205F\u2153\u2154\u2155\u2156\u2157\u2158\u2159\u215A\u215B\u215C\u215D\u215E\u215F\u2215\u2236\u23AE\u2571\u29F6\u29F8\u2AFB\u2AFD\u2FF0\u2FF1\u2FF2\u2FF3\u2FF4\u2FF5\u2FF6\u2FF7\u2FF8\u2FF9\u2FFA\u2FFB\u3000\u3002\u3014\u3015\u3033\u3164\u321D\u321E\u33AE\u33AF\u33C6\u33DF\uA789\uFE14\uFE15\uFE3F\uFE5D\uFE5E\uFEFF\uFF0E\uFF0F\uFF61\uFFA0\uFFF9\uFFFA\uFFFB\uFFFC\uFFFD");
+// "network.IDN.whitelist.*".  (please keep this value in sync with the
+// built-in fallback in intl/uconv/nsTextToSubURI.cpp)
+pref("network.IDN.blacklist_chars", "\u0020\u00A0\u00BC\u00BD\u00BE\u01C3\u02D0\u0337\u0338\u0589\u05C3\u05F4\u0609\u060A\u066A\u06D4\u0701\u0702\u0703\u0704\u115F\u1160\u1735\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200E\u200F\u2024\u2027\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u2039\u203A\u2041\u2044\u2052\u205F\u2153\u2154\u2155\u2156\u2157\u2158\u2159\u215A\u215B\u215C\u215D\u215E\u215F\u2215\u2236\u23AE\u2571\u29F6\u29F8\u2AFB\u2AFD\u2FF0\u2FF1\u2FF2\u2FF3\u2FF4\u2FF5\u2FF6\u2FF7\u2FF8\u2FF9\u2FFA\u2FFB\u3000\u3002\u3014\u3015\u3033\u3164\u321D\u321E\u33AE\u33AF\u33C6\u33DF\uA789\uFE14\uFE15\uFE3F\uFE5D\uFE5E\uFEFF\uFF0E\uFF0F\uFF61\uFFA0\uFFF9\uFFFA\uFFFB\uFFFC\uFFFD");
 
 // This preference specifies a list of domains for which DNS lookups will be
 // IPv4 only. Works around broken DNS servers which can't handle IPv6 lookups
@@ -2074,6 +2090,13 @@ pref("layout.css.getBoxQuads.enabled", true);
 pref("layout.css.convertFromNode.enabled", false);
 #else
 pref("layout.css.convertFromNode.enabled", true);
+#endif
+
+// Is support for unicode-range enabled?
+#ifdef RELEASE_BUILD
+pref("layout.css.unicode-range.enabled", false);
+#else
+pref("layout.css.unicode-range.enabled", true);
 #endif
 
 // Is support for CSS "text-align: true X" enabled?
@@ -3322,8 +3345,6 @@ pref("layout.css.scroll-behavior.property-enabled", false);
 #if defined(ANDROID) || defined(FXOS_SIMULATOR)
 // font names
 
-pref("font.alias-list", "sans,sans-serif,serif,monospace");
-
 // Gonk (along with FxOS Simulator) and Android ship different sets of fonts
 #if defined(MOZ_WIDGET_GONK) || defined(FXOS_SIMULATOR)
 
@@ -3332,8 +3353,8 @@ pref("font.alias-list", "sans,sans-serif,serif,monospace");
 // ar
 
 pref("font.name.serif.el", "Droid Serif"); // not Charis SIL Compact, only has a few Greek chars
-pref("font.name.sans-serif.el", "Roboto"); // To be updated once the Greek letters in Fira are revised
-pref("font.name.monospace.el", "Droid Sans Mono");
+pref("font.name.sans-serif.el", "Fira Sans");
+pref("font.name.monospace.el", "Fira Mono");
 
 pref("font.name.serif.he", "Charis SIL Compact");
 pref("font.name.sans-serif.he", "Fira Sans");
@@ -3545,8 +3566,6 @@ pref("print.print_paper_size", 0);
 pref("print.print_extra_margin", 0); // twips
 
 // font names
-
-pref("font.alias-list", "sans,sans-serif,serif,monospace");
 
 pref("font.size.fixed.ar", 12);
 
@@ -3884,6 +3903,7 @@ pref("layers.frame-counter", false);
 pref("layers.enable-tiles", false);
 pref("layers.tiled-drawtarget.enabled", false);
 pref("layers.low-precision-buffer", false);
+pref("layers.progressive-paint", false);
 pref("layers.tile-width", 256);
 pref("layers.tile-height", 256);
 // Max number of layers per container. See Overwrite in mobile prefs.

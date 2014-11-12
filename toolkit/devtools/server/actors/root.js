@@ -6,7 +6,7 @@
 
 "use strict";
 
-const { Ci, Cu } = require("chrome");
+const { Cc, Ci, Cu } = require("chrome");
 const Services = require("Services");
 const { ActorPool, appendExtraActors, createExtraActors } = require("devtools/server/actors/common");
 const { DebuggerServer } = require("devtools/server/main");
@@ -16,6 +16,10 @@ const DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
 
 DevToolsUtils.defineLazyGetter(this, "StyleSheetActor", () => {
   return require("devtools/server/actors/stylesheets").StyleSheetActor;
+});
+
+DevToolsUtils.defineLazyGetter(this, "ppmm", () => {
+  return Cc["@mozilla.org/parentprocessmessagemanager;1"].getService(Ci.nsIMessageBroadcaster);
 });
 
 /* Root actor for the remote debugging protocol. */
@@ -145,7 +149,11 @@ RootActor.prototype = {
     // adds new rules to the page
     addNewRule: true,
     // Whether the dom node actor implements the getUniqueSelector method
-    getUniqueSelector: true
+    getUniqueSelector: true,
+    // Whether the debugger server supports
+    // blackboxing/pretty-printing (not supported in Fever Dream yet)
+    noBlackBoxing: false,
+    noPrettyPrinting: false
   },
 
   /**
@@ -354,6 +362,28 @@ RootActor.prototype = {
     this._parameters.addonList.onListChanged = null;
   },
 
+  onListProcesses: function () {
+    let processes = [];
+    for (let i = 0; i < ppmm.childCount; i++) {
+      processes.push({
+        id: i, // XXX: may not be a perfect id, but process message manager doesn't expose anything...
+        parent: i == 0, // XXX Weak, but appear to be stable
+        tabCount: undefined, // TODO: exposes process message manager on frameloaders in order to compute this
+      });
+    }
+    return { processes: processes };
+  },
+
+  onAttachProcess: function (aRequest) {
+    let mm = ppmm.getChildAt(aRequest.id);
+    if (!mm) {
+      return { error: "noProcess",
+               message: "There is no process with id '" + aRequest.id + "'." };
+    }
+    return DebuggerServer.connectToContent(this.conn, mm)
+                         .then(form => ({ form: form }));
+  },
+
   /* This is not in the spec, but it's used by tests. */
   onEcho: function (aRequest) {
     /*
@@ -427,6 +457,8 @@ RootActor.prototype = {
 RootActor.prototype.requestTypes = {
   "listTabs": RootActor.prototype.onListTabs,
   "listAddons": RootActor.prototype.onListAddons,
+  "listProcesses": RootActor.prototype.onListProcesses,
+  "attachProcess": RootActor.prototype.onAttachProcess,
   "echo": RootActor.prototype.onEcho,
   "protocolDescription": RootActor.prototype.onProtocolDescription
 };

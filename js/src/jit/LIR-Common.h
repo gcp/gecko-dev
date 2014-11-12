@@ -4231,20 +4231,6 @@ class LTypedObjectProto : public LCallInstructionHelper<1, 1, 1>
     }
 };
 
-// Load an unsized typed object's length.
-class LTypedObjectUnsizedLength : public LInstructionHelper<1, 1, 0>
-{
-  public:
-    LIR_HEADER(TypedObjectUnsizedLength)
-
-    explicit LTypedObjectUnsizedLength(const LAllocation &object) {
-        setOperand(0, object);
-    }
-    const LAllocation *object() {
-        return getOperand(0);
-    }
-};
-
 // Load a typed object's elements vector.
 class LTypedObjectElements : public LInstructionHelper<1, 1, 0>
 {
@@ -4464,6 +4450,48 @@ class LLoadElementT : public LInstructionHelper<1, 2, 0>
 
     const MLoadElement *mir() const {
         return mir_->toLoadElement();
+    }
+    const LAllocation *elements() {
+        return getOperand(0);
+    }
+    const LAllocation *index() {
+        return getOperand(1);
+    }
+};
+
+class LLoadUnboxedPointerV : public LInstructionHelper<BOX_PIECES, 2, 0>
+{
+  public:
+    LIR_HEADER(LoadUnboxedPointerV)
+
+    LLoadUnboxedPointerV(const LAllocation &elements, const LAllocation &index) {
+        setOperand(0, elements);
+        setOperand(1, index);
+    }
+
+    const MLoadUnboxedObjectOrNull *mir() const {
+        return mir_->toLoadUnboxedObjectOrNull();
+    }
+    const LAllocation *elements() {
+        return getOperand(0);
+    }
+    const LAllocation *index() {
+        return getOperand(1);
+    }
+};
+
+class LLoadUnboxedPointerT : public LInstructionHelper<1, 2, 0>
+{
+  public:
+    LIR_HEADER(LoadUnboxedPointerT)
+
+    LLoadUnboxedPointerT(const LAllocation &elements, const LAllocation &index) {
+        setOperand(0, elements);
+        setOperand(1, index);
+    }
+
+    const MLoadUnboxedString *mir() const {
+        return mir_->toLoadUnboxedString();
     }
     const LAllocation *elements() {
         return getOperand(0);

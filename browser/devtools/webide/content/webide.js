@@ -30,6 +30,9 @@ const Strings = Services.strings.createBundle("chrome://browser/locale/devtools/
 const HTML = "http://www.w3.org/1999/xhtml";
 const HELP_URL = "https://developer.mozilla.org/docs/Tools/WebIDE/Troubleshooting";
 
+const MAX_ZOOM = 1.4;
+const MIN_ZOOM = 0.6;
+
 // download template index early
 GetTemplatesJSON(true);
 
@@ -98,8 +101,11 @@ let UI = {
 
     this.setupDeck();
 
-    // Hook to display promotional Developer Edition doorhanger. Only displayed once.
-    showDoorhanger({ window, type: "deveditionpromo", anchor: document.querySelector("#deck") });
+    this.contentViewer = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                               .getInterface(Ci.nsIWebNavigation)
+                               .QueryInterface(Ci.nsIDocShell)
+                               .contentViewer;
+    this.contentViewer.fullZoom = Services.prefs.getCharPref("devtools.webide.zoom");
   },
 
   uninit: function() {
@@ -129,6 +135,11 @@ let UI = {
         AppManager.selectedProject.type != "tab") {
       AppManager.validateProject(AppManager.selectedProject);
     }
+
+    // Hook to display promotional Developer Edition doorhanger. Only displayed once.
+    // Hooked into the `onfocus` event because sometimes does not work
+    // when run at the end of `init`. ¯\(°_o)/¯
+    showDoorhanger({ window, type: "deveditionpromo", anchor: document.querySelector("#deck") });
   },
 
   appManagerUpdate: function(event, what, details) {
@@ -736,6 +747,7 @@ let UI = {
     }
     deck.selectedPanel = panel;
     this.updateProjectEditorMenusVisibility();
+    this.updateToolboxFullscreenState();
   },
 
   resetDeck: function() {
@@ -763,6 +775,7 @@ let UI = {
       document.querySelector("#cmd_play").setAttribute("disabled", "true");
       document.querySelector("#cmd_stop").setAttribute("disabled", "true");
       document.querySelector("#cmd_toggleToolbox").setAttribute("disabled", "true");
+      document.querySelector("#cmd_showDevicePrefs").setAttribute("disabled", "true");
       return;
     }
 
@@ -825,6 +838,7 @@ let UI = {
     let permissionsCmd = document.querySelector("#cmd_showPermissionsTable");
     let detailsCmd = document.querySelector("#cmd_showRuntimeDetails");
     let disconnectCmd = document.querySelector("#cmd_disconnectRuntime");
+    let devicePrefsCmd = document.querySelector("#cmd_showDevicePrefs");
 
     let box = document.querySelector("#runtime-actions");
 
@@ -835,6 +849,9 @@ let UI = {
         permissionsCmd.removeAttribute("disabled");
         screenshotCmd.removeAttribute("disabled");
       }
+      if (AppManager.preferenceFront) {
+        devicePrefsCmd.removeAttribute("disabled");
+      }
       disconnectCmd.removeAttribute("disabled");
       runtimePanelButton.setAttribute("active", "true");
     } else {
@@ -842,6 +859,7 @@ let UI = {
       permissionsCmd.setAttribute("disabled", "true");
       screenshotCmd.setAttribute("disabled", "true");
       disconnectCmd.setAttribute("disabled", "true");
+      devicePrefsCmd.setAttribute("disabled", "true");
       runtimePanelButton.removeAttribute("active");
     }
 
@@ -888,9 +906,11 @@ let UI = {
     splitter.removeAttribute("hidden");
 
     let iframe = document.createElement("iframe");
+    iframe.id = "toolbox";
+
     document.querySelector("notificationbox").insertBefore(iframe, splitter.nextSibling);
     let host = devtools.Toolbox.HostType.CUSTOM;
-    let options = { customIframe: iframe };
+    let options = { customIframe: iframe, zoom: false };
     this.toolboxIframe = iframe;
 
     let height = Services.prefs.getIntPref("devtools.toolbox.footer.height");
@@ -898,7 +918,20 @@ let UI = {
 
     document.querySelector("#action-button-debug").setAttribute("active", "true");
 
+    this.updateToolboxFullscreenState();
     return gDevTools.showToolbox(target, null, host, options);
+  },
+
+  updateToolboxFullscreenState: function() {
+    let panel = document.querySelector("#deck").selectedPanel;
+    let nbox = document.querySelector("#notificationbox");
+    if (panel.id == "deck-panel-details" &&
+        AppManager.selectedProject.type != "packaged" &&
+        this.toolboxIframe) {
+      nbox.setAttribute("toolboxfullscreen", "true");
+    } else {
+      nbox.removeAttribute("toolboxfullscreen");
+    }
   },
 
   closeToolboxUI: function() {
@@ -913,6 +946,7 @@ let UI = {
     let splitter = document.querySelector(".devtools-horizontal-splitter");
     splitter.setAttribute("hidden", "true");
     document.querySelector("#action-button-debug").removeAttribute("active");
+    this.updateToolboxFullscreenState();
   },
 };
 
@@ -1179,6 +1213,10 @@ let Cmds = {
     UI.selectDeckPanel("runtimedetails");
   },
 
+  showDevicePrefs: function() {
+    UI.selectDeckPanel("devicepreferences");
+  },
+
   showMonitor: function() {
     UI.selectDeckPanel("monitor");
   },
@@ -1245,5 +1283,24 @@ let Cmds = {
 
   showPrefs: function() {
     UI.selectDeckPanel("prefs");
+  },
+
+  zoomIn: function() {
+    if (UI.contentViewer.fullZoom < MAX_ZOOM) {
+      UI.contentViewer.fullZoom += 0.1;
+      Services.prefs.setCharPref("devtools.webide.zoom", UI.contentViewer.fullZoom);
+    }
+  },
+
+  zoomOut: function() {
+    if (UI.contentViewer.fullZoom > MIN_ZOOM) {
+      UI.contentViewer.fullZoom -= 0.1;
+      Services.prefs.setCharPref("devtools.webide.zoom", UI.contentViewer.fullZoom);
+    }
+  },
+
+  resetZoom: function() {
+    UI.contentViewer.fullZoom = 1;
+    Services.prefs.setCharPref("devtools.webide.zoom", 1);
   },
 };

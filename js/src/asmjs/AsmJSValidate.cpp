@@ -569,7 +569,7 @@ class Type
         MOZ_ASSERT(isSimd());
         switch (which_) {
           case Int32x4:
-            return Int;
+            return Signed;
           case Float32x4:
             return Float;
           // Scalar types
@@ -4320,7 +4320,7 @@ CheckDotAccess(FunctionCompiler &f, ParseNode *elem, MDefinition **def, Type *ty
     JSAtomState &names = m.cx()->names();
 
     if (field == names.signMask) {
-        *type = Type::Int;
+        *type = Type::Signed;
         *def = f.extractSignMask(baseDef);
         return true;
     }
@@ -8392,6 +8392,7 @@ GenerateAsyncInterruptExit(ModuleCompiler &m, Label *throwLabel)
     // during jump delay slot.
     masm.pop(HeapReg);
     masm.as_jr(HeapReg);
+    masm.loadAsmJSHeapRegisterFromGlobalData();
 #elif defined(JS_CODEGEN_ARM)
     masm.setFramePushed(0);         // set to zero so we can use masm.framePushed() below
     masm.PushRegsInMask(RegisterSet(GeneralRegisterSet(Registers::AllMask & ~(1<<Registers::sp)), FloatRegisterSet(uint32_t(0))));   // save all GP registers,excep sp
