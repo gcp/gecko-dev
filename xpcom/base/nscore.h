@@ -309,12 +309,13 @@ typedef MozRefCountType nsrefcnt;
 #endif
 
 /*
- * Standalone XPCOM lib support
+ * Standalone XPCOM lib does not need these.
  */
 #if defined(MOZILLA_XPCOMRT_API)
 #undef MOZ_DUMP_ASSERTION_STACK
 #undef MOZ_CRASHREPORTER
 #undef MOZ_DMD
+#undef MOZ_GLUE_IN_PROGRAM
 #undef NS_BUILD_REFCNT_LOGGING
 #endif
 
