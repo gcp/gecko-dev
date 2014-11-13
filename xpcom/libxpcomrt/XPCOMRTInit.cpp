@@ -1,10 +1,14 @@
+#include "mozilla/Module.h"
 #include "mozilla/ModuleUtils.h"
+#include "mozilla/NullPtr.h"
 #include "mozilla/TimeStamp.h"
 #include "nsCategoryManager.h"
 #include "nsComponentManager.h"
 #include "nsDebugImpl.h"
 #include "nsIErrorService.h"
 #include "nsMemoryImpl.h"
+#include "nsNetCID.h"
+#include "nsNetModuleMini.h"
 #include "nsObserverService.h"
 #include "nsThreadManager.h"
 #include "nsThreadPool.h"
@@ -88,6 +92,8 @@ NS_InitXPCOMRT()
     return rv;
   }
 
+  NS_InitNetModuleMini();
+
   return NS_OK;
 }
 
@@ -95,54 +101,60 @@ nsresult
 NS_ShutdownXPCOMRT()
 {
   nsresult rv = NS_OK;
+  {
+    nsCOMPtr<nsIThread> thread = do_GetCurrentThread();
 
-  nsCOMPtr<nsIThread> thread = do_GetCurrentThread();
-
-  if (NS_WARN_IF(!thread)) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  nsRefPtr<nsObserverService> observerService;
-  CallGetService("@mozilla.org/observer-service;1",
-                   (nsObserverService**)getter_AddRefs(observerService));
-
-  if (observerService) {
-    observerService->NotifyObservers(nullptr,
-                                     NS_XPCOM_WILL_SHUTDOWN_OBSERVER_ID,
-                                     nullptr);
-
-    nsCOMPtr<nsIServiceManager> mgr;
-    rv = NS_GetServiceManager(getter_AddRefs(mgr));
-    if (NS_SUCCEEDED(rv)) {
-      observerService->NotifyObservers(mgr, NS_XPCOM_SHUTDOWN_OBSERVER_ID,
-                                       nullptr);
+    if (NS_WARN_IF(!thread)) {
+      return NS_ERROR_UNEXPECTED;
     }
+
+    nsRefPtr<nsObserverService> observerService;
+    CallGetService("@mozilla.org/observer-service;1",
+                     (nsObserverService**)getter_AddRefs(observerService));
+
+    if (observerService) {
+      observerService->NotifyObservers(nullptr,
+                                       NS_XPCOM_WILL_SHUTDOWN_OBSERVER_ID,
+                                       nullptr);
+
+      nsCOMPtr<nsIServiceManager> mgr;
+      rv = NS_GetServiceManager(getter_AddRefs(mgr));
+      if (NS_SUCCEEDED(rv)) {
+        observerService->NotifyObservers(mgr, NS_XPCOM_SHUTDOWN_OBSERVER_ID,
+                                         nullptr);
+      }
+    }
+
+    // This must happen after the shutdown of media and widgets, which
+    // are triggered by the NS_XPCOM_SHUTDOWN_OBSERVER_ID notification.
+    NS_ProcessPendingEvents(thread);
+
+    if (observerService)
+      observerService->NotifyObservers(nullptr,
+                                       NS_XPCOM_SHUTDOWN_THREADS_OBSERVER_ID,
+                                       nullptr);
+
+    gXPCOMThreadsShutDown = true;
+    NS_ProcessPendingEvents(thread);
+
+    // Shutdown the timer thread and all timers that might still be alive before
+    // shutting down the component manager
+    nsTimerImpl::Shutdown();
+
+    NS_ProcessPendingEvents(thread);
+
+    // Net module needs to be shutdown before the thread manager or else
+    // the thread manager will hang waiting for the socket transport
+    // service to shutdown.
+    NS_ShutdownNetModuleMini();
+
+    // Shutdown all remaining threads.  This method does not return until
+    // all threads created using the thread manager (with the exception of
+    // the main thread) have exited.
+    nsThreadManager::get()->Shutdown();
+
+    NS_ProcessPendingEvents(thread);
   }
-
-  // This must happen after the shutdown of media and widgets, which
-  // are triggered by the NS_XPCOM_SHUTDOWN_OBSERVER_ID notification.
-  NS_ProcessPendingEvents(thread);
-
-  if (observerService)
-    observerService->NotifyObservers(nullptr,
-                                     NS_XPCOM_SHUTDOWN_THREADS_OBSERVER_ID,
-                                     nullptr);
-
-  gXPCOMThreadsShutDown = true;
-  NS_ProcessPendingEvents(thread);
-
-  // Shutdown the timer thread and all timers that might still be alive before
-  // shutting down the component manager
-  nsTimerImpl::Shutdown();
-
-  NS_ProcessPendingEvents(thread);
-
-  // Shutdown all remaining threads.  This method does not return until
-  // all threads created using the thread manager (with the exception of
-  // the main thread) have exited.
-  nsThreadManager::get()->Shutdown();
-
-  NS_ProcessPendingEvents(thread);
 
   mozilla::services::Shutdown();
 
