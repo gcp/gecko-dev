@@ -99,6 +99,7 @@ net_GetStdURLParser()
 nsresult
 net_GetURLSpecFromDir(nsIFile *aFile, nsACString &result)
 {
+#if !defined(MOZILLA_XPCOMRT_API)
     nsAutoCString escPath;
     nsresult rv = net_GetURLSpecFromActualFile(aFile, escPath);
     if (NS_FAILED(rv))
@@ -109,12 +110,14 @@ net_GetURLSpecFromDir(nsIFile *aFile, nsACString &result)
     }
     
     result = escPath;
+#endif // !defined(MOZILLA_XPCOMRT_API)
     return NS_OK;
 }
 
 nsresult
 net_GetURLSpecFromFile(nsIFile *aFile, nsACString &result)
 {
+#if !defined(MOZILLA_XPCOMRT_API)
     nsAutoCString escPath;
     nsresult rv = net_GetURLSpecFromActualFile(aFile, escPath);
     if (NS_FAILED(rv))
@@ -133,6 +136,7 @@ net_GetURLSpecFromFile(nsIFile *aFile, nsACString &result)
     }
     
     result = escPath;
+#endif // !defined(MOZILLA_XPCOMRT_API)
     return NS_OK;
 }
 

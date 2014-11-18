@@ -211,7 +211,9 @@ nsHostRecord::SetExpiration(const mozilla::TimeStamp& now, unsigned int valid, u
 
 nsHostRecord::~nsHostRecord()
 {
+#if !defined(MOZILLA_XPCOMRT_API)
     Telemetry::Accumulate(Telemetry::DNS_BLACKLIST_COUNT, mBlacklistedCount);
+#endif // !defined(MOZILLA_XPCOMRT_API)
     delete addr_info;
     delete addr;
 }
@@ -772,7 +774,9 @@ nsHostResolver::ResolveHost(const char            *host,
                 LOG(("  Using cached record for host [%s].\n", host));
                 // put reference to host record on stack...
                 result = he->rec;
+#if !defined(MOZILLA_XPCOMRT_API)
                 Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2, METHOD_HIT);
+#endif // !defined(MOZILLA_XPCOMRT_API)
 
                 // For entries that are in the grace period
                 // or all cached negative entries, use the cache but start a new
@@ -781,8 +785,10 @@ nsHostResolver::ResolveHost(const char            *host,
                 
                 if (he->rec->negative) {
                     LOG(("  Negative cache entry for [%s].\n", host));
+#if !defined(MOZILLA_XPCOMRT_API)
                     Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                           METHOD_NEGATIVE_HIT);
+#endif // !defined(MOZILLA_XPCOMRT_API)
                     status = NS_ERROR_UNKNOWN_HOST;
                 }
             }
@@ -790,8 +796,10 @@ nsHostResolver::ResolveHost(const char            *host,
             // go ahead and use it.
             else if (he->rec->addr) {
                 LOG(("  Using cached address for IP Literal [%s].\n", host));
+#if !defined(MOZILLA_XPCOMRT_API)
                 Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                       METHOD_LITERAL);
+#endif // !defined(MOZILLA_XPCOMRT_API)
                 result = he->rec;
             }
             // try parsing the host name as an IP address literal to short
@@ -804,8 +812,10 @@ nsHostResolver::ResolveHost(const char            *host,
                 he->rec->addr = new NetAddr();
                 PRNetAddrToNetAddr(&tempAddr, he->rec->addr);
                 // put reference to host record on stack...
+#if !defined(MOZILLA_XPCOMRT_API)
                 Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                       METHOD_LITERAL);
+#endif // !defined(MOZILLA_XPCOMRT_API)
                 result = he->rec;
             }
             else if (mPendingCount >= MAX_NON_PRIORITY_REQUESTS &&
@@ -814,8 +824,10 @@ nsHostResolver::ResolveHost(const char            *host,
                 LOG(("  Lookup queue full: dropping %s priority request for "
                      "[%s].\n",
                      IsMediumPriority(flags) ? "medium" : "low", host));
+#if !defined(MOZILLA_XPCOMRT_API)
                 Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                       METHOD_OVERFLOW);
+#endif // !defined(MOZILLA_XPCOMRT_API)
                 // This is a lower priority request and we are swamped, so refuse it.
                 rv = NS_ERROR_DNS_LOOKUP_QUEUE_FULL;
             }
@@ -872,8 +884,10 @@ nsHostResolver::ResolveHost(const char            *host,
                         }
                         if (he->rec->HasUsableResult(TimeStamp::NowLoRes(), flags)) {
                             result = he->rec;
+#if !defined(MOZILLA_XPCOMRT_API)
                             Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                                   METHOD_HIT);
+#endif // !defined(MOZILLA_XPCOMRT_API)
                             ConditionallyRefreshRecord(he->rec, host);
                         }
                         // For AF_INET6, a new lookup means another AF_UNSPEC
@@ -886,8 +900,10 @@ nsHostResolver::ResolveHost(const char            *host,
                             result = he->rec;
                             he->rec->negative = true;
                             status = NS_ERROR_UNKNOWN_HOST;
+#if !defined(MOZILLA_XPCOMRT_API)
                             Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                                   METHOD_NEGATIVE_HIT);
+#endif // !defined(MOZILLA_XPCOMRT_API)
                         }
                     }
                 }
@@ -899,8 +915,10 @@ nsHostResolver::ResolveHost(const char            *host,
                     PR_APPEND_LINK(callback, &he->rec->callbacks);
                     he->rec->flags = flags;
                     rv = IssueLookup(he->rec);
+#if !defined(MOZILLA_XPCOMRT_API)
                     Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                           METHOD_NETWORK_FIRST);
+#endif // !defined(MOZILLA_XPCOMRT_API)
                     if (NS_FAILED(rv)) {
                         PR_REMOVE_AND_INIT_LINK(callback);
                     }
@@ -916,8 +934,10 @@ nsHostResolver::ResolveHost(const char            *host,
                      host, callback));
                 PR_APPEND_LINK(callback, &he->rec->callbacks);
                 if (he->rec->onQueue) {
+#if !defined(MOZILLA_XPCOMRT_API)
                     Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                           METHOD_NETWORK_SHARED);
+#endif // !defined(MOZILLA_XPCOMRT_API)
 
                     // Consider the case where we are on a pending queue of
                     // lower priority than the request is being made at.
@@ -1074,8 +1094,10 @@ nsHostResolver::ConditionallyRefreshRecord(nsHostRecord *rec, const char *host)
         if (!rec->negative) {
             // negative entries are constantly being refreshed, only
             // track positive grace period induced renewals
+#if !defined(MOZILLA_XPCOMRT_API)
             Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                 METHOD_RENEWAL);
+#endif // !defined(MOZILLA_XPCOMRT_API)
         }
     }
     return NS_OK;
@@ -1257,8 +1279,10 @@ nsHostResolver::OnLookupComplete(nsHostRecord* rec, nsresult status, AddrInfo* r
                 if (!head->negative) {
                     // record the age of the entry upon eviction.
                     TimeDuration age = TimeStamp::NowLoRes() - head->mValidStart;
+#if !defined(MOZILLA_XPCOMRT_API)
                     Telemetry::Accumulate(Telemetry::DNS_CLEANUP_AGE,
                                           static_cast<uint32_t>(age.ToSeconds() / 60));
+#endif // !defined(MOZILLA_XPCOMRT_API)
                 }
 
                 // release reference to rec owned by mEvictionQ
@@ -1422,9 +1446,13 @@ nsHostResolver::ThreadFunc(void *arg)
                 // Time to get TTL; categorized by expiration strategy.
                 histogramID = Telemetry::DNS_RENEWAL_TIME_FOR_TTL;
             }
+#if !defined(MOZILLA_XPCOMRT_API)
             Telemetry::Accumulate(histogramID, millis);
+#endif // !defined(MOZILLA_XPCOMRT_API)
         } else {
+#if !defined(MOZILLA_XPCOMRT_API)
             Telemetry::Accumulate(Telemetry::DNS_FAILED_LOOKUP_TIME, millis);
+#endif // !defined(MOZILLA_XPCOMRT_API)
         }
 
         // OnLookupComplete may release "rec", long before we lose it.
