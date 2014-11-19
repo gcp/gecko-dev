@@ -23,6 +23,7 @@
 #include "mozilla/a11y/DocAccessibleChild.h"
 #endif
 #include "mozilla/Preferences.h"
+#include "mozilla/docshell/OfflineCacheUpdateChild.h"
 #include "mozilla/dom/ContentBridgeChild.h"
 #include "mozilla/dom/ContentBridgeParent.h"
 #include "mozilla/dom/DOMStorageIPC.h"
@@ -552,76 +553,6 @@ NS_INTERFACE_MAP_BEGIN(ContentChild)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
-static bool
-GetAppPaths(nsCString &aAppPath, nsCString &aAppBinaryPath)
-{
-  nsAutoCString appPath;
-  nsAutoCString appBinaryPath(
-    (CommandLine::ForCurrentProcess()->argv()[0]).c_str());
-
-  nsAutoCString::const_iterator start, end;
-  appBinaryPath.BeginReading(start);
-  appBinaryPath.EndReading(end);
-  if (RFindInReadable(NS_LITERAL_CSTRING(".app/Contents/MacOS/"), start, end)) {
-    end = start;
-    ++end; ++end; ++end; ++end;
-    appBinaryPath.BeginReading(start);
-    appPath.Assign(Substring(start, end));
-  } else {
-    return false;
-  }
-
-  nsCOMPtr<nsIFile> app, appBinary;
-  nsresult rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(appPath),
-                                true, getter_AddRefs(app));
-  if (NS_FAILED(rv)) {
-    return false;
-  }
-  rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(appBinaryPath),
-                       true, getter_AddRefs(appBinary));
-  if (NS_FAILED(rv)) {
-    return false;
-  }
-
-  bool isLink;
-  app->IsSymlink(&isLink);
-  if (isLink) {
-    app->GetNativeTarget(aAppPath);
-  } else {
-    app->GetNativePath(aAppPath);
-  }
-  appBinary->IsSymlink(&isLink);
-  if (isLink) {
-    appBinary->GetNativeTarget(aAppBinaryPath);
-  } else {
-    appBinary->GetNativePath(aAppBinaryPath);
-  }
-
-  return true;
-}
-
-void
-ContentChild::OnChannelConnected(int32_t aPid)
-{
-  nsAutoCString appPath, appBinaryPath;
-  if (!GetAppPaths(appPath, appBinaryPath)) {
-    MOZ_CRASH("Error resolving child process path");
-  }
-
-  MacSandboxInfo info;
-  info.type = MacSandboxType_Content;
-  info.appPath.Assign(appPath);
-  info.appBinaryPath.Assign(appBinaryPath);
-
-  nsAutoCString err;
-  if (!mozilla::StartMacSandbox(info, err)) {
-    NS_WARNING(err.get());
-    MOZ_CRASH("sandbox_init() failed");
-  }
-}
-#endif
-
 bool
 ContentChild::Init(MessageLoop* aIOLoop,
                    base::ProcessHandle aParentHandle,
@@ -1120,6 +1051,76 @@ ContentChild::CleanUpSandboxEnvironment()
 }
 #endif
 
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+static bool
+GetAppPaths(nsCString &aAppPath, nsCString &aAppBinaryPath)
+{
+  nsAutoCString appPath;
+  nsAutoCString appBinaryPath(
+    (CommandLine::ForCurrentProcess()->argv()[0]).c_str());
+
+  nsAutoCString::const_iterator start, end;
+  appBinaryPath.BeginReading(start);
+  appBinaryPath.EndReading(end);
+  if (RFindInReadable(NS_LITERAL_CSTRING(".app/Contents/MacOS/"), start, end)) {
+    end = start;
+    ++end; ++end; ++end; ++end;
+    appBinaryPath.BeginReading(start);
+    appPath.Assign(Substring(start, end));
+  } else {
+    return false;
+  }
+
+  nsCOMPtr<nsIFile> app, appBinary;
+  nsresult rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(appPath),
+                                true, getter_AddRefs(app));
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+  rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(appBinaryPath),
+                       true, getter_AddRefs(appBinary));
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  bool isLink;
+  app->IsSymlink(&isLink);
+  if (isLink) {
+    app->GetNativeTarget(aAppPath);
+  } else {
+    app->GetNativePath(aAppPath);
+  }
+  appBinary->IsSymlink(&isLink);
+  if (isLink) {
+    appBinary->GetNativeTarget(aAppBinaryPath);
+  } else {
+    appBinary->GetNativePath(aAppBinaryPath);
+  }
+
+  return true;
+}
+
+static void
+StartMacOSContentSandbox()
+{
+  nsAutoCString appPath, appBinaryPath;
+  if (!GetAppPaths(appPath, appBinaryPath)) {
+    MOZ_CRASH("Error resolving child process path");
+  }
+
+  MacSandboxInfo info;
+  info.type = MacSandboxType_Content;
+  info.appPath.Assign(appPath);
+  info.appBinaryPath.Assign(appBinaryPath);
+
+  nsAutoCString err;
+  if (!mozilla::StartMacSandbox(info, err)) {
+    NS_WARNING(err.get());
+    MOZ_CRASH("sandbox_init() failed");
+  }
+}
+#endif
+
 bool
 ContentChild::RecvSetProcessSandbox()
 {
@@ -1146,6 +1147,8 @@ ContentChild::RecvSetProcessSandbox()
         mozilla::SandboxTarget::Instance()->StartSandbox();
         SetUpSandboxEnvironment();
     }
+#elif defined(XP_MACOSX)
+    StartMacOSContentSandbox();
 #endif
 #endif
     return true;
@@ -2253,6 +2256,25 @@ ContentChild::RecvUnregisterSheet(const URIParams& aURI, const uint32_t& aType)
         sheetService->UnregisterSheet(uri, aType);
     }
 
+    return true;
+}
+
+POfflineCacheUpdateChild*
+ContentChild::AllocPOfflineCacheUpdateChild(const URIParams& manifestURI,
+                                            const URIParams& documentURI,
+                                            const bool& stickDocument,
+                                            const TabId& aTabId)
+{
+    NS_RUNTIMEABORT("unused");
+    return nullptr;
+}
+
+bool
+ContentChild::DeallocPOfflineCacheUpdateChild(POfflineCacheUpdateChild* actor)
+{
+    OfflineCacheUpdateChild* offlineCacheUpdate =
+        static_cast<OfflineCacheUpdateChild*>(actor);
+    NS_RELEASE(offlineCacheUpdate);
     return true;
 }
 

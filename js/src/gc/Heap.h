@@ -631,6 +631,9 @@ struct ArenaHeader : public JS::shadow::ArenaHeader
     inline void setNextAllocDuringSweep(ArenaHeader *aheader);
     inline void unsetAllocDuringSweep();
 
+    inline void setNextArenaToUpdate(ArenaHeader *aheader);
+    inline ArenaHeader *getNextArenaToUpdateAndUnlink();
+
     void unmarkAll();
 
 #ifdef JSGC_COMPACTING
@@ -949,7 +952,9 @@ struct Chunk
     ArenaHeader *allocateArena(JSRuntime *rt, JS::Zone *zone, AllocKind kind,
                                const AutoLockGC &lock);
 
-    void releaseArena(JSRuntime *rt, ArenaHeader *aheader, const AutoLockGC &lock);
+    enum ArenaDecommitState { IsCommitted = false, IsDecommitted = true };
+    void releaseArena(JSRuntime *rt, ArenaHeader *aheader, const AutoLockGC &lock,
+                      ArenaDecommitState state = IsCommitted);
     void recycleArena(ArenaHeader *aheader, SortedArenaList &dest, AllocKind thingKind,
                       size_t thingsPerArena);
 
@@ -980,11 +985,12 @@ struct Chunk
     unsigned findDecommittedArenaOffset();
     ArenaHeader* fetchNextDecommittedArena();
 
+    void addArenaToFreeList(JSRuntime *rt, ArenaHeader *aheader);
+    void addArenaToDecommittedList(JSRuntime *rt, const ArenaHeader *aheader);
+
   public:
     /* Unlink and return the freeArenasHead. */
     inline ArenaHeader* fetchNextFreeArena(JSRuntime *rt);
-
-    inline void addArenaToFreeList(JSRuntime *rt, ArenaHeader *aheader);
 };
 
 static_assert(sizeof(Chunk) == ChunkSize,
@@ -1147,6 +1153,23 @@ ArenaHeader::unsetAllocDuringSweep()
     MOZ_ASSERT(allocatedDuringIncremental);
     allocatedDuringIncremental = 0;
     auxNextLink = 0;
+}
+
+inline ArenaHeader *
+ArenaHeader::getNextArenaToUpdateAndUnlink()
+{
+    MOZ_ASSERT(!hasDelayedMarking && !allocatedDuringIncremental && !markOverflow);
+    ArenaHeader *next = &reinterpret_cast<Arena *>(auxNextLink << ArenaShift)->aheader;
+    auxNextLink = 0;
+    return next;
+}
+
+inline void
+ArenaHeader::setNextArenaToUpdate(ArenaHeader *aheader)
+{
+    MOZ_ASSERT(!hasDelayedMarking && !allocatedDuringIncremental && !markOverflow);
+    MOZ_ASSERT(!auxNextLink);
+    auxNextLink = aheader->arenaAddress() >> ArenaShift;
 }
 
 static void

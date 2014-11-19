@@ -95,6 +95,7 @@ namespace jit {
     _(CharCodeAt)                                                           \
     _(FromCharCode)                                                         \
     _(StringSplit)                                                          \
+    _(Substr)                                                               \
     _(Return)                                                               \
     _(Throw)                                                                \
     _(Box)                                                                  \
@@ -261,7 +262,8 @@ namespace jit {
     _(MemoryBarrier)                                                        \
     _(UnknownValue)                                                         \
     _(LexicalCheck)                                                         \
-    _(ThrowUninitializedLexical)
+    _(ThrowUninitializedLexical)                                            \
+    _(Debugger)
 
 // Forward declarations of MIR types.
 #define FORWARD_DECLARE(op) class M##op;

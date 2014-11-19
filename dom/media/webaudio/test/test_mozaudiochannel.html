@@ -143,6 +143,7 @@ function runTest() {
 
 SpecialPowers.pushPrefEnv({"set": [["media.useAudioChannelService", true ]]}, runTest);
 SimpleTest.waitForExplicitFinish();
+SimpleTest.requestLongerTimeout(5);
 
 </script>
 </pre>

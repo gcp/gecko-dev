@@ -76,10 +76,6 @@ public:
         nsCString vendor;
     };
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
-    void OnChannelConnected(int32_t aPid);
-#endif
-
     bool Init(MessageLoop* aIOLoop,
               base::ProcessHandle aParentHandle,
               IPC::Channel* aChannel);
@@ -407,6 +403,14 @@ public:
 
     PBrowserOrId
     GetBrowserOrId(TabChild* aTabChild);
+
+    virtual POfflineCacheUpdateChild* AllocPOfflineCacheUpdateChild(
+            const URIParams& manifestURI,
+            const URIParams& documentURI,
+            const bool& stickDocument,
+            const TabId& aTabId) MOZ_OVERRIDE;
+    virtual bool
+    DeallocPOfflineCacheUpdateChild(POfflineCacheUpdateChild* offlineCacheUpdate) MOZ_OVERRIDE;
 
 private:
     virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;

@@ -1147,8 +1147,11 @@ public:
         return mDOMExpandoSet->put(expando);
     }
     void RemoveDOMExpandoObject(JSObject *expando) {
-        if (mDOMExpandoSet)
-            mDOMExpandoSet->remove(expando);
+        if (mDOMExpandoSet) {
+            DOMExpandoSet::Ptr p = mDOMExpandoSet->lookup(expando);
+            MOZ_ASSERT(p.found());
+            mDOMExpandoSet->remove(p);
+        }
     }
 
     typedef js::HashMap<JSAddonId *,
@@ -1939,9 +1942,9 @@ public:
     inline void TraceJS(JSTracer* trc) {}
     inline void AutoTrace(JSTracer* trc) {}
 
-    void Mark()       {mJSObject = (JSObject*)(intptr_t(mJSObject) | 1);}
-    void Unmark()     {mJSObject = (JSObject*)(intptr_t(mJSObject) & ~1);}
-    bool IsMarked() const {return !!(intptr_t(mJSObject) & 1);}
+    void Mark()       {mJSObject.setFlags(1);}
+    void Unmark()     {mJSObject.unsetFlags(1);}
+    bool IsMarked() const {return mJSObject.hasFlag(1);}
 
 private:
     XPCWrappedNativeTearOff(const XPCWrappedNativeTearOff& r) MOZ_DELETE;
@@ -1950,7 +1953,7 @@ private:
 private:
     XPCNativeInterface* mInterface;
     nsISupports*        mNative;
-    JSObject*           mJSObject;
+    JS::TenuredHeap<JSObject*> mJSObject;
 };
 
 /***********************************************/

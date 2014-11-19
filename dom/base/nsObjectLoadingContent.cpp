@@ -1033,17 +1033,6 @@ nsObjectLoadingContent::BuildParametersArray()
   }
 
   nsAdoptingCString wmodeOverride = Preferences::GetCString("plugins.force.wmode");
-#if defined(XP_WIN) || defined(XP_LINUX)
-  // Bug 923745 (/Bug 1061995) - Until we support windowed mode plugins in
-  // content processes, force flash to use a windowless rendering mode. This
-  // hack should go away when bug 923746 lands. (OS X plugins always use some
-  // native widgets, so unfortunately this does not help there)
-  if (wmodeOverride.IsEmpty() &&
-      XRE_GetProcessType() == GeckoProcessType_Content) {
-    wmodeOverride.AssignLiteral("transparent");
-  }
-#endif
-
   for (uint32_t i = 0; i < mCachedAttributes.Length(); i++) {
     if (!wmodeOverride.IsEmpty() && mCachedAttributes[i].mName.EqualsIgnoreCase("wmode")) {
       CopyASCIItoUTF16(wmodeOverride, mCachedAttributes[i].mValue);
@@ -2521,7 +2510,8 @@ nsObjectLoadingContent::OpenChannel()
   // Referrer
   nsCOMPtr<nsIHttpChannel> httpChan(do_QueryInterface(chan));
   if (httpChan) {
-    httpChan->SetReferrer(doc->GetDocumentURI());
+    httpChan->SetReferrerWithPolicy(doc->GetDocumentURI(),
+                                    doc->GetReferrerPolicy());
 
     // Set the initiator type
     nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(httpChan));

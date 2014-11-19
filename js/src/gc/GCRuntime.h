@@ -37,6 +37,11 @@ class MarkingValidator;
 struct AutoPrepareForTracing;
 class AutoTraceSession;
 
+#ifdef JSGC_COMPACTING
+struct ArenasToUpdate;
+struct MovingTracer;
+#endif
+
 class ChunkPool
 {
     Chunk *head_;
@@ -302,6 +307,7 @@ class GCRuntime
     void notifyDidPaint();
     void shrinkBuffers();
     void onOutOfMallocMemory();
+    void onOutOfMallocMemory(const AutoLockGC &lock);
 
 #ifdef JS_GC_ZEAL
     const void *addressOfZealMode() { return &zealMode; }
@@ -503,7 +509,7 @@ class GCRuntime
      * Must be called either during the GC or with the GC lock taken.
      */
     Chunk *expireEmptyChunkPool(bool shrinkBuffers, const AutoLockGC &lock);
-    void freeEmptyChunks(JSRuntime *rt);
+    void freeEmptyChunks(JSRuntime *rt, const AutoLockGC &lock);
     void freeChunkList(Chunk *chunkListHead);
     void prepareToFreeChunk(ChunkInfo &info);
     void releaseChunk(Chunk *chunk);
@@ -548,6 +554,7 @@ class GCRuntime
     bool sweepPhase(SliceBudget &sliceBudget);
     void endSweepPhase(bool lastGC);
     void sweepZones(FreeOp *fop, bool lastGC);
+    void decommitAllWithoutUnlocking(const AutoLockGC &lock);
     void decommitArenas(const AutoLockGC &lock);
     void expireChunksAndArenas(bool shouldShrink, const AutoLockGC &lock);
     void sweepBackgroundThings();
@@ -558,6 +565,8 @@ class GCRuntime
     void sweepZoneAfterCompacting(Zone *zone);
     void compactPhase(bool lastGC);
     ArenaHeader *relocateArenas();
+    void updateAllCellPointersParallel(ArenasToUpdate &source);
+    void updateAllCellPointersSerial(MovingTracer *trc, ArenasToUpdate &source);
     void updatePointersToRelocatedCells();
     void releaseRelocatedArenas(ArenaHeader *relocatedList);
 #ifdef DEBUG

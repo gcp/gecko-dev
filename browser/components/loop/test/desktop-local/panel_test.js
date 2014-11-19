@@ -34,9 +34,10 @@ describe("loop.panel", function() {
       get locale() {
         return "en-US";
       },
-      getLoopBoolPref: sandbox.stub(),
       setLoopCharPref: sandbox.stub(),
       getLoopCharPref: sandbox.stub().returns("unseen"),
+      getLoopBoolPref: sandbox.stub(),
+      setLoopBoolPref: sandbox.stub(),
       getPluralForm: function() {
         return "fakeText";
       },
@@ -184,7 +185,7 @@ describe("loop.panel", function() {
 
           view = createTestPanelView();
 
-          [callTab, roomsTab, contactsTab] =
+          [roomsTab, contactsTab] =
             TestUtils.scryRenderedDOMComponentsWithClass(view, "tab");
         });
 
@@ -201,14 +202,6 @@ describe("loop.panel", function() {
             view.getDOMNode().querySelector("li[data-tab-name=\"rooms\"]"));
 
           expect(roomsTab.getDOMNode().classList.contains("selected"))
-            .to.be.true;
-        });
-
-        it("should select call tab when clicking tab button", function() {
-          TestUtils.Simulate.click(
-            view.getDOMNode().querySelector("li[data-tab-name=\"call\"]"));
-
-          expect(callTab.getDOMNode().classList.contains("selected"))
             .to.be.true;
         });
       });
@@ -369,6 +362,37 @@ describe("loop.panel", function() {
 
         TestUtils.findRenderedComponentWithType(view, loop.panel.ToSView);
       });
+
+      it("should not render a ToSView when the view has been 'seen'", function() {
+        navigator.mozLoop.getLoopCharPref = function() {
+          return "seen";
+        };
+        var view = createTestPanelView();
+
+        try {
+          TestUtils.findRenderedComponentWithType(view, loop.panel.ToSView);
+          sinon.assert.fail("Should not find the ToSView if it has been 'seen'");
+        } catch (ex) {}
+      });
+
+      it("should render a GettingStarted view", function() {
+        var view = createTestPanelView();
+
+        TestUtils.findRenderedComponentWithType(view, loop.panel.GettingStartedView);
+      });
+
+      it("should not render a GettingStartedView when the view has been seen", function() {
+        navigator.mozLoop.getLoopBoolPref = function() {
+          return true;
+        };
+        var view = createTestPanelView();
+
+        try {
+          TestUtils.findRenderedComponentWithType(view, loop.panel.GettingStartedView);
+          sinon.assert.fail("Should not find the GettingStartedView if it has been seen");
+        } catch (ex) {}
+      });
+
     });
   });
 
