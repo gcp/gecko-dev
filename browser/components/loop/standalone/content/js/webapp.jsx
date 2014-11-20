@@ -940,6 +940,7 @@ loop.webapp = (function($, _, OT, mozL10n) {
             <loop.standaloneRoomViews.StandaloneRoomView
               activeRoomStore={this.props.activeRoomStore}
               dispatcher={this.props.dispatcher}
+              helper={this.props.helper}
             />
           );
         }
@@ -998,8 +999,7 @@ loop.webapp = (function($, _, OT, mozL10n) {
       helper: helper,
       sdk: OT
     });
-    var activeRoomStore = new loop.store.ActiveRoomStore({
-      dispatcher: dispatcher,
+    var activeRoomStore = new loop.store.ActiveRoomStore(dispatcher, {
       mozLoop: standaloneMozLoop,
       sdkDriver: sdkDriver
     });

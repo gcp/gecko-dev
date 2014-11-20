@@ -12,6 +12,7 @@ loop.roomViews = (function(mozL10n) {
   "use strict";
 
   var sharedActions = loop.shared.actions;
+  var sharedMixins = loop.shared.mixins;
   var ROOM_STATES = loop.store.ROOM_STATES;
   var sharedViews = loop.shared.views;
 
@@ -59,7 +60,7 @@ loop.roomViews = (function(mozL10n) {
    * Desktop room invitation view (overlay).
    */
   var DesktopRoomInvitationView = React.createClass({
-    mixins: [ActiveRoomStoreMixin],
+    mixins: [ActiveRoomStoreMixin, React.addons.LinkedStateMixin],
 
     propTypes: {
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired
@@ -67,13 +68,23 @@ loop.roomViews = (function(mozL10n) {
 
     getInitialState: function() {
       return {
-        copiedUrl: false
-      }
+        copiedUrl: false,
+        newRoomName: ""
+      };
     },
 
     handleFormSubmit: function(event) {
       event.preventDefault();
-      // XXX
+
+      var newRoomName = this.state.newRoomName;
+
+      if (newRoomName && this.state.roomName != newRoomName) {
+        this.props.dispatcher.dispatch(
+          new sharedActions.RenameRoom({
+            roomToken: this.state.roomToken,
+            newRoomName: newRoomName
+          }));
+      }
     },
 
     handleEmailButtonClick: function(event) {
@@ -96,7 +107,9 @@ loop.roomViews = (function(mozL10n) {
       return (
         <div className="room-invitation-overlay">
           <form onSubmit={this.handleFormSubmit}>
-            <input type="text" ref="roomName"
+            <input type="text" className="input-room-name"
+              valueLink={this.linkState("newRoomName")}
+              onBlur={this.handleFormSubmit}
               placeholder={mozL10n.get("rooms_name_this_room_label")} />
           </form>
           <p>{mozL10n.get("invite_header_text")}</p>
@@ -120,7 +133,11 @@ loop.roomViews = (function(mozL10n) {
    * Desktop room conversation view.
    */
   var DesktopRoomConversationView = React.createClass({
-    mixins: [ActiveRoomStoreMixin, loop.shared.mixins.DocumentTitleMixin],
+    mixins: [
+      ActiveRoomStoreMixin,
+      sharedMixins.DocumentTitleMixin,
+      sharedMixins.RoomsAudioMixin
+    ],
 
     propTypes: {
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired
@@ -227,11 +244,15 @@ loop.roomViews = (function(mozL10n) {
       var localStreamClasses = React.addons.classSet({
         local: true,
         "local-stream": true,
-        "local-stream-audio": !this.state.videoMuted
+        "local-stream-audio": !this.state.videoMuted,
+        "room-preview": this.state.roomState !== ROOM_STATES.HAS_PARTICIPANTS
       });
 
       switch(this.state.roomState) {
-        case ROOM_STATES.FAILED: {
+        case ROOM_STATES.FAILED:
+        case ROOM_STATES.FULL: {
+          // Note: While rooms are set to hold a maximum of 2 participants, the
+          //       FULL case should never happen on desktop.
           return <loop.conversation.GenericFailureView
             cancelCall={this.closeWindow}
           />;

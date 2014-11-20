@@ -70,18 +70,12 @@ GeneratorObject::suspend(JSContext *cx, HandleObject obj, AbstractFramePtr frame
     if (*pc == JSOP_YIELD && genObj->isClosing()) {
         MOZ_ASSERT(genObj->is<LegacyGeneratorObject>());
         RootedValue val(cx, ObjectValue(*frame.callee()));
-        js_ReportValueError(cx, JSMSG_BAD_GENERATOR_YIELD, JSDVG_SEARCH_STACK, val, NullPtr());
+        js_ReportValueError(cx, JSMSG_BAD_GENERATOR_YIELD, JSDVG_IGNORE_STACK, val, NullPtr());
         return false;
     }
 
     uint32_t yieldIndex = GET_UINT24(pc);
-    MOZ_ASSERT((*pc == JSOP_INITIALYIELD) == (yieldIndex == 0));
-
-    static_assert(JSOP_INITIALYIELD_LENGTH == JSOP_YIELD_LENGTH,
-                  "code below assumes INITIALYIELD and YIELD have same length");
-    pc += JSOP_YIELD_LENGTH;
-
-    genObj->setSuspendedBytecodeOffset(frame.script()->pcToOffset(pc), yieldIndex);
+    genObj->setYieldIndex(yieldIndex);
     genObj->setScopeChain(*frame.scopeChain());
 
     if (nvalues) {
@@ -111,6 +105,22 @@ GeneratorObject::finalSuspend(JSContext *cx, HandleObject obj)
 }
 
 bool
+js::GeneratorThrowOrClose(JSContext *cx, HandleObject obj, HandleValue arg, uint32_t resumeKind)
+{
+    GeneratorObject *genObj = &obj->as<GeneratorObject>();
+    if (resumeKind == GeneratorObject::THROW) {
+        cx->setPendingException(arg);
+        genObj->setRunning();
+    } else {
+        MOZ_ASSERT(resumeKind == GeneratorObject::CLOSE);
+        MOZ_ASSERT(genObj->is<LegacyGeneratorObject>());
+        cx->setPendingException(MagicValue(JS_GENERATOR_CLOSING));
+        genObj->setClosing();
+    }
+    return false;
+}
+
+bool
 GeneratorObject::resume(JSContext *cx, InterpreterActivation &activation,
                         HandleObject obj, HandleValue arg, GeneratorObject::ResumeKind resumeKind)
 {
@@ -135,16 +145,9 @@ GeneratorObject::resume(JSContext *cx, InterpreterActivation &activation,
         genObj->clearExpressionStack();
     }
 
-    activation.regs().pc = callee->nonLazyScript()->code() + genObj->suspendedBytecodeOffset();
-
-#ifdef DEBUG
-    // Verify the YIELD_INDEX slot holds the right value.
-    static_assert(JSOP_INITIALYIELD_LENGTH == JSOP_YIELD_LENGTH,
-                  "code below assumes INITIALYIELD and YIELD have same length");
-    jsbytecode *yieldpc = activation.regs().pc - JSOP_YIELD_LENGTH;
-    MOZ_ASSERT(*yieldpc == JSOP_INITIALYIELD || *yieldpc == JSOP_YIELD);
-    MOZ_ASSERT(GET_UINT24(yieldpc) == genObj->suspendedYieldIndex());
-#endif
+    JSScript *script = callee->nonLazyScript();
+    uint32_t offset = script->yieldOffsets()[genObj->yieldIndex()];
+    activation.regs().pc = script->offsetToPC(offset);
 
     // Always push on a value, even if we are raising an exception. In the
     // exception case, the stack needs to have something on it so that exception
@@ -159,18 +162,8 @@ GeneratorObject::resume(JSContext *cx, InterpreterActivation &activation,
         return true;
 
       case THROW:
-        cx->setPendingException(arg);
-        if (genObj->isNewborn())
-            genObj->setClosed();
-        else
-            genObj->setRunning();
-        return false;
-
       case CLOSE:
-        MOZ_ASSERT(genObj->is<LegacyGeneratorObject>());
-        cx->setPendingException(MagicValue(JS_GENERATOR_CLOSING));
-        genObj->setClosing();
-        return false;
+        return GeneratorThrowOrClose(cx, genObj, arg, resumeKind);
 
       default:
         MOZ_CRASH("bad resumeKind");
@@ -185,11 +178,6 @@ LegacyGeneratorObject::close(JSContext *cx, HandleObject obj)
     // Avoid calling back into JS unless it is necessary.
      if (genObj->isClosed())
         return true;
-
-    if (genObj->isNewborn()) {
-        genObj->setClosed();
-        return true;
-    }
 
     RootedValue rval(cx);
 
