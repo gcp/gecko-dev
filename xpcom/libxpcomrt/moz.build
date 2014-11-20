@@ -66,6 +66,7 @@ xpcom_glue_src = [
   'nsID.cpp',
   'nsISupportsImpl.cpp',
   'nsMemory.cpp',
+  'nsProxyRelease.cpp',
   'nsQuickSort.cpp',
   'nsTArray.cpp',
   'nsTHashtable.cpp',
@@ -80,6 +81,7 @@ src_list += [
 
 xpcom_string_src = [
   'nsDependentSubstring.cpp',
+  'nsPromiseFlatString.cpp',
   'nsReadableUtils.cpp',
   'nsString.cpp',
   'nsStringComparator.cpp',
@@ -126,6 +128,7 @@ LOCAL_INCLUDES = [
   '../ds',
   '../glue',
   '../threads',
+  '/netwerk/mini/',
   '/xpcom/reflect/xptinfo/',
 ]
 

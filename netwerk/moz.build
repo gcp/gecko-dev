@@ -16,6 +16,7 @@ DIRS += [
     'protocol',
     'system',
     'ipc',
+    'mini',
 ]
 
 if CONFIG['MOZ_SRTP']:
