@@ -3119,7 +3119,7 @@ IsArrayConstructor(const Value &v)
 }
 
 static bool
-ArrayFromCallArgs(JSContext *cx, RootedTypeObject &type, CallArgs &args)
+ArrayFromCallArgs(JSContext *cx, HandleTypeObject type, CallArgs &args)
 {
     if (!InitArrayTypes(cx, type, args.array(), args.length()))
         return false;
@@ -3227,6 +3227,12 @@ static const JSFunctionSpec array_methods[] = {
     JS_SELF_HOSTED_SYM_FN(iterator,  "ArrayValues",      0,0),
     JS_SELF_HOSTED_FN("entries",     "ArrayEntries",     0,0),
     JS_SELF_HOSTED_FN("keys",        "ArrayKeys",        0,0),
+
+    /* ES7 additions */
+#ifdef NIGHTLY_BUILD
+    JS_SELF_HOSTED_FN("includes",    "ArrayIncludes",    2,0),
+#endif
+
     JS_FS_END
 };
 
@@ -3294,6 +3300,21 @@ js_Array(JSContext *cx, unsigned argc, Value *vp)
 
     args.rval().setObject(*obj);
     return true;
+}
+
+ArrayObject *
+js::ArrayConstructorOneArg(JSContext *cx, HandleTypeObject type, int32_t lengthInt)
+{
+    if (lengthInt < 0) {
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_BAD_ARRAY_LENGTH);
+        return nullptr;
+    }
+
+    uint32_t length = uint32_t(lengthInt);
+    AllocatingBehaviour allocating = (length <= ArrayObject::EagerAllocationMaxLength)
+                                   ? NewArray_FullyAllocating
+                                   : NewArray_PartlyAllocating;
+    return NewDenseArray(cx, length, type, allocating);
 }
 
 static JSObject *

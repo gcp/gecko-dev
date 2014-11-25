@@ -8,6 +8,7 @@
 
 #include "nsRect.h"
 #include "nsStyleContext.h"
+#include "nsBidiUtils.h"
 
 // If WRITING_MODE_VERTICAL_ENABLED is defined, we will attempt to support
 // the vertical writing-mode values; if it is not defined, then
@@ -16,7 +17,12 @@
 // of transitioning layout to use writing-mode and logical directions, but
 // not yet ready to ship vertical support.
 
-/* #define WRITING_MODE_VERTICAL_ENABLED 1 */
+// XXX To be removed, and the #ifdef blocks below made unconditional,
+//     once we're confident we can leave it permanently enabled.
+
+#ifndef RELEASE_BUILD
+#define WRITING_MODE_VERTICAL_ENABLED 1
+#endif
 
 // It is the caller's responsibility to operate on logical-coordinate objects
 // with matched writing modes. Failure to do so will be a runtime bug; the
@@ -304,11 +310,11 @@ public:
   //XXX change uint8_t to UBiDiLevel after bug 924851
   void SetDirectionFromBidiLevel(uint8_t level)
   {
-    if (level & 1) {
-      // odd level, set RTL
+    if (IS_LEVEL_RTL(level)) {
+      // set RTL
       mWritingMode |= eBidiMask;
     } else {
-      // even level, set LTR
+      // set LTR
       mWritingMode &= ~eBidiMask;
     }
   }

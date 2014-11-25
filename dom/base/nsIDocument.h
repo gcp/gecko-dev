@@ -26,6 +26,8 @@
 #include "Units.h"
 #include "nsExpirationTracker.h"
 #include "nsClassHashtable.h"
+#include "prclist.h"
+#include "gfxVR.h"
 
 class imgIRequest;
 class nsAString;
@@ -114,6 +116,7 @@ class OverfillCallback;
 class HTMLBodyElement;
 struct LifecycleCallbackArgs;
 class Link;
+class MediaQueryList;
 class GlobalObject;
 class NodeFilter;
 class NodeIterator;
@@ -133,12 +136,18 @@ template<typename> class Sequence;
 
 template<typename, typename> class CallbackObjectHolder;
 typedef CallbackObjectHolder<NodeFilter, nsIDOMNodeFilter> NodeFilterHolder;
+
+struct FullScreenOptions {
+  FullScreenOptions() { }
+  nsRefPtr<gfx::VRHMDInfo> mVRHMDDevice;
+};
+
 } // namespace dom
 } // namespace mozilla
 
 #define NS_IDOCUMENT_IID \
-{ 0x1f343423, 0x957c, 0x4da3, \
-  { 0xaa, 0xa3, 0x07, 0x37, 0x54, 0x3e, 0x79, 0x2a } }
+{ 0xf63d2f6e, 0xd1c1, 0x49b9, \
+ { 0x88, 0x26, 0xd5, 0x9e, 0x5d, 0x72, 0x2a, 0x42 } }
 
 // Enum for requesting a particular type of document when creating a doc
 enum DocumentFlavor {
@@ -162,6 +171,7 @@ already_AddRefed<nsContentList>
 NS_GetContentList(nsINode* aRootNode,
                   int32_t aMatchNameSpaceId,
                   const nsAString& aTagname);
+
 //----------------------------------------------------------------------
 
 // Document interface.  This is implemented by all document objects in
@@ -1062,7 +1072,8 @@ public:
    * the <iframe> or <browser> that contains this document is also mode
    * fullscreen. This happens recursively in all ancestor documents.
    */
-  virtual void AsyncRequestFullScreen(Element* aElement) = 0;
+  virtual void AsyncRequestFullScreen(Element* aElement,
+                                      mozilla::dom::FullScreenOptions& aOptions) = 0;
 
   /**
    * Called when a frame in a child process has entered fullscreen or when a
@@ -1526,6 +1537,17 @@ public:
                     mozilla::ErrorResult& aRv) = 0;
 
   /**
+   * Support for window.matchMedia()
+   */
+
+  already_AddRefed<mozilla::dom::MediaQueryList>
+    MatchMedia(const nsAString& aMediaQueryList);
+
+  const PRCList* MediaQueryLists() const {
+    return &mDOMMediaQueryLists;
+  }
+
+  /**
    * Get the compatibility mode for this document
    */
   nsCompatibility GetCompatibilityMode() const {
@@ -1899,6 +1921,12 @@ public:
   virtual void MaybePreLoadImage(nsIURI* uri,
                                  const nsAString& aCrossOriginAttr,
                                  ReferrerPolicy aReferrerPolicy) = 0;
+
+  /**
+   * Called by images to forget an image preload when they start doing
+   * the real load.
+   */
+  virtual void ForgetImagePreload(nsIURI* aURI) = 0;
 
   /**
    * Called by nsParser to preload style sheets.  Can also be merged into the
@@ -2777,6 +2805,9 @@ protected:
 
   uint32_t mBlockDOMContentLoaded;
   bool mDidFireDOMContentLoaded:1;
+
+  // Our live MediaQueryLists
+  PRCList mDOMMediaQueryLists;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocument, NS_IDOCUMENT_IID)

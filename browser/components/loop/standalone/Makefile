@@ -12,7 +12,7 @@
 # Bug 1066176 tracks moving all functionality currently here
 # to the Gruntfile and getting rid of this Makefile entirely.
 
-LOOP_SERVER_URL := $(shell echo $${LOOP_SERVER_URL-http://localhost:5000})
+LOOP_SERVER_URL := $(shell echo $${LOOP_SERVER_URL-http://localhost:5000/v0})
 LOOP_FEEDBACK_API_URL := $(shell echo $${LOOP_FEEDBACK_API_URL-"https://input.allizom.org/api/v1/feedback"})
 LOOP_FEEDBACK_PRODUCT_NAME := $(shell echo $${LOOP_FEEDBACK_PRODUCT_NAME-Loop})
 LOOP_BRAND_WEBSITE_URL := $(shell echo $${LOOP_BRAND_WEBSITE_URL-"https://www.mozilla.org/firefox/"})
@@ -84,3 +84,5 @@ config:
 	@echo "loop.config.fxosApp = loop.config.fxosApp || {};" >> content/config.js
 	@echo "loop.config.fxosApp.name = 'Loop';" >> content/config.js
 	@echo "loop.config.fxosApp.manifestUrl = 'http://fake-market.herokuapp.com/apps/packagedApp/manifest.webapp';" >> content/config.js
+	@echo "loop.config.roomsSupportUrl = 'https://support.mozilla.org/kb/group-conversations-firefox-hello-webrtc';" >> content/config.js
+	@echo "loop.config.guestSupportUrl = 'https://support.mozilla.org/kb/respond-firefox-hello-invitation-guest-mode';" >> content/config.js

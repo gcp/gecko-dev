@@ -33,7 +33,8 @@ class ServoTestharnessExecutor(ProcessTestExecutor):
 
 
         self.proc = ProcessHandler(self.command,
-                                   processOutputLine=[self.on_output])
+                                   processOutputLine=[self.on_output],
+                                   onFinish=self.on_finish)
         self.proc.run()
 
         timeout = test.timeout * self.timeout_multiplier
@@ -41,13 +42,12 @@ class ServoTestharnessExecutor(ProcessTestExecutor):
         # Now wait to get the output we expect, or until we reach the timeout
         self.result_flag.wait(timeout + 5)
 
-        if self.result_flag.is_set():
-            assert self.result_data is not None
+        if self.result_flag.is_set() and self.result_data is not None:
             self.result_data["test"] = test.url
             result = self.convert_result(test, self.result_data)
             self.proc.kill()
         else:
-            if self.proc.pid is None:
+            if self.proc.proc.poll() is not None:
                 result = (test.result_cls("CRASH", None), [])
             else:
                 self.proc.kill()
@@ -67,3 +67,6 @@ class ServoTestharnessExecutor(ProcessTestExecutor):
                 self.logger.process_output(self.proc.pid,
                                            line,
                                            " ".join(self.command))
+
+    def on_finish(self):
+        self.result_flag.set()

@@ -18,7 +18,7 @@ function getConfigFile(req, res) {
   res.send([
     "var loop = loop || {};",
     "loop.config = loop.config || {};",
-    "loop.config.serverUrl = 'http://localhost:" + loopServerPort + "';",
+    "loop.config.serverUrl = 'http://localhost:" + loopServerPort + "/v0';",
     "loop.config.feedbackApiUrl = '" + feedbackApiUrl + "';",
     "loop.config.feedbackProductName = '" + feedbackProductName + "';",
     // XXX Update with the real marketplace url once the FxOS Loop app is
@@ -30,7 +30,9 @@ function getConfigFile(req, res) {
     "loop.config.legalWebsiteUrl = '/legal/terms';",
     "loop.config.fxosApp = loop.config.fxosApp || {};",
     "loop.config.fxosApp.name = 'Loop';",
-    "loop.config.fxosApp.manifestUrl = 'http://fake-market.herokuapp.com/apps/packagedApp/manifest.webapp';"
+    "loop.config.fxosApp.manifestUrl = 'http://fake-market.herokuapp.com/apps/packagedApp/manifest.webapp';",
+    "loop.config.roomsSupportUrl = 'https://support.mozilla.org/kb/group-conversations-firefox-hello-webrtc';",
+    "loop.config.guestSupportUrl = 'https://support.mozilla.org/kb/respond-firefox-hello-invitation-guest-mode';"
   ].join("\n"));
 }
 

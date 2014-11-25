@@ -508,11 +508,19 @@ struct Mul {
 };
 template<typename T>
 struct Minimum {
-    static inline T apply(T l, T r) { return l < r ? l : r; }
+    static inline T apply(T l, T r) { return math_min_impl(l, r); }
+};
+template<typename T>
+struct MinNum {
+    static inline T apply(T l, T r) { return IsNaN(l) ? r : (IsNaN(r) ? l : math_min_impl(l, r)); }
 };
 template<typename T>
 struct Maximum {
-    static inline T apply(T l, T r) { return l > r ? l : r; }
+    static inline T apply(T l, T r) { return math_max_impl(l, r); }
+};
+template<typename T>
+struct MaxNum {
+    static inline T apply(T l, T r) { return IsNaN(l) ? r : (IsNaN(r) ? l : math_max_impl(l, r)); }
 };
 template<typename T>
 struct LessThan {
@@ -551,10 +559,6 @@ struct Or {
     static inline T apply(T l, T r) { return l | r; }
 };
 template<typename T>
-struct Scale {
-    static inline T apply(int32_t lane, T scalar, T x) { return scalar * x; }
-};
-template<typename T>
 struct WithX {
     static inline T apply(int32_t lane, T scalar, T x) { return lane == 0 ? scalar : x; }
 };
@@ -569,22 +573,6 @@ struct WithZ {
 template<typename T>
 struct WithW {
     static inline T apply(int32_t lane, T scalar, T x) { return lane == 3 ? scalar : x; }
-};
-template<typename T>
-struct WithFlagX {
-    static inline T apply(T l, T f, T x) { return l == 0 ? (f ? 0xFFFFFFFF : 0x0) : x; }
-};
-template<typename T>
-struct WithFlagY {
-    static inline T apply(T l, T f, T x) { return l == 1 ? (f ? 0xFFFFFFFF : 0x0) : x; }
-};
-template<typename T>
-struct WithFlagZ {
-    static inline T apply(T l, T f, T x) { return l == 2 ? (f ? 0xFFFFFFFF : 0x0) : x; }
-};
-template<typename T>
-struct WithFlagW {
-    static inline T apply(T l, T f, T x) { return l == 3 ? (f ? 0xFFFFFFFF : 0x0) : x; }
 };
 struct ShiftLeft {
     static inline int32_t apply(int32_t v, int32_t bits) { return v << bits; }
@@ -969,6 +957,84 @@ Float32x4Select(JSContext *cx, unsigned argc, Value *vp)
 
     float *result = reinterpret_cast<float *>(orInt);
     return StoreResult<Float32x4>(cx, args, result);
+}
+
+template<class VElem, unsigned NumElem>
+static bool
+TypedArrayDataPtrFromArgs(JSContext *cx, const CallArgs &args, VElem **data)
+{
+    if (!args[0].isObject())
+        return ErrorBadArgs(cx);
+
+    JSObject &argobj = args[0].toObject();
+    if (!argobj.is<TypedArrayObject>())
+        return ErrorBadArgs(cx);
+
+    Rooted<TypedArrayObject*> typedArray(cx, &argobj.as<TypedArrayObject>());
+
+    int32_t index;
+    if (!ToInt32(cx, args[1], &index))
+        return false;
+
+    int32_t byteStart = index * typedArray->bytesPerElement();
+    if (byteStart < 0 || (uint32_t(byteStart) + NumElem * sizeof(VElem)) > typedArray->byteLength())
+        return ErrorBadArgs(cx);
+
+    *data = reinterpret_cast<VElem*>(static_cast<char*>(typedArray->viewData()) + byteStart);
+    return true;
+}
+
+template<class V, unsigned NumElem>
+static bool
+Load(JSContext *cx, unsigned argc, Value *vp)
+{
+    typedef typename V::Elem Elem;
+
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (args.length() != 2)
+        return ErrorBadArgs(cx);
+
+    Elem *typedArrayData = nullptr;
+    if (!TypedArrayDataPtrFromArgs<Elem, NumElem>(cx, args, &typedArrayData))
+        return false;
+
+    Rooted<TypeDescr*> typeDescr(cx, &V::GetTypeDescr(*cx->global()));
+    MOZ_ASSERT(typeDescr);
+    Rooted<TypedObject *> result(cx, OutlineTypedObject::createZeroed(cx, typeDescr, 0));
+    if (!result)
+        return false;
+
+    Elem *dest = reinterpret_cast<Elem*>(result->typedMem());
+    for (unsigned i = 0; i < NumElem; i++)
+        dest[i] = typedArrayData[i];
+
+    args.rval().setObject(*result);
+    return true;
+}
+
+template<class V, unsigned NumElem>
+static bool
+Store(JSContext *cx, unsigned argc, Value *vp)
+{
+    typedef typename V::Elem Elem;
+
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (args.length() != 3)
+        return ErrorBadArgs(cx);
+
+    Elem *typedArrayData = nullptr;
+    if (!TypedArrayDataPtrFromArgs<Elem, NumElem>(cx, args, &typedArrayData))
+        return false;
+
+    if (!IsVectorObject<V>(args[2]))
+        return ErrorBadArgs(cx);
+
+    Elem *src = TypedObjectMemory<Elem*>(args[2]);
+    for (unsigned i = 0; i < NumElem; i++)
+        typedArrayData[i] = src[i];
+
+    args.rval().setObject(args[2].toObject());
+    return true;
 }
 
 #define DEFINE_SIMD_FLOAT32X4_FUNCTION(Name, Func, Operands, Flags) \

@@ -177,6 +177,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     friend class SavedStacks;
     friend class mozilla::LinkedListElement<Debugger>;
     friend bool (::JS_DefineDebuggerObject)(JSContext *cx, JS::HandleObject obj);
+    friend bool (::JS::dbg::IsDebugger)(JS::Value val);
     friend bool SavedStacksMetadataCallback(JSContext *cx, JSObject **pmetadata);
     friend void JS::dbg::onNewPromise(JSContext *cx, HandleObject promise);
     friend void JS::dbg::onPromiseSettled(JSContext *cx, HandleObject promise);
@@ -486,6 +487,8 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     bool hasMemory() const;
     DebuggerMemory &memory() const;
 
+    GlobalObjectSet::Range allDebuggees() const { return debuggees.all(); }
+
     /*********************************** Methods for interaction with the GC. */
 
     /*
@@ -578,7 +581,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static bool handleBaselineOsr(JSContext *cx, InterpreterFrame *from, jit::BaselineFrame *to);
     static bool handleIonBailout(JSContext *cx, jit::RematerializedFrame *from, jit::BaselineFrame *to);
     static void propagateForcedReturn(JSContext *cx, AbstractFramePtr frame, HandleValue rval);
-    static bool hasLiveOnExceptionUnwind(GlobalObject *global);
+    static bool hasLiveHook(GlobalObject *global, Hook which);
 
     /************************************* Functions for use by Debugger.cpp. */
 

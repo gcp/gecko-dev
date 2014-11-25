@@ -299,8 +299,8 @@ add_task(function* test_openRoom() {
 
   Assert.ok(openedUrl, "should open a chat window");
 
-  // Stop the busy kicking in for following tests.
-  let windowId = openedUrl.match(/about:loopconversation\#(\d+)$/)[1];
+  // Stop the busy kicking in for following tests. (note: windowId can be 'fakeToken')
+  let windowId = openedUrl.match(/about:loopconversation\#(\w+)$/)[1];
   let windowData = MozLoopService.getConversationWindowData(windowId);
 
   Assert.equal(windowData.type, "room", "window data should contain room as the type");
@@ -337,6 +337,13 @@ add_task(function* test_roomUpdates() {
 });
 
 // Test if joining a room works as expected.
+add_task(function* test_joinRoomGuest() {
+  // We need these set up for getting the email address.
+  let roomToken = "_nxD4V4FflQ";
+  let joinedData = yield LoopRooms.promise("join", roomToken);
+  Assert.equal(joinedData.action, "join");
+});
+
 add_task(function* test_joinRoom() {
   // We need these set up for getting the email address.
   Services.prefs.setCharPref("loop.fxa_oauth.profile", JSON.stringify({
@@ -350,6 +357,9 @@ add_task(function* test_joinRoom() {
   let joinedData = yield LoopRooms.promise("join", roomToken);
   Assert.equal(joinedData.action, "join");
   Assert.equal(joinedData.displayName, "fake@invalid.com");
+
+  Services.prefs.clearUserPref("loop.fxa_oauth.profile");
+  Services.prefs.clearUserPref("loop.fxa_oauth.tokendata");
 });
 
 // Test if refreshing a room works as expected.

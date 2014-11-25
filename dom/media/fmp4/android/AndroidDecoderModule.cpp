@@ -79,14 +79,15 @@ public:
     layers::SurfaceTextureImage* typedImg = static_cast<layers::SurfaceTextureImage*>(img.get());
     typedImg->SetData(data);
 
-    mCallback->Output(VideoData::CreateFromImage(videoInfo, mImageContainer, aInfo->getOffset(),
-                                                 aInfo->getPresentationTimeUs(),
-                                                 aDuration,
-                                                 img, isSync,
-                                                 aInfo->getPresentationTimeUs(),
-                                                 gfx::IntRect(0, 0,
-                                                   mConfig.display_width,
-                                                   mConfig.display_height)));
+    nsRefPtr<VideoData> v = VideoData::CreateFromImage(videoInfo, mImageContainer, aInfo->getOffset(),
+                                                       aInfo->getPresentationTimeUs(),
+                                                       aDuration,
+                                                       img, isSync,
+                                                       aInfo->getPresentationTimeUs(),
+                                                       gfx::IntRect(0, 0,
+                                                         mConfig.display_width,
+                                                         mConfig.display_height));
+    mCallback->Output(v);
     return NS_OK;
   }
 
@@ -113,12 +114,13 @@ public:
     AudioDataValue* audio = new AudioDataValue[aInfo->getSize()];
     PodCopy(audio, static_cast<AudioDataValue*>(aBuffer), aInfo->getSize());
 
-    mCallback->Output(new AudioData(aInfo->getOffset(), aInfo->getPresentationTimeUs(),
-                                    aDuration,
-                                    numFrames,
-                                    audio,
-                                    numChannels,
-                                    sampleRate));
+    nsRefPtr<AudioData> data = new AudioData(aInfo->getOffset(), aInfo->getPresentationTimeUs(),
+                                             aDuration,
+                                             numFrames,
+                                             audio,
+                                             numChannels,
+                                             sampleRate);
+    mCallback->Output(data);
     return NS_OK;
   }
 };
@@ -133,7 +135,7 @@ bool AndroidDecoderModule::SupportsAudioMimeType(const char* aMimeType) {
 }
 
 already_AddRefed<MediaDataDecoder>
-AndroidDecoderModule::CreateH264Decoder(
+AndroidDecoderModule::CreateVideoDecoder(
                                 const mp4_demuxer::VideoDecoderConfig& aConfig,
                                 layers::LayersBackend aLayersBackend,
                                 layers::ImageContainer* aImageContainer,

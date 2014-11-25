@@ -1295,13 +1295,7 @@ SetUserTimeAndStartupIDForActivatedWindow(GtkWidget* aWindow)
     }
 
     if (sn_launchee_context_get_id_has_timestamp(ctx)) {
-        PRLibrary* gtkLibrary;
-        SetUserTimeFunc setUserTimeFunc = (SetUserTimeFunc)
-            PR_FindFunctionSymbolAndLibrary("gdk_x11_window_set_user_time", &gtkLibrary);
-        if (setUserTimeFunc) {
-            setUserTimeFunc(gdkWindow, sn_launchee_context_get_timestamp(ctx));
-            PR_UnloadLibrary(gtkLibrary);
-        }
+        gdk_x11_window_set_user_time(gdkWindow, sn_launchee_context_get_timestamp(ctx));
     }
 
     sn_launchee_context_setup_window(ctx, gdk_x11_window_get_xid(gdkWindow));
@@ -4710,7 +4704,7 @@ nsWindow::ConvertBorderStyles(nsBorderStyle aStyle)
 }
 
 NS_IMETHODIMP
-nsWindow::MakeFullScreen(bool aFullScreen)
+nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen)
 {
     LOG(("nsWindow::MakeFullScreen [%p] aFullScreen %d\n",
          (void *)this, aFullScreen));
@@ -6011,12 +6005,79 @@ nsWindow::GetIMEUpdatePreference()
     return updatePreference;
 }
 
+bool
+nsWindow::ExecuteNativeKeyBindingRemapped(NativeKeyBindingsType aType,
+                                          const WidgetKeyboardEvent& aEvent,
+                                          DoCommandCallback aCallback,
+                                          void* aCallbackData,
+                                          uint32_t aGeckoKeyCode,
+                                          uint32_t aNativeKeyCode)
+{
+    WidgetKeyboardEvent modifiedEvent(aEvent);
+    modifiedEvent.keyCode = aGeckoKeyCode;
+    static_cast<GdkEventKey*>(modifiedEvent.mNativeKeyEvent)->keyval =
+        aNativeKeyCode;
+
+    NativeKeyBindings* keyBindings = NativeKeyBindings::GetInstance(aType);
+    return keyBindings->Execute(modifiedEvent, aCallback, aCallbackData);
+}
+
 NS_IMETHODIMP_(bool)
 nsWindow::ExecuteNativeKeyBinding(NativeKeyBindingsType aType,
                                   const WidgetKeyboardEvent& aEvent,
                                   DoCommandCallback aCallback,
                                   void* aCallbackData)
 {
+    if (aEvent.keyCode >= nsIDOMKeyEvent::DOM_VK_LEFT &&
+        aEvent.keyCode <= nsIDOMKeyEvent::DOM_VK_DOWN) {
+
+        // Check if we're targeting content with vertical writing mode,
+        // and if so remap the arrow keys.
+        WidgetQueryContentEvent query(true, NS_QUERY_SELECTED_TEXT, this);
+        nsEventStatus status;
+        DispatchEvent(&query, status);
+
+        if (query.mSucceeded && query.mReply.mWritingMode.IsVertical()) {
+            uint32_t geckoCode = 0;
+            uint32_t gdkCode = 0;
+            switch (aEvent.keyCode) {
+            case nsIDOMKeyEvent::DOM_VK_LEFT:
+                if (query.mReply.mWritingMode.IsVerticalLR()) {
+                    geckoCode = nsIDOMKeyEvent::DOM_VK_UP;
+                    gdkCode = GDK_Up;
+                } else {
+                    geckoCode = nsIDOMKeyEvent::DOM_VK_DOWN;
+                    gdkCode = GDK_Down;
+                }
+                break;
+
+            case nsIDOMKeyEvent::DOM_VK_RIGHT:
+                if (query.mReply.mWritingMode.IsVerticalLR()) {
+                    geckoCode = nsIDOMKeyEvent::DOM_VK_DOWN;
+                    gdkCode = GDK_Down;
+                } else {
+                    geckoCode = nsIDOMKeyEvent::DOM_VK_UP;
+                    gdkCode = GDK_Up;
+                }
+                break;
+
+            case nsIDOMKeyEvent::DOM_VK_UP:
+                geckoCode = nsIDOMKeyEvent::DOM_VK_LEFT;
+                gdkCode = GDK_Left;
+                break;
+
+            case nsIDOMKeyEvent::DOM_VK_DOWN:
+                geckoCode = nsIDOMKeyEvent::DOM_VK_RIGHT;
+                gdkCode = GDK_Right;
+                break;
+            }
+
+            return ExecuteNativeKeyBindingRemapped(aType, aEvent, aCallback,
+                                                   aCallbackData,
+                                                   geckoCode, gdkCode);
+        }
+    }
+
     NativeKeyBindings* keyBindings = NativeKeyBindings::GetInstance(aType);
     return keyBindings->Execute(aEvent, aCallback, aCallbackData);
 }

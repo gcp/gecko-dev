@@ -84,6 +84,7 @@ public:
   bool IsMediaSeekable() { return true; }
 
   nsresult ReadMetadata(MediaInfo* aInfo, MetadataTags** aTags) MOZ_OVERRIDE;
+  void ReadUpdatedMetadata(MediaInfo* aInfo) MOZ_OVERRIDE;
   void Seek(int64_t aTime, int64_t aStartTime, int64_t aEndTime,
             int64_t aCurrentTime) MOZ_OVERRIDE;
 
@@ -175,7 +176,9 @@ private:
   bool mVideoIsSeeking;
 
   bool mHasEssentialTrackBuffers;
+#ifdef MOZ_FMP4
   nsRefPtr<SharedDecoderManager> mSharedDecoderManager;
+#endif
 };
 
 } // namespace mozilla
