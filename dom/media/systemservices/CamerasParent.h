@@ -32,6 +32,8 @@ public:
   virtual bool RecvGetCaptureCapability(const nsCString&, const int&,
                                         CaptureCapability*) MOZ_OVERRIDE;
   virtual bool RecvGetCaptureDevice(const int&, nsCString*, nsCString*) MOZ_OVERRIDE;
+  virtual bool RecvStartCapture(const int&, const CaptureCapability&) MOZ_OVERRIDE;
+  virtual bool RecvStopCapture() MOZ_OVERRIDE;
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
   CamerasParent();

@@ -65,7 +65,6 @@ int NumberOfCapabilities(const char* deviceUniqueIdUTF8)
 }
 
 int GetCaptureCapability(const char* unique_idUTF8,
-                         const unsigned int unique_idUTF8Length,
                          const unsigned int capability_number,
                          webrtc::CaptureCapability& capability)
 {

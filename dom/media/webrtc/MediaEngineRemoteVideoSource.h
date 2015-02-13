@@ -80,6 +80,8 @@ private:
 
   static bool SatisfiesConstraintSet(const dom::MediaTrackConstraintSet& aConstraints,
                                      const webrtc::CaptureCapability& aCandidate);
+  void ChooseCapability(const VideoTrackConstraintsN &aConstraints,
+                        const MediaEnginePrefs &aPrefs);
 };
 
 }

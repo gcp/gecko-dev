@@ -41,6 +41,8 @@ parent:
 
   sync AllocateCaptureDevice(nsCString unique_idUTF8) returns (int numdev);
   sync ReleaseCaptureDevice(int numdev);
+  sync StartCapture(int numdev, CaptureCapability capability);
+  sync StopCapture();
 
   __delete__();
 };

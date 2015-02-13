@@ -49,25 +49,9 @@ nsresult
 MediaEngineRemoteVideoSource::Allocate(const VideoTrackConstraintsN& aConstraints,
                                        const MediaEnginePrefs& aPrefs)
 {
-
-  ConstrainLongRange cWidth(aConstraints.mRequired.mWidth);
-  ConstrainLongRange cHeight(aConstraints.mRequired.mHeight);
-
-  if (aConstraints.mAdvanced.WasPassed()) {
-    const auto& advanced = aConstraints.mAdvanced.Value();
-    for (uint32_t i = 0; i < advanced.Length(); i++) {
-      if (cWidth.mMax >= advanced[i].mWidth.mMin && cWidth.mMin <= advanced[i].mWidth.mMax &&
-         cHeight.mMax >= advanced[i].mHeight.mMin && cHeight.mMin <= advanced[i].mHeight.mMax) {
-        cWidth.mMin = std::max(cWidth.mMin, advanced[i].mWidth.mMin);
-        cHeight.mMin = std::max(cHeight.mMin, advanced[i].mHeight.mMin);
-      }
-    }
-  }
-
-  // cWidth.mMin cWidth.mMax
-  // mTimePerFrame = aPrefs.mFPS ? 1000 / aPrefs.mFPS : aPrefs.mFPS;
   LOG((__FUNCTION__));
 
+  ChooseCapability(aConstraints, aPrefs);
   if (mozilla::camera::AllocateCaptureDevice(NS_ConvertUTF16toUTF8(mUniqueId).get(),
                                              kMaxUniqueIdLength, mCaptureIndex)) {
     return NS_ERROR_FAILURE;
@@ -98,17 +82,71 @@ MediaEngineRemoteVideoSource::Deallocate()
 nsresult
 MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
 {
+  LOG((__FUNCTION__));
+  if (!mInitDone || !aStream) {
+    return NS_ERROR_FAILURE;
+  }
+
+  mSources.AppendElement(aStream);
+
   aStream->AddTrack(aID, 0, new VideoSegment());
   aStream->AdvanceKnownTracksTime(STREAM_TIME_MAX);
+
+  if (mState == kStarted) {
+    return NS_OK;
+  }
+  mImageContainer = layers::LayerManager::CreateImageContainer();
+
+  mState = kStarted;
+  mTrackID = aID;
+
+  //int error = mViERender->AddRenderer(mCaptureIndex, webrtc::kVideoI420, (webrtc::ExternalRenderer*)this);
+  //if (error == -1) {
+  //  return NS_ERROR_FAILURE;
+  //}
+
+  //error = mViERender->StartRender(mCaptureIndex);
+  //if (error == -1) {
+  //  return NS_ERROR_FAILURE;
+  //}
+
+  //if (mViECapture->StartCapture(mCaptureIndex, mCapability) < 0) {
+  //  return NS_ERROR_FAILURE;
+  //}
+
   return NS_OK;
 }
 
 nsresult
-MediaEngineRemoteVideoSource::Stop(mozilla::SourceMediaStream*, mozilla::TrackID)
+MediaEngineRemoteVideoSource::Stop(mozilla::SourceMediaStream* aSource,
+                                   mozilla::TrackID aID)
 {
-  //if (!mWindow)
-  //  return NS_OK;
-  //NS_DispatchToMainThread(new StopRunnable(this));
+  LOG((__FUNCTION__));
+  if (!mSources.RemoveElement(aSource)) {
+    // Already stopped - this is allowed
+    return NS_OK;
+  }
+
+  aSource->EndTrack(aID);
+
+  if (!mSources.IsEmpty()) {
+    return NS_OK;
+  }
+  if (mState != kStarted) {
+    return NS_ERROR_FAILURE;
+  }
+
+  {
+    //MonitorAutoLock lock(mMonitor);
+    mState = kStopped;
+    // Drop any cached image so we don't start with a stale image on next
+    // usage
+    mImage = nullptr;
+  }
+  //mViERender->StopRender(mCaptureIndex);
+  //mViERender->RemoveRenderer(mCaptureIndex);
+  //mViECapture->StopCapture(mCaptureIndex);
+
   return NS_OK;
 }
 
@@ -161,7 +199,7 @@ MediaEngineRemoteVideoSource::SatisfiesConstraintSets(
   for (size_t j = 0; j < aConstraintSets.Length(); j++) {
     for (size_t i = 0; i < candidateSet.Length();  ) {
       webrtc::CaptureCapability cap;
-      mozilla::camera::GetCaptureCapability(uniqueId.get(), kMaxUniqueIdLength,
+      mozilla::camera::GetCaptureCapability(uniqueId.get(),
                                             candidateSet[i], cap);
       if (!SatisfiesConstraintSet(*aConstraintSets[j], cap)) {
         candidateSet.RemoveElementAt(i);
@@ -171,6 +209,125 @@ MediaEngineRemoteVideoSource::SatisfiesConstraintSets(
     }
   }
   return !!candidateSet.Length();
+}
+
+void
+MediaEngineRemoteVideoSource::ChooseCapability(
+    const VideoTrackConstraintsN &aConstraints,
+    const MediaEnginePrefs &aPrefs)
+{
+  NS_ConvertUTF16toUTF8 uniqueId(mUniqueId);
+  int num = mozilla::camera::NumberOfCapabilities(uniqueId.get());
+  if (num <= 0) {
+    // Mac doesn't support capabilities.
+    return GuessCapability(aConstraints, aPrefs);
+  }
+
+  // The rest is the full algorithm for cameras that can list their capabilities.
+
+  LOG(("ChooseCapability: prefs: %dx%d @%d-%dfps",
+       aPrefs.mWidth, aPrefs.mHeight, aPrefs.mFPS, aPrefs.mMinFPS));
+
+  CapabilitySet candidateSet;
+  for (int i = 0; i < num; i++) {
+    candidateSet.AppendElement(i);
+  }
+
+  // Pick among capabilities: First apply required constraints.
+
+  for (uint32_t i = 0; i < candidateSet.Length();) {
+    webrtc::CaptureCapability cap;
+    mozilla::camera::GetCaptureCapability(uniqueId.get(),
+                                          candidateSet[i], cap);
+    if (!SatisfiesConstraintSet(aConstraints.mRequired, cap)) {
+      candidateSet.RemoveElementAt(i);
+    } else {
+      ++i;
+    }
+  }
+
+  CapabilitySet tailSet;
+
+  // Then apply advanced (formerly known as optional) constraints.
+
+  if (aConstraints.mAdvanced.WasPassed()) {
+    auto &array = aConstraints.mAdvanced.Value();
+
+    for (uint32_t i = 0; i < array.Length(); i++) {
+      CapabilitySet rejects;
+      for (uint32_t j = 0; j < candidateSet.Length();) {
+        webrtc::CaptureCapability cap;
+        mozilla::camera::GetCaptureCapability(uniqueId.get(),
+                                              candidateSet[j], cap);
+        if (!SatisfiesConstraintSet(array[i], cap)) {
+          rejects.AppendElement(candidateSet[j]);
+          candidateSet.RemoveElementAt(j);
+        } else {
+          ++j;
+        }
+      }
+      (candidateSet.Length()? tailSet : candidateSet).MoveElementsFrom(rejects);
+    }
+  }
+
+  if (!candidateSet.Length()) {
+    candidateSet.AppendElement(0);
+  }
+
+  int prefWidth = aPrefs.GetWidth();
+  int prefHeight = aPrefs.GetHeight();
+
+  // Default is closest to available capability but equal to or below;
+  // otherwise closest above.  Since we handle the num=0 case above and
+  // take the first entry always, we can never exit uninitialized.
+
+  webrtc::CaptureCapability cap;
+  bool higher = true;
+  for (uint32_t i = 0; i < candidateSet.Length(); i++) {
+    mozilla::camera::GetCaptureCapability(NS_ConvertUTF16toUTF8(mUniqueId).get(),
+                                          candidateSet[i], cap);
+    if (higher) {
+      if (i == 0 ||
+          (mCapability.width > cap.width && mCapability.height > cap.height)) {
+        // closer than the current choice
+        mCapability = cap;
+        // FIXME: expose expected capture delay?
+      }
+      if (cap.width <= (uint32_t) prefWidth && cap.height <= (uint32_t) prefHeight) {
+        higher = false;
+      }
+    } else {
+      if (cap.width > (uint32_t) prefWidth || cap.height > (uint32_t) prefHeight ||
+          cap.maxFPS < (uint32_t) aPrefs.mMinFPS) {
+        continue;
+      }
+      if (mCapability.width < cap.width && mCapability.height < cap.height) {
+        mCapability = cap;
+        // FIXME: expose expected capture delay?
+      }
+    }
+    // Same resolution, maybe better format or FPS match
+    if (mCapability.width == cap.width && mCapability.height == cap.height) {
+      // FPS too low
+      if (cap.maxFPS < (uint32_t) aPrefs.mMinFPS) {
+        continue;
+      }
+      // Better match
+      if (cap.maxFPS < mCapability.maxFPS) {
+        mCapability = cap;
+      } else if (cap.maxFPS == mCapability.maxFPS) {
+        // Resolution and FPS the same, check format
+        if (cap.rawType == webrtc::RawVideoType::kVideoI420
+          || cap.rawType == webrtc::RawVideoType::kVideoYUY2
+          || cap.rawType == webrtc::RawVideoType::kVideoYV12) {
+          mCapability = cap;
+        }
+      }
+    }
+  }
+  LOG(("chose cap %dx%d @%dfps codec %d raw %d",
+       mCapability.width, mCapability.height, mCapability.maxFPS,
+       mCapability.codecType, mCapability.rawType));
 }
 
 }

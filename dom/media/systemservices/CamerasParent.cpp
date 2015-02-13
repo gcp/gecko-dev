@@ -215,6 +215,18 @@ CamerasParent::RecvGetCaptureDevice(const int& i,
   return true;
 }
 
+bool
+CamerasParent::RecvStartCapture(const int&, const CaptureCapability&)
+{
+  return false;
+}
+
+bool
+CamerasParent::RecvStopCapture()
+{
+  return false;
+}
+
 void
 CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
 {
