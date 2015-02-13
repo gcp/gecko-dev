@@ -7,6 +7,7 @@
 #include "mozilla/Assertions.h"
 #include "CamerasParent.h"
 #include "CamerasUtils.h"
+#include "MediaEngine.h"
 #include "prlog.h"
 
 #include "webrtc/video_engine/include/vie_base.h"
@@ -123,17 +124,40 @@ CamerasParent::RecvNumberOfCapabilities(const nsCString&, int*)
 
 bool
 CamerasParent::RecvGetCaptureCapability(const nsCString&, const int&,
-                              CaptureCapability*)
+                                        CaptureCapability*)
 {
   LOG(("RecvGetCaptureCapability"));
   return false;
 }
 
 bool
-CamerasParent::RecvGetCaptureDevice(const int&, nsCString*, nsCString*)
+CamerasParent::RecvGetCaptureDevice(const int& i,
+                                    nsCString* aName,
+                                    nsCString* aUniqueId)
 {
+  if (!EnsureInitialized()) {
+    LOG(("RecvGetCaptureDevice fails to initialize"));
+    return false;
+  }
+
+  char deviceName[MediaEngineSource::kMaxDeviceNameLength];
+  char uniqueId[MediaEngineSource::kMaxUniqueIdLength];
+
   LOG(("RecvGetCaptureDevice"));
-  return false;
+  int error = mPtrViECapture->GetCaptureDevice(i,
+                                               deviceName, sizeof(deviceName),
+                                               uniqueId, sizeof(uniqueId));
+  if (error) {
+    LOG(("GetCaptureDevice failed: %d", error));
+    return false;
+  }
+
+  LOG(("Returning %s name %s id", deviceName, uniqueId));
+
+  aName->Assign(deviceName);
+  aUniqueId->Assign(uniqueId);
+
+  return true;
 }
 
 void

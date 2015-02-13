@@ -90,7 +90,16 @@ int GetCaptureDevice(unsigned int list_number, char* device_nameUTF8,
                      const unsigned int unique_idUTF8Length)
 {
   LOG(("GetCaptureDevice"));
-  return 0;
+  nsCString device_name;
+  nsCString unique_id;
+  if (Cameras()->SendGetCaptureDevice(list_number, &device_name, &unique_id)) {
+    base::strlcpy(device_nameUTF8, device_name.get(), device_nameUTF8Length);
+    base::strlcpy(unique_idUTF8, unique_id.get(), unique_idUTF8Length);
+    LOG(("Got %s name %s id", device_nameUTF8, unique_idUTF8));
+    return 0;
+  } else {
+    return -1;
+  }
 }
 
 bool
