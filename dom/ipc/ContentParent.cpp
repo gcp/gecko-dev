@@ -212,10 +212,6 @@ using namespace mozilla::system;
 #include "nsIProfileSaveEvent.h"
 #endif
 
-#ifdef MOZ_WEBRTC
-#include "CamerasParent.h"
-#endif
-
 static NS_DEFINE_CID(kCClipboardCID, NS_CLIPBOARD_CID);
 static const char* sClipboardTextFlavors[] = { kUnicodeMime };
 
@@ -3377,19 +3373,6 @@ bool
 ContentParent::DeallocPHalParent(hal_sandbox::PHalParent* aHal)
 {
     delete aHal;
-    return true;
-}
-
-mozilla::camera::PCamerasParent*
-ContentParent::AllocPCamerasParent()
-{
-    return mozilla::camera::CreateCamerasParent();
-}
-
-bool
-ContentParent::DeallocPCamerasParent(mozilla::camera::PCamerasParent* aCameras)
-{
-    delete aCameras;
     return true;
 }
 

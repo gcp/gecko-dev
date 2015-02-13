@@ -172,9 +172,6 @@ public:
     virtual PHalChild* AllocPHalChild() MOZ_OVERRIDE;
     virtual bool DeallocPHalChild(PHalChild*) MOZ_OVERRIDE;
 
-    virtual PCamerasChild* AllocPCamerasChild() MOZ_OVERRIDE;
-    virtual bool DeallocPCamerasChild(PCamerasChild*) MOZ_OVERRIDE;
-
     virtual PMemoryReportRequestChild*
     AllocPMemoryReportRequestChild(const uint32_t& aGeneration,
                                    const bool& aAnonymize,

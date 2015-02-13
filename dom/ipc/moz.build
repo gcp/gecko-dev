@@ -132,7 +132,6 @@ LOCAL_INCLUDES += [
     '/extensions/spellcheck/src',
     '/hal/sandbox',
     '/layout/base',
-    '/media/webrtc/trunk',
     '/netwerk/base',
     '/toolkit/xre',
     '/uriloader/exthandler',

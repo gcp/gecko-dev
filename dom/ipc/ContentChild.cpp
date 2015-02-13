@@ -49,7 +49,6 @@
 #include "mozilla/layers/SharedBufferManagerChild.h"
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/plugins/PluginModuleParent.h"
-#include "mozilla/camera/PCamerasChild.h"
 
 #if defined(MOZ_CONTENT_SANDBOX)
 #if defined(XP_WIN)
@@ -160,10 +159,6 @@
 
 #ifdef MOZ_WEBSPEECH
 #include "mozilla/dom/PSpeechSynthesisChild.h"
-#endif
-
-#ifdef MOZ_WEBRTC
-#include "CamerasChild.h"
 #endif
 
 #include "ProcessUtils.h"
@@ -1409,19 +1404,6 @@ bool
 ContentChild::DeallocPHalChild(PHalChild* aHal)
 {
     delete aHal;
-    return true;
-}
-
-camera::PCamerasChild*
-ContentChild::AllocPCamerasChild()
-{
-    return camera::CreateCamerasChild();
-}
-
-bool
-ContentChild::DeallocPCamerasChild(camera::PCamerasChild* aPCameras)
-{
-    delete aPCameras;
     return true;
 }
 

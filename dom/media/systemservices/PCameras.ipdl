@@ -21,7 +21,7 @@ struct CaptureCapability
 
 sync protocol PCameras
 {
-  manager PContent or PBackground;
+  manager PBackground;
 
 child:
   async FrameSizeChange(int w, int h);
