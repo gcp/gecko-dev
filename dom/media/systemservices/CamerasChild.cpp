@@ -111,6 +111,23 @@ int GetCaptureDevice(unsigned int list_number, char* device_nameUTF8,
   }
 }
 
+int AllocateCaptureDevice(const char* unique_idUTF8,
+                          const unsigned int unique_idUTF8Length,
+                          int& capture_id)
+{
+  LOG((__FUNCTION__));
+  nsCString unique_id(unique_idUTF8);
+  Cameras()->SendAllocateCaptureDevice(unique_id, &capture_id);
+  return 0;
+}
+
+int ReleaseCaptureDevice(const int capture_id)
+{
+  LOG((__FUNCTION__));
+  Cameras()->SendReleaseCaptureDevice(capture_id);
+  return 0;
+}
+
 bool
 CamerasChild::RecvDeliverFrame()
 {

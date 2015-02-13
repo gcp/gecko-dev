@@ -43,16 +43,22 @@ CamerasParent::RecvEnumerateCameras()
 }
 
 bool
-CamerasParent::RecvAllocateCamera(bool* rv)
+CamerasParent::RecvAllocateCaptureDevice(const nsCString& unique_id, int* numdev)
 {
-  LOG(("RecvAllocateCamera"));
-  return false;
+  LOG(("RecvAllocateCaptureDevice"));
+  if (mPtrViECapture->AllocateCaptureDevice(unique_id.get(),
+                                            MediaEngineSource::kMaxUniqueIdLength,
+                                            *numdev)) {
+    return false;
+  }
+  LOG(("Allocated device nr %d", *numdev));
+  return true;
 }
 
 bool
-CamerasParent::RecvReleaseCamera(bool* rv)
+CamerasParent::RecvReleaseCaptureDevice(const int &numdev)
 {
-  LOG(("RecvReleaseCamera"));
+  LOG(("RecvReleaseCamera device nr %d", numdev));
   return false;
 }
 

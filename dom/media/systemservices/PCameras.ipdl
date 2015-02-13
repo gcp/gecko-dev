@@ -39,8 +39,8 @@ parent:
                             returns (CaptureCapability capability);
   sync GetCaptureDevice(int num) returns (nsCString device_name, nsCString device_id);
 
-  sync AllocateCamera() returns (bool rv);
-  sync ReleaseCamera() returns (bool rv);
+  sync AllocateCaptureDevice(nsCString unique_idUTF8) returns (int numdev);
+  sync ReleaseCaptureDevice(int numdev);
 
   __delete__();
 };

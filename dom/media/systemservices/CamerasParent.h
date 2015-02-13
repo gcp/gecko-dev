@@ -25,8 +25,8 @@ class CamerasParent :
 {
 public:
   virtual bool RecvEnumerateCameras() MOZ_OVERRIDE;
-  virtual bool RecvAllocateCamera(bool* rv) MOZ_OVERRIDE;
-  virtual bool RecvReleaseCamera(bool* rv) MOZ_OVERRIDE;
+  virtual bool RecvAllocateCaptureDevice(const nsCString&, int *) MOZ_OVERRIDE;
+  virtual bool RecvReleaseCaptureDevice(const int &) MOZ_OVERRIDE;
   virtual bool RecvNumberOfCaptureDevices(int* numdev) MOZ_OVERRIDE;
   virtual bool RecvNumberOfCapabilities(const nsCString&, int*) MOZ_OVERRIDE;
   virtual bool RecvGetCaptureCapability(const nsCString&, const int&,

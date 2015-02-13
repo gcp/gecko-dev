@@ -66,6 +66,14 @@ MediaEngineRemoteVideoSource::Allocate(const VideoTrackConstraintsN& aConstraint
 
   // cWidth.mMin cWidth.mMax
   // mTimePerFrame = aPrefs.mFPS ? 1000 / aPrefs.mFPS : aPrefs.mFPS;
+  LOG((__FUNCTION__));
+
+  if (mozilla::camera::AllocateCaptureDevice(NS_ConvertUTF16toUTF8(mUniqueId).get(),
+                                             kMaxUniqueIdLength, mCaptureIndex)) {
+    return NS_ERROR_FAILURE;
+  }
+  mState = kAllocated;
+  LOG(("Video device %d allocated", mCaptureIndex));
 
   return NS_OK;
 }
@@ -73,14 +81,25 @@ MediaEngineRemoteVideoSource::Allocate(const VideoTrackConstraintsN& aConstraint
 nsresult
 MediaEngineRemoteVideoSource::Deallocate()
 {
+  LOG((__FUNCTION__));
+  if (mSources.IsEmpty()) {
+    if (mState != kStopped && mState != kAllocated) {
+      return NS_ERROR_FAILURE;
+    }
+    mozilla::camera::ReleaseCaptureDevice(mCaptureIndex);
+    mState = kReleased;
+    LOG(("Video device %d deallocated", mCaptureIndex));
+  } else {
+    LOG(("Video device %d deallocated but still in use", mCaptureIndex));
+  }
   return NS_OK;
 }
 
 nsresult
 MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
 {
-  //aStream->AddTrack(aID, 0, new VideoSegment());
-  //aStream->AdvanceKnownTracksTime(STREAM_TIME_MAX);
+  aStream->AddTrack(aID, 0, new VideoSegment());
+  aStream->AdvanceKnownTracksTime(STREAM_TIME_MAX);
   return NS_OK;
 }
 
@@ -94,21 +113,18 @@ MediaEngineRemoteVideoSource::Stop(mozilla::SourceMediaStream*, mozilla::TrackID
 }
 
 void
-MediaEngineRemoteVideoSource::NotifyPull(MediaStreamGraph*,
+MediaEngineRemoteVideoSource::NotifyPull(MediaStreamGraph* aGraph,
                                          SourceMediaStream* aSource,
                                          TrackID aID, StreamTime aDesiredTime)
 {
   VideoSegment segment;
-  MonitorAutoLock mon(mMonitor);
 
+  //MonitorAutoLock lock(mMonitor);
   StreamTime delta = aDesiredTime - aSource->GetEndOfAppendedData(aID);
+
   if (delta > 0) {
     // nullptr images are allowed
-    // gfx::IntSize size = image ? image->GetSize() : IntSize(0, 0);
-    // segment.AppendFrame(image.forget().downcast<layers::Image>(), delta, size);
-    // This can fail if either a) we haven't added the track yet, or b)
-    // we've removed or finished the track.
-    // aSource->AppendToTrack(aID, &(segment));
+    AppendToTrack(aSource, mImage, aID, delta);
   }
 }
 
@@ -132,7 +148,6 @@ MediaEngineRemoteVideoSource::SatisfiesConstraintSets(
       const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets)
 {
   NS_ConvertUTF16toUTF8 uniqueId(mUniqueId);
-  //int num = mViECapture->NumberOfCapabilities(uniqueId.get(), kMaxUniqueIdLength);
   int num = mozilla::camera::NumberOfCapabilities(uniqueId.get());
   if (num <= 0) {
     return true;
