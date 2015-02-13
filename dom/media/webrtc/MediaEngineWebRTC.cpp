@@ -143,44 +143,56 @@ MediaEngineWebRTC::EnumerateVideoDevices(dom::MediaSourceEnum aMediaSource,
 
   switch (aMediaSource) {
     case dom::MediaSourceEnum::Window:
-      mWinEngineConfig.Set<webrtc::CaptureDeviceInfo>(
+      {
+        webrtc::Config winEngineConfig;
+        winEngineConfig.Set<webrtc::CaptureDeviceInfo>(
           new webrtc::CaptureDeviceInfo(webrtc::CaptureDeviceType::Window));
-      if (!mWinEngine) {
-        if (!(mWinEngine = webrtc::VideoEngine::Create(mWinEngineConfig))) {
-          return;
+        if (!mWinEngine) {
+          if (!(mWinEngine = webrtc::VideoEngine::Create(winEngineConfig))) {
+            return;
+          }
         }
       }
       videoEngine = mWinEngine;
       videoEngineInit = &mWinEngineInit;
       break;
     case dom::MediaSourceEnum::Application:
-      mAppEngineConfig.Set<webrtc::CaptureDeviceInfo>(
+      {
+        webrtc::Config appEngineConfig;
+        appEngineConfig.Set<webrtc::CaptureDeviceInfo>(
           new webrtc::CaptureDeviceInfo(webrtc::CaptureDeviceType::Application));
-      if (!mAppEngine) {
-        if (!(mAppEngine = webrtc::VideoEngine::Create(mAppEngineConfig))) {
-          return;
+        if (!mAppEngine) {
+          if (!(mAppEngine = webrtc::VideoEngine::Create(appEngineConfig))) {
+            return;
+          }
         }
       }
       videoEngine = mAppEngine;
       videoEngineInit = &mAppEngineInit;
       break;
     case dom::MediaSourceEnum::Screen:
-      mScreenEngineConfig.Set<webrtc::CaptureDeviceInfo>(
+      {
+        webrtc::Config screenEngineConfig;
+        screenEngineConfig.Set<webrtc::CaptureDeviceInfo>(
           new webrtc::CaptureDeviceInfo(webrtc::CaptureDeviceType::Screen));
-      if (!mScreenEngine) {
-        if (!(mScreenEngine = webrtc::VideoEngine::Create(mScreenEngineConfig))) {
-          return;
+        if (!mScreenEngine) {
+          if (!(mScreenEngine = webrtc::VideoEngine::Create(screenEngineConfig))) {
+            return;
+          }
         }
       }
       videoEngine = mScreenEngine;
       videoEngineInit = &mScreenEngineInit;
       break;
     case dom::MediaSourceEnum::Browser:
-      mBrowserEngineConfig.Set<webrtc::CaptureDeviceInfo>(
+      {
+        webrtc::Config browserEngineConfig;
+        browserEngineConfig.Set<webrtc::CaptureDeviceInfo>(
           new webrtc::CaptureDeviceInfo(webrtc::CaptureDeviceType::Browser));
-      if (!mBrowserEngine) {
-        if (!(mBrowserEngine = webrtc::VideoEngine::Create(mBrowserEngineConfig))) {
-          return;
+        if (!mBrowserEngine) {
+          if (!(mBrowserEngine = webrtc::VideoEngine::Create(browserEngineConfig))) {
+            return;
+          }
         }
       }
       videoEngine = mBrowserEngine;
