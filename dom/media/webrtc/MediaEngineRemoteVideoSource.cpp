@@ -100,19 +100,9 @@ MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
   mState = kStarted;
   mTrackID = aID;
 
-  //int error = mViERender->AddRenderer(mCaptureIndex, webrtc::kVideoI420, (webrtc::ExternalRenderer*)this);
-  //if (error == -1) {
-  //  return NS_ERROR_FAILURE;
-  //}
-
-  //error = mViERender->StartRender(mCaptureIndex);
-  //if (error == -1) {
-  //  return NS_ERROR_FAILURE;
-  //}
-
-  //if (mViECapture->StartCapture(mCaptureIndex, mCapability) < 0) {
-  //  return NS_ERROR_FAILURE;
-  //}
+  if (mozilla::camera::StartCapture(mCaptureIndex, mCapability, this)) {
+    return NS_ERROR_FAILURE;
+  }
 
   return NS_OK;
 }
@@ -137,15 +127,14 @@ MediaEngineRemoteVideoSource::Stop(mozilla::SourceMediaStream* aSource,
   }
 
   {
-    //MonitorAutoLock lock(mMonitor);
+    MonitorAutoLock lock(mMonitor);
     mState = kStopped;
     // Drop any cached image so we don't start with a stale image on next
     // usage
     mImage = nullptr;
   }
-  //mViERender->StopRender(mCaptureIndex);
-  //mViERender->RemoveRenderer(mCaptureIndex);
-  //mViECapture->StopCapture(mCaptureIndex);
+
+  mozilla::camera::StopCapture(mCaptureIndex);
 
   return NS_OK;
 }
@@ -157,13 +146,91 @@ MediaEngineRemoteVideoSource::NotifyPull(MediaStreamGraph* aGraph,
 {
   VideoSegment segment;
 
-  //MonitorAutoLock lock(mMonitor);
+  MonitorAutoLock lock(mMonitor);
   StreamTime delta = aDesiredTime - aSource->GetEndOfAppendedData(aID);
 
   if (delta > 0) {
     // nullptr images are allowed
     AppendToTrack(aSource, mImage, aID, delta);
   }
+}
+
+int
+MediaEngineRemoteVideoSource::FrameSizeChange(unsigned int w, unsigned int h,
+                                              unsigned int streams)
+{
+  mWidth = w;
+  mHeight = h;
+  LOG(("Video FrameSizeChange: %ux%u", w, h));
+  return 0;
+}
+
+int
+MediaEngineRemoteVideoSource::DeliverFrame(unsigned char* buffer,
+                                           int size,
+                                           uint32_t time_stamp,
+                                           int64_t render_time,
+                                           void *handle)
+{
+  if (mWidth*mHeight + 2*(((mWidth+1)/2)*((mHeight+1)/2)) != size) {
+    MOZ_ASSERT(false, "Wrong size frame in DeliverFrame!");
+    return 0;
+  }
+
+  // Create a video frame and append it to the track.
+  nsRefPtr<layers::Image> image = mImageContainer->CreateImage(ImageFormat::PLANAR_YCBCR);
+  layers::PlanarYCbCrImage* videoImage = static_cast<layers::PlanarYCbCrImage*>(image.get());
+
+  uint8_t* frame = static_cast<uint8_t*> (buffer);
+  const uint8_t lumaBpp = 8;
+  const uint8_t chromaBpp = 4;
+
+  // Take lots of care to round up!
+  layers::PlanarYCbCrData data;
+  data.mYChannel = frame;
+  data.mYSize = IntSize(mWidth, mHeight);
+  data.mYStride = (mWidth * lumaBpp + 7)/ 8;
+  data.mCbCrStride = (mWidth * chromaBpp + 7) / 8;
+  data.mCbChannel = frame + mHeight * data.mYStride;
+  data.mCrChannel = data.mCbChannel + ((mHeight+1)/2) * data.mCbCrStride;
+  data.mCbCrSize = IntSize((mWidth+1)/ 2, (mHeight+1)/ 2);
+  data.mPicX = 0;
+  data.mPicY = 0;
+  data.mPicSize = IntSize(mWidth, mHeight);
+  data.mStereoMode = StereoMode::MONO;
+
+  videoImage->SetData(data);
+
+#ifdef DEBUG
+  static uint32_t frame_num = 0;
+  LOG(("frame %d (%dx%d); timestamp %u, render_time %lu", frame_num++,
+       mWidth, mHeight, time_stamp, render_time));
+#endif
+
+  // we don't touch anything in 'this' until here (except for snapshot,
+  // which has it's own lock)
+  MonitorAutoLock lock(mMonitor);
+
+  // implicitly releases last image
+  mImage = image.forget();
+
+  // Push the frame into the MSG with a minimal duration.  This will likely
+  // mean we'll still get NotifyPull calls which will then return the same
+  // frame again with a longer duration.  However, this means we won't
+  // fail to get the frame in and drop frames.
+
+  // XXX The timestamp for the frame should be based on the Capture time,
+  // not the MSG time, and MSG should never, ever block on a (realtime)
+  // video frame (or even really for streaming - audio yes, video probably no).
+  // Note that MediaPipeline currently ignores the timestamps from MSG
+  uint32_t len = mSources.Length();
+  for (uint32_t i = 0; i < len; i++) {
+    if (mSources[i]) {
+      AppendToTrack(mSources[i], mImage, mTrackID, 1); // shortest possible duration
+    }
+  }
+
+  return 0;
 }
 
 typedef nsTArray<uint8_t> CapabilitySet;

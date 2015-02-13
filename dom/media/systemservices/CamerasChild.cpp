@@ -32,7 +32,7 @@ namespace camera {
 
 static PCamerasChild* sCameras;
 
-static PCamerasChild*
+static CamerasChild*
 Cameras()
 {
   if (!sCameras) {
@@ -51,7 +51,7 @@ Cameras()
     sCameras = existingBackgroundChild->SendPCamerasConstructor();
   }
   MOZ_ASSERT(sCameras);
-  return sCameras;
+  return static_cast<CamerasChild*>(sCameras);
 }
 
 int NumberOfCapabilities(const char* deviceUniqueIdUTF8)
@@ -116,32 +116,84 @@ int AllocateCaptureDevice(const char* unique_idUTF8,
 {
   LOG((__FUNCTION__));
   nsCString unique_id(unique_idUTF8);
-  Cameras()->SendAllocateCaptureDevice(unique_id, &capture_id);
-  return 0;
+  if (Cameras()->SendAllocateCaptureDevice(unique_id, &capture_id)) {
+    return 0;
+  } else {
+    return -1;
+  }
 }
 
 int ReleaseCaptureDevice(const int capture_id)
 {
   LOG((__FUNCTION__));
-  Cameras()->SendReleaseCaptureDevice(capture_id);
-  return 0;
+  if (Cameras()->SendReleaseCaptureDevice(capture_id)) {
+    return 0;
+  } else {
+    return -1;
+  }
+}
+
+int StartCapture(const int capture_id, webrtc::CaptureCapability& webrtcCaps,
+                 webrtc::ExternalRenderer* cb)
+{
+  LOG((__FUNCTION__));
+  Cameras()->Callback() = cb;
+  CaptureCapability capCap(webrtcCaps.width,
+                           webrtcCaps.height,
+                           webrtcCaps.maxFPS,
+                           webrtcCaps.expectedCaptureDelay,
+                           webrtcCaps.rawType,
+                           webrtcCaps.codecType,
+                           webrtcCaps.interlaced);
+  if (Cameras()->SendStartCapture(capture_id, capCap)) {
+    return 0;
+  } else {
+    return -1;
+  }
+}
+
+int StopCapture(const int capture_id)
+
+{  LOG((__FUNCTION__));
+  if (Cameras()->SendStopCapture(capture_id)) {
+    Cameras()->Callback() = nullptr;
+    return 0;
+  } else {
+    return -1;
+  }
 }
 
 bool
-CamerasChild::RecvDeliverFrame()
+CamerasChild::RecvDeliverFrame(const int& size,
+                               const uint32_t& time_stamp,
+                               const int64_t& render_time)
 {
-  LOG(("RecvDeliverFrame"));
+  LOG((__FUNCTION__));
   return false;
+}
+
+bool
+CamerasChild::RecvFrameSizeChange(const int& w, const int& h)
+{
+  LOG((__FUNCTION__));
+  // XXX: Needs a lock
+  if (Cameras()->Callback()) {
+    Cameras()->Callback()->FrameSizeChange(w, h, 0);
+  } else {
+    LOG(("Frame size change with dead callback"));
+  }
+  return true;
 }
 
 bool
 CamerasChild::RecvCameraList(nsTArray<Camera>&& args)
 {
-  LOG(("RecvCameraList"));
+  LOG((__FUNCTION__));
   return true;
 }
 
 CamerasChild::CamerasChild()
+  : mCallback(nullptr)
 {
 #if defined(PR_LOGGING)
   if (!gCamerasChildLog)

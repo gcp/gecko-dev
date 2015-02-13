@@ -28,8 +28,9 @@ sync protocol PCameras
   manager PContent or PBackground;
 
 child:
-  DeliverFrame();
   CameraList(Camera[] args);
+  FrameSizeChange(int w, int h);
+  DeliverFrame(int size, uint32_t time_stamp, int64_t render_time);
 
 parent:
   EnumerateCameras();
@@ -42,7 +43,7 @@ parent:
   sync AllocateCaptureDevice(nsCString unique_idUTF8) returns (int numdev);
   sync ReleaseCaptureDevice(int numdev);
   sync StartCapture(int numdev, CaptureCapability capability);
-  sync StopCapture();
+  sync StopCapture(int numdev);
 
   __delete__();
 };

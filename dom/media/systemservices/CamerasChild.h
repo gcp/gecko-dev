@@ -11,9 +11,13 @@
 #include "mozilla/camera/PCamerasChild.h"
 #include "mozilla/camera/PCamerasParent.h"
 
-namespace webrtc {
-  struct CaptureCapability;
-}
+// conflicts with #include of scoped_ptr.h
+#undef FF
+#include "webrtc/common.h"
+// Video Engine
+#include "webrtc/video_engine/include/vie_base.h"
+#include "webrtc/video_engine/include/vie_capture.h"
+#include "webrtc/video_engine/include/vie_render.h"
 
 namespace mozilla {
 namespace camera {
@@ -31,17 +35,25 @@ int AllocateCaptureDevice(const char* unique_idUTF8,
                           const unsigned int unique_idUTF8Length,
                           int& capture_id);
 int ReleaseCaptureDevice(const int capture_id);
-
+int StartCapture(const int capture_id, webrtc::CaptureCapability& capability,
+                 webrtc::ExternalRenderer* func);
+int StopCapture(const int capture_id);
 
 class CamerasChild :
   public PCamerasChild
 {
 public:
-  virtual bool RecvDeliverFrame() MOZ_OVERRIDE;
+  virtual bool RecvDeliverFrame(const int&, const uint32_t&, const int64_t&) MOZ_OVERRIDE;
+  virtual bool RecvFrameSizeChange(const int& w, const int& h) MOZ_OVERRIDE;
   virtual bool RecvCameraList(nsTArray<Camera>&& args) MOZ_OVERRIDE;
+
+  webrtc::ExternalRenderer*& Callback() { return mCallback; };
 
   CamerasChild();
   virtual ~CamerasChild();
+
+private:
+  webrtc::ExternalRenderer* mCallback;
 };
 
 PCamerasChild* CreateCamerasChild();

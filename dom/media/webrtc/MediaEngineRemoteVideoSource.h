@@ -32,6 +32,7 @@
 // WebRTC library includes follow
 #include "webrtc/common.h"
 #include "webrtc/video_engine/include/vie_capture.h"
+#include "webrtc/video_engine/include/vie_render.h"
 
 #include "NullTransport.h"
 
@@ -40,20 +41,23 @@ namespace mozilla {
 /**
  * The WebRTC implementation of the MediaEngine interface.
  */
-class MediaEngineRemoteVideoSource : public MediaEngineCameraVideoSource
+class MediaEngineRemoteVideoSource : public MediaEngineCameraVideoSource,
+                                     public webrtc::ExternalRenderer
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
-  //ViEExternalRenderer.
-  //virtual int FrameSizeChange(unsigned int w, unsigned int h, unsigned int streams);
-  //virtual int DeliverFrame(unsigned char* buffer,
-  //                         int size,
-  //                         uint32_t time_stamp,
-  //                         int64_t render_time,
-  //                         void *handle);
-  //virtual bool IsTextureSupported() { return false; }
+  // ExternalRenderer
+  virtual int FrameSizeChange(unsigned int w, unsigned int h,
+                              unsigned int streams) MOZ_OVERRIDE;
+  virtual int DeliverFrame(unsigned char* buffer,
+                           int size,
+                           uint32_t time_stamp,
+                           int64_t render_time,
+                           void *handle) MOZ_OVERRIDE;
+  virtual bool IsTextureSupported() MOZ_OVERRIDE { return false; };
 
+  //
   MediaEngineRemoteVideoSource(int aIndex,
                                const char* aMonitorName = "RemoteVideo.Monitor");
 

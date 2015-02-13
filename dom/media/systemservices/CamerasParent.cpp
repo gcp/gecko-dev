@@ -10,10 +10,6 @@
 #include "MediaEngine.h"
 #include "prlog.h"
 
-#include "webrtc/video_engine/include/vie_base.h"
-#include "webrtc/video_engine/include/vie_capture.h"
-#undef FF
-
 PRLogModuleInfo *gCamerasParentLog;
 
 #undef LOG
@@ -28,6 +24,31 @@ PRLogModuleInfo *gCamerasParentLog;
 
 namespace mozilla {
 namespace camera {
+
+int
+CamerasParent::FrameSizeChange(unsigned int w, unsigned int h,
+                               unsigned int streams)
+{
+  LOG(("Video FrameSizeChange: %ux%u", w, h));
+  if (!SendFrameSizeChange(w, h)) {
+    return -1;
+  }
+  return 0;
+}
+
+int
+CamerasParent::DeliverFrame(unsigned char* buffer,
+                            int size,
+                            uint32_t time_stamp,
+                            int64_t render_time,
+                            void *handle)
+{
+  LOG((__FUNCTION__));
+  if (!SendDeliverFrame(size, time_stamp, render_time)) {
+    return -1;
+  }
+  return 0;
+}
 
 bool
 CamerasParent::RecvEnumerateCameras()
@@ -59,7 +80,11 @@ bool
 CamerasParent::RecvReleaseCaptureDevice(const int &numdev)
 {
   LOG(("RecvReleaseCamera device nr %d", numdev));
-  return false;
+  if (mPtrViECapture->ReleaseCaptureDevice(numdev)) {
+    return false;
+  }
+  LOG(("Freed device nr %d", numdev));
+  return true;
 }
 
 bool
@@ -81,6 +106,11 @@ CamerasParent::InitVideoEngine()
 
   mPtrViECapture = webrtc::ViECapture::GetInterface(mVideoEngine);
   if (!mPtrViECapture) {
+    return false;
+  }
+
+  mPtrViERender = webrtc::ViERender::GetInterface(mVideoEngine);
+  if (!mPtrViERender) {
     return false;
   }
 
@@ -216,15 +246,53 @@ CamerasParent::RecvGetCaptureDevice(const int& i,
 }
 
 bool
-CamerasParent::RecvStartCapture(const int&, const CaptureCapability&)
+CamerasParent::RecvStartCapture(const int& capnum,
+                                const CaptureCapability& ipcCaps)
 {
-  return false;
+  if (!EnsureInitialized()) {
+    LOG(("RecvStartCapture fails to initialize"));
+    return false;
+  }
+
+  int error = mPtrViERender->AddRenderer(capnum, webrtc::kVideoI420, (webrtc::ExternalRenderer*)this);
+  if (error == -1) {
+    return false;
+  }
+
+  error = mPtrViERender->StartRender(capnum);
+  if (error == -1) {
+    return false;
+  }
+
+  webrtc::CaptureCapability capability;
+  capability.width = ipcCaps.width();
+  capability.height = ipcCaps.height();
+  capability.maxFPS = ipcCaps.maxFPS();
+  capability.expectedCaptureDelay = ipcCaps.expectedCaptureDelay();
+  capability.rawType = static_cast<webrtc::RawVideoType>(ipcCaps.rawType());
+  capability.codecType = static_cast<webrtc::VideoCodecType>(ipcCaps.codecType());
+  capability.interlaced = ipcCaps.interlaced();
+
+  if (mPtrViECapture->StartCapture(capnum, capability) < 0) {
+    return false;
+  }
+
+  return true;
 }
 
 bool
-CamerasParent::RecvStopCapture()
+CamerasParent::RecvStopCapture(const int& capnum)
 {
-  return false;
+  if (!EnsureInitialized()) {
+    LOG(("RecvStopCapture fails to initialize"));
+    return false;
+  }
+
+  mPtrViERender->StopRender(capnum);
+  mPtrViERender->RemoveRenderer(capnum);
+  mPtrViECapture->StopCapture(capnum);
+
+  return true;
 }
 
 void

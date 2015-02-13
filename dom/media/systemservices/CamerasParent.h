@@ -10,20 +10,33 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/camera/PCamerasParent.h"
 
-namespace webrtc {
-  struct CaptureCapability;
-  struct VideoEngine;
-  struct ViEBase;
-  struct ViECapture;
-}
+// conflicts with #include of scoped_ptr.h
+#undef FF
+#include "webrtc/common.h"
+// Video Engine
+#include "webrtc/video_engine/include/vie_base.h"
+#include "webrtc/video_engine/include/vie_capture.h"
+#include "webrtc/video_engine/include/vie_render.h"
 
 namespace mozilla {
 namespace camera {
 
 class CamerasParent :
-  public PCamerasParent
+  public PCamerasParent,
+  public webrtc::ExternalRenderer
 {
 public:
+  //ViEExternalRenderer.
+  virtual int FrameSizeChange(unsigned int w, unsigned int h,
+                              unsigned int streams) MOZ_OVERRIDE;
+  virtual int DeliverFrame(unsigned char* buffer,
+                           int size,
+                           uint32_t time_stamp,
+                           int64_t render_time,
+                           void *handle) MOZ_OVERRIDE;
+  virtual bool IsTextureSupported() MOZ_OVERRIDE { return false; };
+
+  //
   virtual bool RecvEnumerateCameras() MOZ_OVERRIDE;
   virtual bool RecvAllocateCaptureDevice(const nsCString&, int *) MOZ_OVERRIDE;
   virtual bool RecvReleaseCaptureDevice(const int &) MOZ_OVERRIDE;
@@ -33,7 +46,7 @@ public:
                                         CaptureCapability*) MOZ_OVERRIDE;
   virtual bool RecvGetCaptureDevice(const int&, nsCString*, nsCString*) MOZ_OVERRIDE;
   virtual bool RecvStartCapture(const int&, const CaptureCapability&) MOZ_OVERRIDE;
-  virtual bool RecvStopCapture() MOZ_OVERRIDE;
+  virtual bool RecvStopCapture(const int&) MOZ_OVERRIDE;
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
   CamerasParent();
@@ -43,10 +56,11 @@ protected:
   bool InitVideoEngine();
   bool EnsureInitialized();
 
-  webrtc::VideoEngine* mVideoEngine;
+  webrtc::VideoEngine *mVideoEngine;
   bool mVideoEngineInit;
   webrtc::ViEBase *mPtrViEBase;
   webrtc::ViECapture *mPtrViECapture;
+  webrtc::ViERender *mPtrViERender;
 };
 
 PCamerasParent* CreateCamerasParent();
