@@ -30,7 +30,8 @@ sync protocol PCameras
 child:
   CameraList(Camera[] args);
   FrameSizeChange(int w, int h);
-  DeliverFrame(int size, uint32_t time_stamp, int64_t render_time);
+  // transfers ownership of |buffer| from parent to child
+  DeliverFrame(Shmem buffer, int size, uint32_t time_stamp, int64_t render_time);
 
 parent:
   EnumerateCameras();
@@ -44,6 +45,8 @@ parent:
   sync ReleaseCaptureDevice(int numdev);
   sync StartCapture(int numdev, CaptureCapability capability);
   sync StopCapture(int numdev);
+  // transfers frame back
+  async ReleaseFrame(Shmem s);
 
   __delete__();
 };

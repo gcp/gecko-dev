@@ -44,10 +44,29 @@ CamerasParent::DeliverFrame(unsigned char* buffer,
                             void *handle)
 {
   LOG((__FUNCTION__));
-  if (!SendDeliverFrame(size, time_stamp, render_time)) {
+
+  // Prepare video buffer
+  if (mShmem.Size<char>() != size) {
+    DeallocShmem(mShmem);
+    // this may fail; always check return value
+    if (!AllocShmem(size, SharedMemory::TYPE_BASIC, &mShmem)) {
+      return -1;
+    }
+  }
+
+  // get() and Size() check for proper alignment of the segment
+  memcpy(mShmem.get<char>(), buffer, size);
+
+  if (!SendDeliverFrame(mShmem, size, time_stamp, render_time)) {
     return -1;
   }
   return 0;
+}
+
+bool
+CamerasParent::RecvReleaseFrame(mozilla::ipc::Shmem&& s) {
+  mShmem = s;
+  return true;
 }
 
 bool
@@ -333,6 +352,8 @@ CamerasParent::~CamerasParent()
     mVideoEngine->SetTraceCallback(nullptr);
     webrtc::VideoEngine::Delete(mVideoEngine);
   }
+
+  DeallocShmem(mShmem);
 
   mVideoEngine = nullptr;
 }

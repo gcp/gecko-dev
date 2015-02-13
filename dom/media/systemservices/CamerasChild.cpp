@@ -164,12 +164,21 @@ int StopCapture(const int capture_id)
 }
 
 bool
-CamerasChild::RecvDeliverFrame(const int& size,
+CamerasChild::RecvDeliverFrame(mozilla::ipc::Shmem&& shmem,
+                               const int& size,
                                const uint32_t& time_stamp,
                                const int64_t& render_time)
 {
   LOG((__FUNCTION__));
-  return false;
+  if (Cameras()->Callback()) {
+    unsigned char* image = shmem.get<unsigned char>();
+    Cameras()->Callback()->DeliverFrame(image, size, time_stamp,
+                                        render_time, nullptr);
+    Cameras()->SendReleaseFrame(shmem);
+  } else {
+    LOG(("DeliverFrame called with dead callback"));
+  }
+  return true;
 }
 
 bool

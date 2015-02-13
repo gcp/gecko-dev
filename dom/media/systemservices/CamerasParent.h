@@ -9,6 +9,7 @@
 
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/camera/PCamerasParent.h"
+#include "mozilla/ipc/Shmem.h"
 
 // conflicts with #include of scoped_ptr.h
 #undef FF
@@ -47,6 +48,7 @@ public:
   virtual bool RecvGetCaptureDevice(const int&, nsCString*, nsCString*) MOZ_OVERRIDE;
   virtual bool RecvStartCapture(const int&, const CaptureCapability&) MOZ_OVERRIDE;
   virtual bool RecvStopCapture(const int&) MOZ_OVERRIDE;
+  virtual bool RecvReleaseFrame(mozilla::ipc::Shmem&&) MOZ_OVERRIDE;
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
   CamerasParent();
@@ -61,6 +63,9 @@ protected:
   webrtc::ViEBase *mPtrViEBase;
   webrtc::ViECapture *mPtrViECapture;
   webrtc::ViERender *mPtrViERender;
+
+  // image buffer
+  mozilla::ipc::Shmem mShmem;
 };
 
 PCamerasParent* CreateCamerasParent();
