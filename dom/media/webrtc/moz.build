@@ -22,7 +22,6 @@ if CONFIG['MOZ_WEBRTC']:
         'MediaEngineRemoteVideoSource.cpp',
         'MediaEngineTabVideoSource.cpp',
         'MediaEngineWebRTCAudio.cpp',
-        'MediaEngineWebRTCVideo.cpp',
         'MediaTrackConstraints.cpp',
     ]
     # MediaEngineWebRTC.cpp needs to be built separately.
