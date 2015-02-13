@@ -6,6 +6,7 @@
 
 #include "BroadcastChannelParent.h"
 #include "FileDescriptorSetParent.h"
+#include "CamerasParent.h"
 #include "mozilla/AppProcessChecker.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/ContentParent.h"
@@ -243,6 +244,20 @@ BackgroundParentImpl::DeallocPVsyncParent(PVsyncParent* aActor)
   // This actor already has one ref-count. Please check AllocPVsyncParent().
   nsRefPtr<mozilla::layout::VsyncParent> actor =
       dont_AddRef(static_cast<mozilla::layout::VsyncParent*>(aActor));
+  return true;
+}
+
+camera::PCamerasParent*
+BackgroundParentImpl::AllocPCamerasParent()
+{
+  return camera::CreateCamerasParent();
+}
+
+bool
+BackgroundParentImpl::DeallocPCamerasParent(camera::PCamerasParent *aActor)
+{
+  MOZ_ASSERT(aActor);
+ delete aActor;
   return true;
 }
 

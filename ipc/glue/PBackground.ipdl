@@ -8,6 +8,7 @@ include protocol PBlob;
 include protocol PBroadcastChannel;
 include protocol PFileDescriptorSet;
 include protocol PVsync;
+include protocol PCameras;
 
 include DOMTypes;
 include PBackgroundSharedTypes;
@@ -25,6 +26,7 @@ sync protocol PBackground
   manages PBroadcastChannel;
   manages PFileDescriptorSet;
   manages PVsync;
+  manages PCameras;
 
 parent:
   // Only called at startup during mochitests to check the basic infrastructure.
@@ -33,6 +35,8 @@ parent:
   PBackgroundIDBFactory(LoggingInfo loggingInfo);
 
   PVsync();
+
+  PCameras();
 
   PBroadcastChannel(PrincipalInfo pInfo, nsString origin, nsString channel);
 

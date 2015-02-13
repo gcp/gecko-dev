@@ -84,6 +84,12 @@ protected:
   virtual bool
   DeallocPBroadcastChannelParent(PBroadcastChannelParent* aActor) MOZ_OVERRIDE;
 
+  virtual PCamerasParent*
+  AllocPCamerasParent() MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPCamerasParent(PCamerasParent* aActor) MOZ_OVERRIDE;
+
   virtual bool
   RecvRegisterServiceWorker(const ServiceWorkerRegistrationData& aData)
                             MOZ_OVERRIDE;

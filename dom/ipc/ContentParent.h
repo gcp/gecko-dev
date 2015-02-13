@@ -297,6 +297,11 @@ public:
         return PContentParent::RecvPHalConstructor(aActor);
     }
 
+    virtual PCamerasParent* AllocPCamerasParent() MOZ_OVERRIDE;
+    virtual bool RecvPCamerasConstructor(PCamerasParent* aActor) MOZ_OVERRIDE {
+        return PContentParent::RecvPCamerasConstructor(aActor);
+    }
+
     virtual PStorageParent* AllocPStorageParent() MOZ_OVERRIDE;
     virtual bool RecvPStorageConstructor(PStorageParent* aActor) MOZ_OVERRIDE {
         return PContentParent::RecvPStorageConstructor(aActor);
@@ -548,6 +553,7 @@ private:
                                  const uint32_t& aFlags, bool* aIsSecureURI) MOZ_OVERRIDE;
 
     virtual bool DeallocPHalParent(PHalParent*) MOZ_OVERRIDE;
+    virtual bool DeallocPCamerasParent(PCamerasParent*) MOZ_OVERRIDE;
 
     virtual PMemoryReportRequestParent*
     AllocPMemoryReportRequestParent(const uint32_t& aGeneration,

@@ -7,6 +7,7 @@
 #include "ImageTypes.h"
 #include "ImageContainer.h"
 #include "mozilla/layers/GrallocTextureClient.h"
+#include "CamerasChild.h"
 #include "nsMemory.h"
 #include "mtransport/runnable_utils.h"
 #include "MediaTrackConstraints.h"
@@ -366,6 +367,8 @@ MediaEngineWebRTCVideoSource::Init()
   // Get interfaces for capture, render for now
   mViECapture = webrtc::ViECapture::GetInterface(mVideoEngine);
   mViERender = webrtc::ViERender::GetInterface(mVideoEngine);
+
+  camera::GetCameraList();
 
   if (mViECapture == nullptr || mViERender == nullptr) {
     return;

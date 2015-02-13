@@ -7,6 +7,7 @@
 #include "ActorsChild.h" // IndexedDB
 #include "BroadcastChannelChild.h"
 #include "FileDescriptorSetChild.h"
+#include "CamerasChild.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/PBlobChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
@@ -228,6 +229,20 @@ BackgroundChildImpl::DeallocPBroadcastChannelChild(
   nsRefPtr<dom::BroadcastChannelChild> child =
     dont_AddRef(static_cast<dom::BroadcastChannelChild*>(aActor));
   MOZ_ASSERT(child);
+  return true;
+}
+
+camera::PCamerasChild*
+BackgroundChildImpl::AllocPCamerasChild()
+{
+  return camera::CreateCamerasChild();
+}
+
+bool
+BackgroundChildImpl::DeallocPCamerasChild(camera::PCamerasChild *aActor)
+{
+  MOZ_ASSERT(aActor);
+  delete aActor;
   return true;
 }
 

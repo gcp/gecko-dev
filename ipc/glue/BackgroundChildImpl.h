@@ -71,6 +71,12 @@ protected:
   virtual bool
   DeallocPFileDescriptorSetChild(PFileDescriptorSetChild* aActor) MOZ_OVERRIDE;
 
+  virtual PCamerasChild*
+  AllocPCamerasChild() MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPCamerasChild(PCamerasChild* aActor) MOZ_OVERRIDE;
+
   virtual PVsyncChild*
   AllocPVsyncChild() MOZ_OVERRIDE;
 

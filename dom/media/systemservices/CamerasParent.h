@@ -1,0 +1,34 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set sw=2 ts=8 et ft=cpp : */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#ifndef mozilla_CamerasParent_h
+#define mozilla_CamerasParent_h
+
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/camera/PCamerasParent.h"
+
+namespace mozilla {
+namespace camera {
+
+class CamerasParent :
+  public PCamerasParent
+{
+public:
+  virtual bool RecvEnumerateCameras() MOZ_OVERRIDE;
+  virtual bool RecvAllocateCamera(bool* rv) MOZ_OVERRIDE;
+  virtual bool RecvReleaseCamera(bool* rv) MOZ_OVERRIDE;
+  virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  CamerasParent();
+  virtual ~CamerasParent();
+};
+
+PCamerasParent* CreateCamerasParent();
+
+} // namespace camera
+} // namespace mozilla
+
+#endif  // mozilla_CameraParent_h
