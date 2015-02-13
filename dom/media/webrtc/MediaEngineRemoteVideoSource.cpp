@@ -26,11 +26,22 @@ MediaEngineRemoteVideoSource::MediaEngineRemoteVideoSource(
 
 void
 MediaEngineRemoteVideoSource::Init() {
+  char deviceName[kMaxDeviceNameLength];
+  char uniqueId[kMaxUniqueIdLength];
+  if (mozilla::camera::GetCaptureDevice(mCaptureIndex,
+                                        deviceName, kMaxDeviceNameLength,
+                                        uniqueId, kMaxUniqueIdLength)) {
+    return;
+  }
+
+  CopyUTF8toUTF16(deviceName, mDeviceName);
+  CopyUTF8toUTF16(uniqueId, mUniqueId);
   return;
 }
 
 void
 MediaEngineRemoteVideoSource::Shutdown() {
+  // XXX: terminate PCameras / webrtc handles?
   return;
 }
 
@@ -122,8 +133,7 @@ MediaEngineRemoteVideoSource::SatisfiesConstraintSets(
 {
   NS_ConvertUTF16toUTF8 uniqueId(mUniqueId);
   //int num = mViECapture->NumberOfCapabilities(uniqueId.get(), kMaxUniqueIdLength);
-  int num = mozilla::camera::NumberOfCapabilities(uniqueId.get(),
-                                                  kMaxUniqueIdLength);
+  int num = mozilla::camera::NumberOfCapabilities(uniqueId.get());
   if (num <= 0) {
     return true;
   }

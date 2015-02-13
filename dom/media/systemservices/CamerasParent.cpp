@@ -116,9 +116,29 @@ CamerasParent::RecvNumberOfCaptureDevices(int* numdev)
 }
 
 bool
-CamerasParent::RecvNumberOfCapabilities(const nsCString&, int*)
+CamerasParent::RecvNumberOfCapabilities(const nsCString& unique_id,
+                                        int* numCaps)
 {
   LOG(("RecvNumberOfCapabilities"));
+  if (!EnsureInitialized()) {
+    *numCaps = 0;
+    LOG(("RecvNumberOfCapabilities fails to initialize"));
+    return false;
+  }
+
+  LOG(("Getting caps for %s", unique_id.get()));
+  int num = mPtrViECapture->NumberOfCapabilities(unique_id.get(),
+                                                 MediaEngineSource::kMaxUniqueIdLength
+                                                 );
+  *numCaps = num;
+  if (num < 0) {
+    LOG(("RecvNumberOfCapabilities couldn't find capabilities"));
+    return false;
+  } else {
+    LOG(("RecvNumberOfCapabilities: %d", *numCaps));
+    return true;
+  }
+
   return false;
 }
 

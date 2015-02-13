@@ -368,8 +368,6 @@ MediaEngineWebRTCVideoSource::Init()
   mViECapture = webrtc::ViECapture::GetInterface(mVideoEngine);
   mViERender = webrtc::ViERender::GetInterface(mVideoEngine);
 
-  camera::GetCameraList();
-
   if (mViECapture == nullptr || mViERender == nullptr) {
     return;
   }

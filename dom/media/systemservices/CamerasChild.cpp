@@ -60,11 +60,14 @@ void GetCameraList(void)
   Cameras()->SendEnumerateCameras();
 }
 
-int NumberOfCapabilities(const char* deviceUniqueIdUTF8,
-                         const unsigned int unique_idUTF8Length)
+int NumberOfCapabilities(const char* deviceUniqueIdUTF8)
 {
-  LOG(("NumberOfCapabilities"));
-  return 0;
+  int numCaps = 0;
+  LOG(("NumberOfCapabilities: %s", deviceUniqueIdUTF8));
+  nsCString unique_id(deviceUniqueIdUTF8);
+  Cameras()->SendNumberOfCapabilities(unique_id, &numCaps);
+  LOG(("Capture capability count: %d", numCaps));
+  return numCaps;
 }
 
 int GetCaptureCapability(const char* unique_idUTF8,
@@ -80,6 +83,8 @@ int NumberOfCaptureDevices()
 {
   int numCapDevs = 0;
   Cameras()->SendNumberOfCaptureDevices(&numCapDevs);
+  // Note: This is typically the first call, so there's no guarantee
+  // gLog is initialized yet before the Cameras() call.
   LOG(("Capture Devices: %d", numCapDevs));
   return numCapDevs;
 }
