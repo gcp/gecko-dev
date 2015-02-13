@@ -56,24 +56,26 @@ Cameras()
   return static_cast<CamerasChild*>(sCameras);
 }
 
-int NumberOfCapabilities(const char* deviceUniqueIdUTF8)
+int NumberOfCapabilities(CaptureEngine aCapEngine, const char* deviceUniqueIdUTF8)
 {
   int numCaps = 0;
-  LOG(("NumberOfCapabilities: %s", deviceUniqueIdUTF8));
+  LOG(("NumberOfCapabilities for %s", deviceUniqueIdUTF8));
   nsCString unique_id(deviceUniqueIdUTF8);
-  Cameras()->SendNumberOfCapabilities(unique_id, &numCaps);
+  Cameras()->SendNumberOfCapabilities(aCapEngine, unique_id, &numCaps);
   LOG(("Capture capability count: %d", numCaps));
   return numCaps;
 }
 
-int GetCaptureCapability(const char* unique_idUTF8,
+int GetCaptureCapability(CaptureEngine aCapEngine, const char* unique_idUTF8,
                          const unsigned int capability_number,
                          webrtc::CaptureCapability& capability)
 {
   LOG(("GetCaptureCapability: %s %d", unique_idUTF8, capability_number));
   nsCString unique_id(unique_idUTF8);
   CaptureCapability ipcCapability;
-  Cameras()->SendGetCaptureCapability(unique_id, capability_number, &ipcCapability);
+  Cameras()->SendGetCaptureCapability(aCapEngine,
+                                      unique_id,
+                                      capability_number, &ipcCapability);
   capability.width = ipcCapability.width();
   capability.height = ipcCapability.height();
   capability.maxFPS = ipcCapability.maxFPS();
@@ -84,17 +86,18 @@ int GetCaptureCapability(const char* unique_idUTF8,
   return 0;
 }
 
-int NumberOfCaptureDevices()
+int NumberOfCaptureDevices(CaptureEngine aCapEngine)
 {
   int numCapDevs = 0;
-  Cameras()->SendNumberOfCaptureDevices(&numCapDevs);
+  Cameras()->SendNumberOfCaptureDevices(aCapEngine, &numCapDevs);
   // Note: This is typically the first call, so there's no guarantee
   // gLog is initialized yet before the Cameras() call.
   LOG(("Capture Devices: %d", numCapDevs));
   return numCapDevs;
 }
 
-int GetCaptureDevice(unsigned int list_number, char* device_nameUTF8,
+int GetCaptureDevice(CaptureEngine aCapEngine,
+                     unsigned int list_number, char* device_nameUTF8,
                      const unsigned int device_nameUTF8Length,
                      char* unique_idUTF8,
                      const unsigned int unique_idUTF8Length)
@@ -102,7 +105,8 @@ int GetCaptureDevice(unsigned int list_number, char* device_nameUTF8,
   LOG((__PRETTY_FUNCTION__));
   nsCString device_name;
   nsCString unique_id;
-  if (Cameras()->SendGetCaptureDevice(list_number, &device_name, &unique_id)) {
+  if (Cameras()->SendGetCaptureDevice(aCapEngine,
+                                      list_number, &device_name, &unique_id)) {
     base::strlcpy(device_nameUTF8, device_name.get(), device_nameUTF8Length);
     base::strlcpy(unique_idUTF8, unique_id.get(), unique_idUTF8Length);
     LOG(("Got %s name %s id", device_nameUTF8, unique_idUTF8));
@@ -112,13 +116,15 @@ int GetCaptureDevice(unsigned int list_number, char* device_nameUTF8,
   }
 }
 
-int AllocateCaptureDevice(const char* unique_idUTF8,
+int AllocateCaptureDevice(CaptureEngine aCapEngine,
+                          const char* unique_idUTF8,
                           const unsigned int unique_idUTF8Length,
                           int& capture_id)
 {
   LOG((__PRETTY_FUNCTION__));
   nsCString unique_id(unique_idUTF8);
-  if (Cameras()->SendAllocateCaptureDevice(unique_id, &capture_id)) {
+  if (Cameras()->SendAllocateCaptureDevice(aCapEngine,
+                                           unique_id, &capture_id)) {
     LOG(("Success allocating %s %d", unique_idUTF8, capture_id));
     return 0;
   } else {
@@ -127,17 +133,18 @@ int AllocateCaptureDevice(const char* unique_idUTF8,
   }
 }
 
-int ReleaseCaptureDevice(const int capture_id)
+int ReleaseCaptureDevice(CaptureEngine aCapEngine, const int capture_id)
 {
   LOG((__PRETTY_FUNCTION__));
-  if (Cameras()->SendReleaseCaptureDevice(capture_id)) {
+  if (Cameras()->SendReleaseCaptureDevice(aCapEngine, capture_id)) {
     return 0;
   } else {
     return -1;
   }
 }
 
-int StartCapture(const int capture_id, webrtc::CaptureCapability& webrtcCaps,
+int StartCapture(CaptureEngine aCapEngine,
+                 const int capture_id, webrtc::CaptureCapability& webrtcCaps,
                  webrtc::ExternalRenderer* cb)
 {
   LOG((__PRETTY_FUNCTION__));
@@ -149,18 +156,18 @@ int StartCapture(const int capture_id, webrtc::CaptureCapability& webrtcCaps,
                            webrtcCaps.rawType,
                            webrtcCaps.codecType,
                            webrtcCaps.interlaced);
-  if (Cameras()->SendStartCapture(capture_id, capCap)) {
+  if (Cameras()->SendStartCapture(aCapEngine, capture_id, capCap)) {
     return 0;
   } else {
     return -1;
   }
 }
 
-int StopCapture(const int capture_id)
+int StopCapture(CaptureEngine aCapEngine, const int capture_id)
 
 {
   LOG((__PRETTY_FUNCTION__));
-  if (Cameras()->SendStopCapture(capture_id)) {
+  if (Cameras()->SendStopCapture(aCapEngine, capture_id)) {
     Cameras()->Callback() = nullptr;
     return 0;
   } else {

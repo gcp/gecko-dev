@@ -22,22 +22,37 @@
 namespace mozilla {
 namespace camera {
 
-int NumberOfCapabilities(const char* deviceUniqueIdUTF8);
-int GetCaptureCapability(const char* unique_idUTF8,
+enum CaptureEngine : int {
+  InvalidEngine,
+  ScreenEngine,
+  BrowserEngine,
+  WinEngine,
+  AppEngine,
+  CameraEngine
+};
+
+int NumberOfCapabilities(CaptureEngine aCapEngine,
+                         const char* deviceUniqueIdUTF8);
+int GetCaptureCapability(CaptureEngine aCapEngine,
+                         const char* unique_idUTF8,
                          const unsigned int capability_number,
                          webrtc::CaptureCapability& capability);
-int NumberOfCaptureDevices();
-int GetCaptureDevice(unsigned int list_number, char* device_nameUTF8,
+int NumberOfCaptureDevices(CaptureEngine aCapEngine);
+int GetCaptureDevice(CaptureEngine aCapEngine,
+                     unsigned int list_number, char* device_nameUTF8,
                      const unsigned int device_nameUTF8Length,
                      char* unique_idUTF8,
                      const unsigned int unique_idUTF8Length);
-int AllocateCaptureDevice(const char* unique_idUTF8,
+int AllocateCaptureDevice(CaptureEngine aCapEngine,
+                          const char* unique_idUTF8,
                           const unsigned int unique_idUTF8Length,
                           int& capture_id);
-int ReleaseCaptureDevice(const int capture_id);
-int StartCapture(const int capture_id, webrtc::CaptureCapability& capability,
+int ReleaseCaptureDevice(CaptureEngine aCapEngine,
+                         const int capture_id);
+int StartCapture(CaptureEngine aCapEngine,
+                 const int capture_id, webrtc::CaptureCapability& capability,
                  webrtc::ExternalRenderer* func);
-int StopCapture(const int capture_id);
+int StopCapture(CaptureEngine aCapEngine, const int capture_id);
 void Shutdown();
 
 class CamerasChild :

@@ -18,6 +18,7 @@
 #include "webrtc/video_engine/include/vie_base.h"
 #include "webrtc/video_engine/include/vie_capture.h"
 #include "webrtc/video_engine/include/vie_render.h"
+#include "CamerasChild.h"
 
 namespace mozilla {
 namespace camera {
@@ -38,15 +39,15 @@ public:
   virtual bool IsTextureSupported() MOZ_OVERRIDE { return false; };
 
   //
-  virtual bool RecvAllocateCaptureDevice(const nsCString&, int *) MOZ_OVERRIDE;
-  virtual bool RecvReleaseCaptureDevice(const int &) MOZ_OVERRIDE;
-  virtual bool RecvNumberOfCaptureDevices(int* numdev) MOZ_OVERRIDE;
-  virtual bool RecvNumberOfCapabilities(const nsCString&, int*) MOZ_OVERRIDE;
-  virtual bool RecvGetCaptureCapability(const nsCString&, const int&,
+  virtual bool RecvAllocateCaptureDevice(const int&, const nsCString&, int *) MOZ_OVERRIDE;
+  virtual bool RecvReleaseCaptureDevice(const int&, const int &) MOZ_OVERRIDE;
+  virtual bool RecvNumberOfCaptureDevices(const int&, int* numdev) MOZ_OVERRIDE;
+  virtual bool RecvNumberOfCapabilities(const int&, const nsCString&, int*) MOZ_OVERRIDE;
+  virtual bool RecvGetCaptureCapability(const int&, const nsCString&, const int&,
                                         CaptureCapability*) MOZ_OVERRIDE;
-  virtual bool RecvGetCaptureDevice(const int&, nsCString*, nsCString*) MOZ_OVERRIDE;
-  virtual bool RecvStartCapture(const int&, const CaptureCapability&) MOZ_OVERRIDE;
-  virtual bool RecvStopCapture(const int&) MOZ_OVERRIDE;
+  virtual bool RecvGetCaptureDevice(const int&, const int&, nsCString*, nsCString*) MOZ_OVERRIDE;
+  virtual bool RecvStartCapture(const int&, const int&, const CaptureCapability&) MOZ_OVERRIDE;
+  virtual bool RecvStopCapture(const int&, const int&) MOZ_OVERRIDE;
   virtual bool RecvReleaseFrame(mozilla::ipc::Shmem&&) MOZ_OVERRIDE;
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
@@ -61,14 +62,29 @@ public:
   virtual ~CamerasParent();
 
 protected:
-  bool InitVideoEngine();
-  bool EnsureInitialized();
+  bool SetupEngine(CaptureEngine aCapEngine);
+  void CloseActiveEngine();
+  bool EnsureInitialized(int aEngine);
 
-  webrtc::VideoEngine *mVideoEngine;
-  bool mVideoEngineInit;
+  // Kept active as long as the engine doesn't change
+  CaptureEngine mActiveEngine;
+  webrtc::Config mActiveConfig;
   webrtc::ViEBase *mPtrViEBase;
   webrtc::ViECapture *mPtrViECapture;
   webrtc::ViERender *mPtrViERender;
+
+  webrtc::VideoEngine* mCameraEngine;
+  webrtc::VideoEngine* mScreenEngine;
+  webrtc::VideoEngine* mBrowserEngine;
+  webrtc::VideoEngine* mWinEngine;
+  webrtc::VideoEngine* mAppEngine;
+
+  // Need this to avoid unneccesary WebRTC calls while enumerating.
+  bool mCameraEngineInit;
+  bool mScreenEngineInit;
+  bool mBrowserEngineInit;
+  bool mWinEngineInit;
+  bool mAppEngineInit;
 
   // image buffer
   bool mShmemInitialized;

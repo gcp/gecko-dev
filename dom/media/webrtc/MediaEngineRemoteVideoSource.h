@@ -33,6 +33,7 @@
 #include "webrtc/common.h"
 #include "webrtc/video_engine/include/vie_capture.h"
 #include "webrtc/video_engine/include/vie_render.h"
+#include "CamerasChild.h"
 
 #include "NullTransport.h"
 
@@ -58,7 +59,7 @@ public:
   virtual bool IsTextureSupported() MOZ_OVERRIDE { return false; };
 
   //
-  MediaEngineRemoteVideoSource(int aIndex,
+  MediaEngineRemoteVideoSource(int aIndex, mozilla::camera::CaptureEngine aCapEngine,
                                const char* aMonitorName = "RemoteVideo.Monitor");
 
   virtual nsresult Allocate(const VideoTrackConstraintsN& aConstraints,
@@ -86,6 +87,8 @@ private:
                                      const webrtc::CaptureCapability& aCandidate);
   void ChooseCapability(const VideoTrackConstraintsN &aConstraints,
                         const MediaEnginePrefs &aPrefs);
+
+  mozilla::camera::CaptureEngine mCapEngine;
 };
 
 }

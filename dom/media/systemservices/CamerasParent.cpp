@@ -150,9 +150,16 @@ CamerasParent::RecvReleaseFrame(mozilla::ipc::Shmem&& s) {
 }
 
 bool
-CamerasParent::RecvAllocateCaptureDevice(const nsCString& unique_id, int* numdev)
+CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
+                                         const nsCString& unique_id,
+                                         int* numdev)
 {
   LOG((__PRETTY_FUNCTION__));
+  if (!EnsureInitialized(aCapEngine)) {
+    LOG(("Fails to initialize"));
+    return false;
+  }
+
   if (mPtrViECapture->AllocateCaptureDevice(unique_id.get(),
                                             MediaEngineSource::kMaxUniqueIdLength,
                                             *numdev)) {
@@ -163,8 +170,15 @@ CamerasParent::RecvAllocateCaptureDevice(const nsCString& unique_id, int* numdev
 }
 
 bool
-CamerasParent::RecvReleaseCaptureDevice(const int &numdev)
+CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
+                                        const int &numdev)
 {
+  LOG((__PRETTY_FUNCTION__));
+  if (!EnsureInitialized(aCapEngine)) {
+    LOG(("Fails to initialize"));
+    return false;
+  }
+
   LOG(("RecvReleaseCamera device nr %d", numdev));
   if (mPtrViECapture->ReleaseCaptureDevice(numdev)) {
     return false;
@@ -174,41 +188,121 @@ CamerasParent::RecvReleaseCaptureDevice(const int &numdev)
 }
 
 bool
-CamerasParent::InitVideoEngine()
+CamerasParent::SetupEngine(CaptureEngine aCapEngine)
 {
-  mVideoEngine = webrtc::VideoEngine::Create();
-  if (!mVideoEngine) {
+  webrtc::VideoEngine *engine = nullptr;
+  bool *engineInit = nullptr;
+
+  switch (aCapEngine) {
+    case ScreenEngine:
+      if (!mScreenEngine) {
+        mActiveConfig.Set<webrtc::CaptureDeviceInfo>(
+          new webrtc::CaptureDeviceInfo(webrtc::CaptureDeviceType::Screen));
+        mScreenEngine = webrtc::VideoEngine::Create(mActiveConfig);
+      }
+      engine = mScreenEngine;
+      engineInit = &mScreenEngineInit;
+      break;
+    case BrowserEngine:
+      if (!mBrowserEngine) {
+        mActiveConfig.Set<webrtc::CaptureDeviceInfo>(
+          new webrtc::CaptureDeviceInfo(webrtc::CaptureDeviceType::Browser));
+        mBrowserEngine = webrtc::VideoEngine::Create(mActiveConfig);
+      }
+      engine = mBrowserEngine;
+      engineInit = &mBrowserEngineInit;
+      break;
+    case WinEngine:
+      if (!mWinEngine) {
+        mActiveConfig.Set<webrtc::CaptureDeviceInfo>(
+          new webrtc::CaptureDeviceInfo(webrtc::CaptureDeviceType::Window));
+        mWinEngine = webrtc::VideoEngine::Create(mActiveConfig);
+      }
+      engine = mWinEngine;
+      engineInit = &mWinEngineInit;
+      break;
+    case AppEngine:
+      if (!mAppEngine) {
+        mActiveConfig.Set<webrtc::CaptureDeviceInfo>(
+          new webrtc::CaptureDeviceInfo(webrtc::CaptureDeviceType::Application));
+        mAppEngine = webrtc::VideoEngine::Create(mActiveConfig);
+      }
+      engine = mAppEngine;
+      engineInit = &mAppEngineInit;
+      break;
+    case CameraEngine:
+      if (!mCameraEngine) {
+        mCameraEngine = webrtc::VideoEngine::Create();
+      }
+      engine = mCameraEngine;
+      engineInit = &mCameraEngineInit;
+      break;
+    default:
+      LOG(("Invalid webrtc Video engine"));
+      MOZ_CRASH();
+      break;
+  }
+
+  if (!engine) {
+    LOG(("VideoEngine::Create failed"));
     return false;
   }
 
-  mPtrViEBase = webrtc::ViEBase::GetInterface(mVideoEngine);
+  mPtrViEBase = webrtc::ViEBase::GetInterface(engine);
   if (!mPtrViEBase) {
+    LOG(("ViEBase::GetInterface failed"));
     return false;
   }
 
   if (mPtrViEBase->Init() < 0) {
+    LOG(("ViEBase::Init failed"));
     return false;
   }
 
-  mPtrViECapture = webrtc::ViECapture::GetInterface(mVideoEngine);
+  *engineInit = true;
+
+  mPtrViECapture = webrtc::ViECapture::GetInterface(engine);
   if (!mPtrViECapture) {
+    LOG(("ViECapture::GetInterface failed"));
     return false;
   }
 
-  mPtrViERender = webrtc::ViERender::GetInterface(mVideoEngine);
+  mPtrViERender = webrtc::ViERender::GetInterface(engine);
   if (!mPtrViERender) {
+    LOG(("ViERender::GetInterface failed"));
     return false;
   }
 
-  mVideoEngineInit = true;
+  mActiveEngine = aCapEngine;
   return true;
 }
 
-bool
-CamerasParent::EnsureInitialized()
+void
+CamerasParent::CloseActiveEngine()
 {
-  if (!mVideoEngineInit) {
-    if (!InitVideoEngine()) {
+  if(mPtrViEBase) {
+    mPtrViEBase->Release();
+    mPtrViEBase = nullptr;
+  }
+  if (mPtrViECapture) {
+    mPtrViECapture->Release();
+    mPtrViECapture = nullptr;
+  }
+  if (mPtrViERender) {
+    mPtrViERender->Release();
+    mPtrViERender = nullptr;
+  }
+}
+
+bool
+CamerasParent::EnsureInitialized(int aEngine)
+{
+  LOG((__PRETTY_FUNCTION__));
+  CaptureEngine capEngine = static_cast<CaptureEngine>(aEngine);
+  if (capEngine != mActiveEngine) {
+    LOG(("Engine type new: %d old: %d", aEngine, mActiveEngine));
+    CloseActiveEngine();
+    if (!SetupEngine(capEngine)) {
       return false;
     }
   }
@@ -217,10 +311,11 @@ CamerasParent::EnsureInitialized()
 }
 
 bool
-CamerasParent::RecvNumberOfCaptureDevices(int* numdev)
+CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine,
+                                          int* numdev)
 {
   LOG((__PRETTY_FUNCTION__));
-  if (!EnsureInitialized()) {
+  if (!EnsureInitialized(aCapEngine)) {
     *numdev = 0;
     LOG(("RecvNumberOfCaptureDevices fails to initialize"));
     return false;
@@ -238,11 +333,12 @@ CamerasParent::RecvNumberOfCaptureDevices(int* numdev)
 }
 
 bool
-CamerasParent::RecvNumberOfCapabilities(const nsCString& unique_id,
+CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
+                                        const nsCString& unique_id,
                                         int* numCaps)
 {
   LOG((__PRETTY_FUNCTION__));
-  if (!EnsureInitialized()) {
+  if (!EnsureInitialized(aCapEngine)) {
     *numCaps = 0;
     LOG(("RecvNumberOfCapabilities fails to initialize"));
     return false;
@@ -265,14 +361,18 @@ CamerasParent::RecvNumberOfCapabilities(const nsCString& unique_id,
 }
 
 bool
-CamerasParent::RecvGetCaptureCapability(const nsCString& unique_id, const int& num,
+CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
+                                        const nsCString& unique_id,
+                                        const int& num,
                                         CaptureCapability* capCapability)
 {
-  LOG(("RecvGetCaptureCapability: %s %d", unique_id.get(), num));
-  if (!EnsureInitialized()) {
-    LOG(("RecvGetCaptureCapability fails to initialize"));
+  LOG((__PRETTY_FUNCTION__));
+  if (!EnsureInitialized(aCapEngine)) {
+    LOG(("Fails to initialize"));
     return false;
   }
+
+  LOG(("RecvGetCaptureCapability: %s %d", unique_id.get(), num));
 
   webrtc::CaptureCapability webrtcCaps;
   int error = mPtrViECapture->GetCaptureCapability(unique_id.get(),
@@ -302,12 +402,14 @@ CamerasParent::RecvGetCaptureCapability(const nsCString& unique_id, const int& n
 }
 
 bool
-CamerasParent::RecvGetCaptureDevice(const int& i,
+CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
+                                    const int& i,
                                     nsCString* aName,
                                     nsCString* aUniqueId)
 {
-  if (!EnsureInitialized()) {
-    LOG(("RecvGetCaptureDevice fails to initialize"));
+  LOG((__PRETTY_FUNCTION__));
+  if (!EnsureInitialized(aCapEngine)) {
+    LOG(("Fails to initialize"));
     return false;
   }
 
@@ -332,11 +434,13 @@ CamerasParent::RecvGetCaptureDevice(const int& i,
 }
 
 bool
-CamerasParent::RecvStartCapture(const int& capnum,
+CamerasParent::RecvStartCapture(const int& aCapEngine,
+                                const int& capnum,
                                 const CaptureCapability& ipcCaps)
 {
-  if (!EnsureInitialized()) {
-    LOG(("RecvStartCapture fails to initialize"));
+  LOG((__PRETTY_FUNCTION__));
+  if (!EnsureInitialized(aCapEngine)) {
+    LOG(("Failure to initialize"));
     return false;
   }
 
@@ -367,10 +471,12 @@ CamerasParent::RecvStartCapture(const int& capnum,
 }
 
 bool
-CamerasParent::RecvStopCapture(const int& capnum)
+CamerasParent::RecvStopCapture(const int& aCapEngine,
+                               const int& capnum)
 {
-  if (!EnsureInitialized()) {
-    LOG(("RecvStopCapture fails to initialize"));
+  LOG((__PRETTY_FUNCTION__));
+  if (!EnsureInitialized(aCapEngine)) {
+    LOG(("Failure to initialize"));
     return false;
   }
 
@@ -389,8 +495,20 @@ CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 CamerasParent::CamerasParent()
-  : mVideoEngine(nullptr), mVideoEngineInit(false),
-    mPtrViEBase(nullptr), mPtrViECapture(nullptr),
+  : mActiveEngine(InvalidEngine),
+    mPtrViEBase(nullptr),
+    mPtrViECapture(nullptr),
+    mPtrViERender(nullptr),
+    mCameraEngine(nullptr),
+    mScreenEngine(nullptr),
+    mBrowserEngine(nullptr),
+    mWinEngine(nullptr),
+    mAppEngine(nullptr),
+    mCameraEngineInit(false),
+    mScreenEngineInit(false),
+    mBrowserEngineInit(false),
+    mWinEngineInit(false),
+    mAppEngineInit(false),
     mShmemInitialized(false)
 {
 #if defined(PR_LOGGING)
@@ -411,23 +529,36 @@ CamerasParent::~CamerasParent()
 
   MOZ_COUNT_DTOR(CamerasParent);
 
-  if(mPtrViEBase) {
-    mPtrViEBase->Release();
-    mPtrViEBase = nullptr;
-  }
-  if (mPtrViECapture) {
-    mPtrViECapture->Release();
-    mPtrViECapture = nullptr;
-  }
+  CloseActiveEngine();
 
-  if (mVideoEngine) {
-    mVideoEngine->SetTraceCallback(nullptr);
-    webrtc::VideoEngine::Delete(mVideoEngine);
+  if (mCameraEngine) {
+    mCameraEngine->SetTraceCallback(nullptr);
+    webrtc::VideoEngine::Delete(mCameraEngine);
+  }
+  if (mScreenEngine) {
+    mScreenEngine->SetTraceCallback(nullptr);
+    webrtc::VideoEngine::Delete(mScreenEngine);
+  }
+  if (mWinEngine) {
+    mWinEngine->SetTraceCallback(nullptr);
+    webrtc::VideoEngine::Delete(mWinEngine);
+  }
+  if (mBrowserEngine) {
+    mBrowserEngine->SetTraceCallback(nullptr);
+    webrtc::VideoEngine::Delete(mBrowserEngine);
+  }
+  if (mAppEngine) {
+    mAppEngine->SetTraceCallback(nullptr);
+    webrtc::VideoEngine::Delete(mAppEngine);
   }
 
   DeallocShmem(mShmem);
 
-  mVideoEngine = nullptr;
+  mCameraEngine = nullptr;
+  mScreenEngine = nullptr;
+  mWinEngine = nullptr;
+  mBrowserEngine = nullptr;
+  mAppEngine = nullptr;
 }
 
 PCamerasParent* CreateCamerasParent() {

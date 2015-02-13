@@ -29,16 +29,17 @@ child:
   async DeliverFrame(Shmem buffer, int size, uint32_t time_stamp, int64_t render_time);
 
 parent:
-  sync NumberOfCaptureDevices() returns (int numdev);
-  sync NumberOfCapabilities(nsCString deviceUniqueIdUTF8) returns (int numcap);
-  sync GetCaptureCapability(nsCString unique_idUTF8, int capability_number)
+  sync NumberOfCaptureDevices(int engine) returns (int numdev);
+  sync NumberOfCapabilities(int engine, nsCString deviceUniqueIdUTF8)
+       returns (int numcap);
+  sync GetCaptureCapability(int engine, nsCString unique_idUTF8, int capability_number)
                             returns (CaptureCapability capability);
-  sync GetCaptureDevice(int num) returns (nsCString device_name, nsCString device_id);
+  sync GetCaptureDevice(int engine, int num) returns (nsCString device_name, nsCString device_id);
 
-  sync AllocateCaptureDevice(nsCString unique_idUTF8) returns (int numdev);
-  sync ReleaseCaptureDevice(int numdev);
-  sync StartCapture(int numdev, CaptureCapability capability);
-  sync StopCapture(int numdev);
+  sync AllocateCaptureDevice(int engine, nsCString unique_idUTF8) returns (int numdev);
+  sync ReleaseCaptureDevice(int engine, int numdev);
+  sync StartCapture(int engine, int numdev, CaptureCapability capability);
+  sync StopCapture(int engine, int numdev);
   // transfers frame back
   async ReleaseFrame(Shmem s);
 

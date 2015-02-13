@@ -48,6 +48,7 @@
 #include "webrtc/video_engine/include/vie_codec.h"
 #include "webrtc/video_engine/include/vie_render.h"
 #include "webrtc/video_engine/include/vie_capture.h"
+#include "CamerasChild.h"
 
 #include "NullTransport.h"
 #include "AudioOutputObserver.h"
@@ -263,23 +264,11 @@ private:
 
   nsCOMPtr<nsIThread> mThread;
 
+  //XXX: what is this really locking?
   Mutex mMutex;
-
-  // protected with mMutex:
-  webrtc::VideoEngine* mScreenEngine;
-  webrtc::VideoEngine* mBrowserEngine;
-  webrtc::VideoEngine* mWinEngine;
-  webrtc::VideoEngine* mAppEngine;
-  webrtc::VideoEngine* mVideoEngine;
   webrtc::VoiceEngine* mVoiceEngine;
-
-  // Need this to avoid unneccesary WebRTC calls while enumerating.
-  bool mVideoEngineInit;
   bool mAudioEngineInit;
-  bool mScreenEngineInit;
-  bool mBrowserEngineInit;
-  bool mWinEngineInit;
-  bool mAppEngineInit;
+
   bool mHasTabVideoSource;
 
   // Store devices we've already seen in a hashtable for quick return.

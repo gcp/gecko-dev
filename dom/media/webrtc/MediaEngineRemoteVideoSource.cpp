@@ -27,8 +27,9 @@ using dom::ConstrainLongRange;
 NS_IMPL_ISUPPORTS0(MediaEngineRemoteVideoSource)
 
 MediaEngineRemoteVideoSource::MediaEngineRemoteVideoSource(
-  int aIndex, const char* aMonitorName)
-  : MediaEngineCameraVideoSource(aIndex, aMonitorName)
+  int aIndex, mozilla::camera::CaptureEngine aCapEngine, const char* aMonitorName)
+  : MediaEngineCameraVideoSource(aIndex, aMonitorName),
+    mCapEngine(aCapEngine)
 {
   Init();
 }
@@ -38,7 +39,8 @@ MediaEngineRemoteVideoSource::Init() {
   LOG((__PRETTY_FUNCTION__));
   char deviceName[kMaxDeviceNameLength];
   char uniqueId[kMaxUniqueIdLength];
-  if (mozilla::camera::GetCaptureDevice(mCaptureIndex,
+  if (mozilla::camera::GetCaptureDevice(mCapEngine,
+                                        mCaptureIndex,
                                         deviceName, kMaxDeviceNameLength,
                                         uniqueId, kMaxUniqueIdLength)) {
     return;
@@ -67,7 +69,8 @@ MediaEngineRemoteVideoSource::Allocate(const VideoTrackConstraintsN& aConstraint
   LOG((__PRETTY_FUNCTION__));
 
   ChooseCapability(aConstraints, aPrefs);
-  if (mozilla::camera::AllocateCaptureDevice(NS_ConvertUTF16toUTF8(mUniqueId).get(),
+  if (mozilla::camera::AllocateCaptureDevice(mCapEngine,
+                                             NS_ConvertUTF16toUTF8(mUniqueId).get(),
                                              kMaxUniqueIdLength, mCaptureIndex)) {
     return NS_ERROR_FAILURE;
   }
@@ -85,7 +88,7 @@ MediaEngineRemoteVideoSource::Deallocate()
     if (mState != kStopped && mState != kAllocated) {
       return NS_ERROR_FAILURE;
     }
-    mozilla::camera::ReleaseCaptureDevice(mCaptureIndex);
+    mozilla::camera::ReleaseCaptureDevice(mCapEngine, mCaptureIndex);
     mState = kReleased;
     LOG(("Video device %d deallocated", mCaptureIndex));
   } else {
@@ -117,7 +120,8 @@ MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
   mState = kStarted;
   mTrackID = aID;
 
-  if (mozilla::camera::StartCapture(mCaptureIndex, mCapability, this)) {
+  if (mozilla::camera::StartCapture(mCapEngine,
+                                    mCaptureIndex, mCapability, this)) {
     LOG(("StartCapture failed"));
     return NS_ERROR_FAILURE;
   }
@@ -152,7 +156,7 @@ MediaEngineRemoteVideoSource::Stop(mozilla::SourceMediaStream* aSource,
     mImage = nullptr;
   }
 
-  mozilla::camera::StopCapture(mCaptureIndex);
+  mozilla::camera::StopCapture(mCapEngine, mCaptureIndex);
 
   return NS_OK;
 }
@@ -271,7 +275,7 @@ MediaEngineRemoteVideoSource::SatisfiesConstraintSets(
       const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets)
 {
   NS_ConvertUTF16toUTF8 uniqueId(mUniqueId);
-  int num = mozilla::camera::NumberOfCapabilities(uniqueId.get());
+  int num = mozilla::camera::NumberOfCapabilities(mCapEngine, uniqueId.get());
   if (num <= 0) {
     return true;
   }
@@ -284,7 +288,8 @@ MediaEngineRemoteVideoSource::SatisfiesConstraintSets(
   for (size_t j = 0; j < aConstraintSets.Length(); j++) {
     for (size_t i = 0; i < candidateSet.Length();  ) {
       webrtc::CaptureCapability cap;
-      mozilla::camera::GetCaptureCapability(uniqueId.get(),
+      mozilla::camera::GetCaptureCapability(mCapEngine,
+                                            uniqueId.get(),
                                             candidateSet[i], cap);
       if (!SatisfiesConstraintSet(*aConstraintSets[j], cap)) {
         candidateSet.RemoveElementAt(i);
@@ -302,7 +307,7 @@ MediaEngineRemoteVideoSource::ChooseCapability(
     const MediaEnginePrefs &aPrefs)
 {
   NS_ConvertUTF16toUTF8 uniqueId(mUniqueId);
-  int num = mozilla::camera::NumberOfCapabilities(uniqueId.get());
+  int num = mozilla::camera::NumberOfCapabilities(mCapEngine, uniqueId.get());
   if (num <= 0) {
     // Mac doesn't support capabilities.
     return GuessCapability(aConstraints, aPrefs);
@@ -322,7 +327,8 @@ MediaEngineRemoteVideoSource::ChooseCapability(
 
   for (uint32_t i = 0; i < candidateSet.Length();) {
     webrtc::CaptureCapability cap;
-    mozilla::camera::GetCaptureCapability(uniqueId.get(),
+    mozilla::camera::GetCaptureCapability(mCapEngine,
+                                          uniqueId.get(),
                                           candidateSet[i], cap);
     if (!SatisfiesConstraintSet(aConstraints.mRequired, cap)) {
       candidateSet.RemoveElementAt(i);
@@ -342,7 +348,8 @@ MediaEngineRemoteVideoSource::ChooseCapability(
       CapabilitySet rejects;
       for (uint32_t j = 0; j < candidateSet.Length();) {
         webrtc::CaptureCapability cap;
-        mozilla::camera::GetCaptureCapability(uniqueId.get(),
+        mozilla::camera::GetCaptureCapability(mCapEngine,
+                                              uniqueId.get(),
                                               candidateSet[j], cap);
         if (!SatisfiesConstraintSet(array[i], cap)) {
           rejects.AppendElement(candidateSet[j]);
@@ -369,7 +376,8 @@ MediaEngineRemoteVideoSource::ChooseCapability(
   webrtc::CaptureCapability cap;
   bool higher = true;
   for (uint32_t i = 0; i < candidateSet.Length(); i++) {
-    mozilla::camera::GetCaptureCapability(NS_ConvertUTF16toUTF8(mUniqueId).get(),
+    mozilla::camera::GetCaptureCapability(mCapEngine,
+                                          NS_ConvertUTF16toUTF8(mUniqueId).get(),
                                           candidateSet[i], cap);
     if (higher) {
       if (i == 0 ||
