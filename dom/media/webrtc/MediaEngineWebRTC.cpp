@@ -48,6 +48,7 @@ namespace mozilla {
 
 MediaEngineWebRTC::MediaEngineWebRTC(MediaEnginePrefs &aPrefs)
   : mMutex("mozilla::MediaEngineWebRTC"),
+    mVoiceEngine(nullptr),
     mAudioEngineInit(false)
 {
 #ifndef MOZ_B2G_CAMERA
