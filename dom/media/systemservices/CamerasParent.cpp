@@ -8,6 +8,7 @@
 #include "CamerasParent.h"
 #include "CamerasUtils.h"
 #include "MediaEngine.h"
+#include "nsThreadUtils.h"
 #include "prlog.h"
 
 PRLogModuleInfo *gCamerasParentLog;
@@ -25,14 +26,106 @@ PRLogModuleInfo *gCamerasParentLog;
 namespace mozilla {
 namespace camera {
 
+static CamerasParent* sCamerasParent = nullptr;
+
+class FrameSizeChangeRunnable : public nsRunnable {
+public:
+  FrameSizeChangeRunnable(unsigned int aWidth, unsigned int aHeight)
+    : mWidth(aWidth), mHeight(aHeight) {};
+
+  NS_IMETHOD Run() {
+    if (!sCamerasParent->SendFrameSizeChange(mWidth, mHeight)) {
+      mResult = -1;
+    } else {
+      mResult = 0;
+    }
+    return NS_OK;
+  }
+
+  int GetResult() {
+    return mResult;
+  }
+
+private:
+  unsigned int mWidth;
+  unsigned int mHeight;
+  int mResult;
+};
+
 int
 CamerasParent::FrameSizeChange(unsigned int w, unsigned int h,
                                unsigned int streams)
 {
   LOG(("Video FrameSizeChange: %ux%u", w, h));
-  if (!SendFrameSizeChange(w, h)) {
+  nsRefPtr<FrameSizeChangeRunnable> runnable = new FrameSizeChangeRunnable(w, h);
+  mPBackgroundThread->Dispatch(runnable, NS_DISPATCH_SYNC);
+  return runnable->GetResult();
+}
+
+class DeliverFrameRunnable : public nsRunnable {
+public:
+  DeliverFrameRunnable(unsigned char* buffer,
+                       int size,
+                       uint32_t time_stamp,
+                       int64_t render_time)
+    : mBuffer(buffer), mSize(size),
+      mTimeStamp(time_stamp), mRenderTime(render_time) {};
+
+  NS_IMETHOD Run() {
+    if (!sCamerasParent->DeliverFrameOverIPC(mBuffer, mSize, mTimeStamp, mRenderTime)) {
+      mResult = -1;
+    } else {
+      mResult = 0;
+    }
+    return NS_OK;
+  }
+
+  int GetResult() {
+    return mResult;
+  }
+
+private:
+  unsigned char* mBuffer;
+  int mSize;
+  uint32_t mTimeStamp;
+  int64_t mRenderTime;
+  int mResult;
+};
+
+int
+CamerasParent::DeliverFrameOverIPC(unsigned char* buffer,
+                                   int size,
+                                   uint32_t time_stamp,
+                                   int64_t render_time)
+{
+
+  if (!mShmemInitialized) {
+    AllocShmem(size, SharedMemory::TYPE_BASIC, &mShmem);
+    mShmemInitialized = true;
+  }
+
+  if (!mShmem.IsWritable()) {
+    LOG(("Video shmem is not writeable in DeliverFrame"));
     return -1;
   }
+
+  // Prepare video buffer
+  if (mShmem.Size<char>() != size) {
+    DeallocShmem(mShmem);
+    // this may fail; always check return value
+    if (!AllocShmem(size, SharedMemory::TYPE_BASIC, &mShmem)) {
+      LOG(("Failure allocating new size video buffer"));
+      return -1;
+    }
+  }
+
+  // get() and Size() check for proper alignment of the segment
+  memcpy(mShmem.get<char>(), buffer, size);
+
+  if (!SendDeliverFrame(mShmem, size, time_stamp, render_time)) {
+    return -1;
+  }
+
   return 0;
 }
 
@@ -44,41 +137,15 @@ CamerasParent::DeliverFrame(unsigned char* buffer,
                             void *handle)
 {
   LOG((__FUNCTION__));
-
-  // Prepare video buffer
-  if (mShmem.Size<char>() != size) {
-    DeallocShmem(mShmem);
-    // this may fail; always check return value
-    if (!AllocShmem(size, SharedMemory::TYPE_BASIC, &mShmem)) {
-      return -1;
-    }
-  }
-
-  // get() and Size() check for proper alignment of the segment
-  memcpy(mShmem.get<char>(), buffer, size);
-
-  if (!SendDeliverFrame(mShmem, size, time_stamp, render_time)) {
-    return -1;
-  }
-  return 0;
+  nsRefPtr<DeliverFrameRunnable> runnable =
+    new DeliverFrameRunnable(buffer, size, time_stamp, render_time);
+  mPBackgroundThread->Dispatch(runnable, NS_DISPATCH_SYNC);
+  return runnable->GetResult();
 }
 
 bool
 CamerasParent::RecvReleaseFrame(mozilla::ipc::Shmem&& s) {
   mShmem = s;
-  return true;
-}
-
-bool
-CamerasParent::RecvEnumerateCameras()
-{
-  LOG(("RecvEnumerateCamereas()"));
-  nsTArray<Camera> cameras;
-
-  if (!SendCameraList(cameras)) {
-    return false;
-  }
-
   return true;
 }
 
@@ -322,13 +389,17 @@ CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
 
 CamerasParent::CamerasParent()
   : mVideoEngine(nullptr), mVideoEngineInit(false),
-    mPtrViEBase(nullptr), mPtrViECapture(nullptr)
+    mPtrViEBase(nullptr), mPtrViECapture(nullptr),
+    mShmemInitialized(false)
 {
 #if defined(PR_LOGGING)
   if (!gCamerasParentLog)
     gCamerasParentLog = PR_NewLogModule("CamerasParent");
 #endif
   LOG(("CamerasParent: %p", this));
+
+  mPBackgroundThread = NS_GetCurrentThread();
+  sCamerasParent = this;
 
   MOZ_COUNT_CTOR(CamerasParent);
 }

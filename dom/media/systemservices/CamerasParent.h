@@ -38,7 +38,6 @@ public:
   virtual bool IsTextureSupported() MOZ_OVERRIDE { return false; };
 
   //
-  virtual bool RecvEnumerateCameras() MOZ_OVERRIDE;
   virtual bool RecvAllocateCaptureDevice(const nsCString&, int *) MOZ_OVERRIDE;
   virtual bool RecvReleaseCaptureDevice(const int &) MOZ_OVERRIDE;
   virtual bool RecvNumberOfCaptureDevices(int* numdev) MOZ_OVERRIDE;
@@ -50,6 +49,13 @@ public:
   virtual bool RecvStopCapture(const int&) MOZ_OVERRIDE;
   virtual bool RecvReleaseFrame(mozilla::ipc::Shmem&&) MOZ_OVERRIDE;
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  // forwarded to PBackground thread
+  int DeliverFrameOverIPC(unsigned char* buffer,
+                          int size,
+                          uint32_t time_stamp,
+                          int64_t render_time);
+
 
   CamerasParent();
   virtual ~CamerasParent();
@@ -65,7 +71,11 @@ protected:
   webrtc::ViERender *mPtrViERender;
 
   // image buffer
+  bool mShmemInitialized;
   mozilla::ipc::Shmem mShmem;
+
+  // PBackground parent thread
+  nsCOMPtr<nsIThread> mPBackgroundThread;
 };
 
 PCamerasParent* CreateCamerasParent();

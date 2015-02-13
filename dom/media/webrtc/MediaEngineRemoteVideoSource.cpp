@@ -11,6 +11,15 @@
 #include "MediaTrackConstraints.h"
 #include "CamerasChild.h"
 
+#ifdef PR_LOGGING
+extern PRLogModuleInfo* GetMediaManagerLog();
+#define LOG(msg) PR_LOG(GetMediaManagerLog(), PR_LOG_DEBUG, msg)
+#define LOGFRAME(msg) PR_LOG(GetMediaManagerLog(), 6, msg)
+#else
+#define LOG(msg)
+#define LOGFRAME(msg)
+#endif
+
 namespace mozilla {
 
 using dom::ConstrainLongRange;
@@ -36,6 +45,9 @@ MediaEngineRemoteVideoSource::Init() {
 
   CopyUTF8toUTF16(deviceName, mDeviceName);
   CopyUTF8toUTF16(uniqueId, mUniqueId);
+
+  mInitDone = true;
+
   return;
 }
 
@@ -84,6 +96,7 @@ MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
 {
   LOG((__FUNCTION__));
   if (!mInitDone || !aStream) {
+    LOG(("No stream or init not done"));
     return NS_ERROR_FAILURE;
   }
 
@@ -93,6 +106,7 @@ MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
   aStream->AdvanceKnownTracksTime(STREAM_TIME_MAX);
 
   if (mState == kStarted) {
+    LOG(("State is not started"));
     return NS_OK;
   }
   mImageContainer = layers::LayerManager::CreateImageContainer();
@@ -101,6 +115,7 @@ MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
   mTrackID = aID;
 
   if (mozilla::camera::StartCapture(mCaptureIndex, mCapability, this)) {
+    LOG(("StartCapture failed"));
     return NS_ERROR_FAILURE;
   }
 

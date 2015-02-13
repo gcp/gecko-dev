@@ -117,8 +117,10 @@ int AllocateCaptureDevice(const char* unique_idUTF8,
   LOG((__FUNCTION__));
   nsCString unique_id(unique_idUTF8);
   if (Cameras()->SendAllocateCaptureDevice(unique_id, &capture_id)) {
+    LOG(("Success allocating %s %d", unique_idUTF8, capture_id));
     return 0;
   } else {
+    LOG(("Failure allocating capture device %s %d", unique_idUTF8, capture_id));
     return -1;
   }
 }
@@ -191,13 +193,6 @@ CamerasChild::RecvFrameSizeChange(const int& w, const int& h)
   } else {
     LOG(("Frame size change with dead callback"));
   }
-  return true;
-}
-
-bool
-CamerasChild::RecvCameraList(nsTArray<Camera>&& args)
-{
-  LOG((__FUNCTION__));
   return true;
 }
 

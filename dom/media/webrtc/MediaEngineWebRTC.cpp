@@ -262,7 +262,7 @@ MediaEngineWebRTC::EnumerateVideoDevices(dom::MediaSourceEnum aMediaSource,
 
     //webrtc::CaptureCapability cap;
     //int numCaps = ptrViECapture->NumberOfCapabilities(uniqueId,
-                                                      MediaEngineSource::kMaxUniqueIdLength);
+    //                                                  MediaEngineSource::kMaxUniqueIdLength);
   //LOG(("Number of Capabilities %d", numCaps));
   // for (int j = 0; j < numCaps; j++) {
   //    if (ptrViECapture->GetCaptureCapability(uniqueId,

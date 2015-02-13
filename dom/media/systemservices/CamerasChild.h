@@ -46,7 +46,6 @@ public:
   virtual bool RecvDeliverFrame(mozilla::ipc::Shmem&&,
                                 const int&, const uint32_t&, const int64_t&) MOZ_OVERRIDE;
   virtual bool RecvFrameSizeChange(const int& w, const int& h) MOZ_OVERRIDE;
-  virtual bool RecvCameraList(nsTArray<Camera>&& args) MOZ_OVERRIDE;
 
   webrtc::ExternalRenderer*& Callback() { return mCallback; };
 

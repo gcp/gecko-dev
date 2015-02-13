@@ -8,10 +8,6 @@ include protocol PBackground;
 namespace mozilla {
 namespace camera {
 
-struct Camera
-{
-};
-
 struct CaptureCapability
 {
   int width;
@@ -28,13 +24,11 @@ sync protocol PCameras
   manager PContent or PBackground;
 
 child:
-  CameraList(Camera[] args);
-  FrameSizeChange(int w, int h);
+  async FrameSizeChange(int w, int h);
   // transfers ownership of |buffer| from parent to child
-  DeliverFrame(Shmem buffer, int size, uint32_t time_stamp, int64_t render_time);
+  async DeliverFrame(Shmem buffer, int size, uint32_t time_stamp, int64_t render_time);
 
 parent:
-  EnumerateCameras();
   sync NumberOfCaptureDevices() returns (int numdev);
   sync NumberOfCapabilities(nsCString deviceUniqueIdUTF8) returns (int numcap);
   sync GetCaptureCapability(nsCString unique_idUTF8, int capability_number)
