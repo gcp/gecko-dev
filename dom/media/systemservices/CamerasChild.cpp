@@ -110,7 +110,7 @@ CamerasChild::RecvDeliverFrame()
 }
 
 bool
-CamerasChild::RecvCameraList(const nsTArray<Camera>& args)
+CamerasChild::RecvCameraList(nsTArray<Camera>&& args)
 {
   LOG(("RecvCameraList"));
   return true;

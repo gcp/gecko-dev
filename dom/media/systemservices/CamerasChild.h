@@ -36,7 +36,7 @@ class CamerasChild :
 {
 public:
   virtual bool RecvDeliverFrame() MOZ_OVERRIDE;
-  virtual bool RecvCameraList(const nsTArray<Camera>& args) MOZ_OVERRIDE;
+  virtual bool RecvCameraList(nsTArray<Camera>&& args) MOZ_OVERRIDE;
 
   CamerasChild();
   virtual ~CamerasChild();
