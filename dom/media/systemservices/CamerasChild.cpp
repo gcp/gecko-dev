@@ -54,12 +54,6 @@ Cameras()
   return sCameras;
 }
 
-void GetCameraList(void)
-{
-  LOG(("GetCameraList"));
-  Cameras()->SendEnumerateCameras();
-}
-
 int NumberOfCapabilities(const char* deviceUniqueIdUTF8)
 {
   int numCaps = 0;
@@ -75,7 +69,17 @@ int GetCaptureCapability(const char* unique_idUTF8,
                          const unsigned int capability_number,
                          webrtc::CaptureCapability& capability)
 {
-  LOG(("GetCaptureCapability"));
+  LOG(("GetCaptureCapability: %s %d", unique_idUTF8, capability_number));
+  nsCString unique_id(unique_idUTF8);
+  CaptureCapability ipcCapability;
+  Cameras()->SendGetCaptureCapability(unique_id, capability_number, &ipcCapability);
+  capability.width = ipcCapability.width();
+  capability.height = ipcCapability.height();
+  capability.maxFPS = ipcCapability.maxFPS();
+  capability.expectedCaptureDelay = ipcCapability.expectedCaptureDelay();
+  capability.rawType = static_cast<webrtc::RawVideoType>(ipcCapability.rawType());
+  capability.codecType = static_cast<webrtc::VideoCodecType>(ipcCapability.codecType());
+  capability.interlaced = ipcCapability.interlaced();
   return 0;
 }
 

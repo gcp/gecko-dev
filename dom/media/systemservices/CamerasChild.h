@@ -18,7 +18,6 @@ namespace webrtc {
 namespace mozilla {
 namespace camera {
 
-void GetCameraList(void);
 int NumberOfCapabilities(const char* deviceUniqueIdUTF8);
 int GetCaptureCapability(const char* unique_idUTF8,
                          const unsigned int unique_idUTF8Length,

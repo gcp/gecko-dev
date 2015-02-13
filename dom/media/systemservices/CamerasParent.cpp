@@ -143,11 +143,40 @@ CamerasParent::RecvNumberOfCapabilities(const nsCString& unique_id,
 }
 
 bool
-CamerasParent::RecvGetCaptureCapability(const nsCString&, const int&,
-                                        CaptureCapability*)
+CamerasParent::RecvGetCaptureCapability(const nsCString& unique_id, const int& num,
+                                        CaptureCapability* capCapability)
 {
-  LOG(("RecvGetCaptureCapability"));
-  return false;
+  LOG(("RecvGetCaptureCapability: %s %d", unique_id.get(), num));
+  if (!EnsureInitialized()) {
+    LOG(("RecvGetCaptureCapability fails to initialize"));
+    return false;
+  }
+
+  webrtc::CaptureCapability webrtcCaps;
+  int error = mPtrViECapture->GetCaptureCapability(unique_id.get(),
+                                                   MediaEngineSource::kMaxUniqueIdLength,
+                                                   num,
+                                                   webrtcCaps);
+  if (error) {
+    return false;
+  }
+
+  CaptureCapability capCap(webrtcCaps.width,
+                           webrtcCaps.height,
+                           webrtcCaps.maxFPS,
+                           webrtcCaps.expectedCaptureDelay,
+                           webrtcCaps.rawType,
+                           webrtcCaps.codecType,
+                           webrtcCaps.interlaced);
+  LOG(("Capability: %d %d %d %d %d %d",
+       webrtcCaps.width,
+       webrtcCaps.height,
+       webrtcCaps.maxFPS,
+       webrtcCaps.expectedCaptureDelay,
+       webrtcCaps.rawType,
+       webrtcCaps.codecType));
+  *capCapability = capCap;
+  return true;
 }
 
 bool
