@@ -49,6 +49,31 @@ CamerasParent::RecvReleaseCamera(bool* rv)
   return false;
 }
 
+bool
+CamerasParent::RecvNumberOfCaptureDevices(int* numdev)
+{
+  return false;
+}
+
+bool
+CamerasParent::RecvNumberOfCapabilities(const nsCString&, int*)
+{
+  return false;
+}
+
+bool
+CamerasParent::RecvGetCaptureCapability(const nsCString&, const int&,
+                              CaptureCapability*)
+{
+  return false;
+}
+
+bool
+CamerasParent::RecvGetCaptureDevice(const int&, nsCString*, nsCString*)
+{
+  return false;
+}
+
 void
 CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
 {

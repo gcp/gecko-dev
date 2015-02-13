@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "webrtc/video_engine/include/vie_capture.h"
+#undef FF
+
 #include "mozilla/Assertions.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
@@ -54,6 +57,33 @@ Cameras()
 void GetCameraList(void)
 {
   Cameras()->SendEnumerateCameras();
+}
+
+int NumberOfCapabilities(const char* deviceUniqueIdUTF8,
+                         const unsigned int unique_idUTF8Length)
+{
+  return 0;
+}
+
+int GetCaptureCapability(const char* unique_idUTF8,
+                         const unsigned int unique_idUTF8Length,
+                         const unsigned int capability_number,
+                         webrtc::CaptureCapability& capability)
+{
+  return 0;
+}
+
+int NumberOfCaptureDevices()
+{
+  return 0;
+}
+
+int GetCaptureDevice(unsigned int list_number, char* device_nameUTF8,
+                     const unsigned int device_nameUTF8Length,
+                     char* unique_idUTF8,
+                     const unsigned int unique_idUTF8Length)
+{
+  return 0;
 }
 
 bool

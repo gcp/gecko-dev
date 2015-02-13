@@ -12,6 +12,17 @@ struct Camera
 {
 };
 
+struct CaptureCapability
+{
+  int width;
+  int height;
+  int maxFPS;
+  int expectedCaptureDelay;
+  int rawType;
+  int codecType;
+  bool interlaced;
+};
+
 sync protocol PCameras
 {
   manager PContent or PBackground;
@@ -22,6 +33,12 @@ child:
 
 parent:
   EnumerateCameras();
+  sync NumberOfCaptureDevices() returns (int numdev);
+  sync NumberOfCapabilities(nsCString deviceUniqueIdUTF8) returns (int numcap);
+  sync GetCaptureCapability(nsCString unique_idUTF8, int capability_number)
+                            returns (CaptureCapability capability);
+  sync GetCaptureDevice(int num) returns (nsCString device_name, nsCString device_id);
+
   sync AllocateCamera() returns (bool rv);
   sync ReleaseCamera() returns (bool rv);
 

@@ -11,10 +11,25 @@
 #include "mozilla/camera/PCamerasChild.h"
 #include "mozilla/camera/PCamerasParent.h"
 
+namespace webrtc {
+  struct CaptureCapability;
+}
+
 namespace mozilla {
 namespace camera {
 
 void GetCameraList(void);
+int NumberOfCapabilities(const char* deviceUniqueIdUTF8,
+                         const unsigned int unique_idUTF8Length);
+int GetCaptureCapability(const char* unique_idUTF8,
+                         const unsigned int unique_idUTF8Length,
+                         const unsigned int capability_number,
+                         webrtc::CaptureCapability& capability);
+int NumberOfCaptureDevices();
+int GetCaptureDevice(unsigned int list_number, char* device_nameUTF8,
+                     const unsigned int device_nameUTF8Length,
+                     char* unique_idUTF8,
+                     const unsigned int unique_idUTF8Length);
 
 class CamerasChild :
   public PCamerasChild

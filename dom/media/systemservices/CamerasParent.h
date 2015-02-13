@@ -20,6 +20,11 @@ public:
   virtual bool RecvEnumerateCameras() MOZ_OVERRIDE;
   virtual bool RecvAllocateCamera(bool* rv) MOZ_OVERRIDE;
   virtual bool RecvReleaseCamera(bool* rv) MOZ_OVERRIDE;
+  virtual bool RecvNumberOfCaptureDevices(int* numdev) MOZ_OVERRIDE;
+  virtual bool RecvNumberOfCapabilities(const nsCString&, int*) MOZ_OVERRIDE;
+  virtual bool RecvGetCaptureCapability(const nsCString&, const int&,
+                                        CaptureCapability*) MOZ_OVERRIDE;
+  virtual bool RecvGetCaptureDevice(const int&, nsCString*, nsCString*) MOZ_OVERRIDE;
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
   CamerasParent();

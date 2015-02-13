@@ -27,6 +27,7 @@ GetUserMediaLog()
 #include "nsIComponentRegistrar.h"
 #include "MediaEngineTabVideoSource.h"
 #include "MediaEngineRemoteVideoSource.h"
+#include "CamerasChild.h"
 #include "nsITabSource.h"
 #include "MediaTrackConstraints.h"
 

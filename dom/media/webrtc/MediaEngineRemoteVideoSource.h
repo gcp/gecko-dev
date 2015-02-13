@@ -31,6 +31,7 @@
 #include "mozilla/dom/MediaStreamTrackBinding.h"
 // WebRTC library includes follow
 #include "webrtc/common.h"
+#include "webrtc/video_engine/include/vie_capture.h"
 
 #include "NullTransport.h"
 
