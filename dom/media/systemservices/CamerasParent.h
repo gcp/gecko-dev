@@ -34,6 +34,7 @@ public:
   virtual int DeliverFrame(unsigned char* buffer,
                            int size,
                            uint32_t time_stamp,
+                           int64_t ntp_time,
                            int64_t render_time,
                            void *handle) MOZ_OVERRIDE;
   virtual bool IsTextureSupported() MOZ_OVERRIDE { return false; };
@@ -55,6 +56,7 @@ public:
   int DeliverFrameOverIPC(unsigned char* buffer,
                           int size,
                           uint32_t time_stamp,
+                          int64_t ntp_time,
                           int64_t render_time);
 
 
@@ -80,6 +82,7 @@ protected:
   webrtc::VideoEngine* mAppEngine;
 
   // Need this to avoid unneccesary WebRTC calls while enumerating.
+  // XX: Nothing actually uses this
   bool mCameraEngineInit;
   bool mScreenEngineInit;
   bool mBrowserEngineInit;

@@ -67,12 +67,14 @@ public:
   DeliverFrameRunnable(unsigned char* buffer,
                        int size,
                        uint32_t time_stamp,
+                       int64_t ntp_time,
                        int64_t render_time)
     : mBuffer(buffer), mSize(size),
-      mTimeStamp(time_stamp), mRenderTime(render_time) {};
+      mTimeStamp(time_stamp), mNtpTime(ntp_time), mRenderTime(render_time) {};
 
   NS_IMETHOD Run() {
-    if (!sCamerasParent->DeliverFrameOverIPC(mBuffer, mSize, mTimeStamp, mRenderTime)) {
+    if (!sCamerasParent->DeliverFrameOverIPC(mBuffer, mSize, mTimeStamp,
+                                             mNtpTime, mRenderTime)) {
       mResult = -1;
     } else {
       mResult = 0;
@@ -88,6 +90,7 @@ private:
   unsigned char* mBuffer;
   int mSize;
   uint32_t mTimeStamp;
+  int64_t mNtpTime;
   int64_t mRenderTime;
   int mResult;
 };
@@ -96,6 +99,7 @@ int
 CamerasParent::DeliverFrameOverIPC(unsigned char* buffer,
                                    int size,
                                    uint32_t time_stamp,
+                                   int64_t ntp_time,
                                    int64_t render_time)
 {
 
@@ -122,7 +126,7 @@ CamerasParent::DeliverFrameOverIPC(unsigned char* buffer,
   // get() and Size() check for proper alignment of the segment
   memcpy(mShmem.get<char>(), buffer, size);
 
-  if (!SendDeliverFrame(mShmem, size, time_stamp, render_time)) {
+  if (!SendDeliverFrame(mShmem, size, time_stamp, ntp_time, render_time)) {
     return -1;
   }
 
@@ -133,12 +137,13 @@ int
 CamerasParent::DeliverFrame(unsigned char* buffer,
                             int size,
                             uint32_t time_stamp,
+                            int64_t ntp_time,
                             int64_t render_time,
                             void *handle)
 {
   LOG((__PRETTY_FUNCTION__));
   nsRefPtr<DeliverFrameRunnable> runnable =
-    new DeliverFrameRunnable(buffer, size, time_stamp, render_time);
+    new DeliverFrameRunnable(buffer, size, time_stamp, ntp_time, render_time);
   mPBackgroundThread->Dispatch(runnable, NS_DISPATCH_SYNC);
   return runnable->GetResult();
 }

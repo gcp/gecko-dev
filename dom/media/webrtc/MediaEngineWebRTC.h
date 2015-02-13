@@ -83,7 +83,6 @@ public:
                                dom::MediaSourceEnum aMediaSource = dom::MediaSourceEnum::Camera)
     : MediaEngineCameraVideoSource(aIndex, "WebRTCCamera.Monitor")
     , mVideoEngine(aVideoEnginePtr)
-    , mMinFps(-1)
     , mMediaSource(aMediaSource)
   {
     MOZ_ASSERT(aVideoEnginePtr);
@@ -124,7 +123,6 @@ private:
   webrtc::ViECapture* mViECapture;
   webrtc::ViERender* mViERender;
 
-  int mMinFps; // Min rate we want to accept
   dom::MediaSourceEnum mMediaSource; // source of media (camera | application | screen)
 
   size_t NumCapabilities() MOZ_OVERRIDE;

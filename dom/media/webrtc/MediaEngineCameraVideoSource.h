@@ -29,7 +29,6 @@ public:
     , mHasDirectListeners(false)
     , mCaptureIndex(aIndex)
     , mTrackID(0)
-    , mFps(-1)
   {}
 
 
@@ -47,10 +46,6 @@ public:
   virtual bool IsFake() MOZ_OVERRIDE
   {
     return false;
-  }
-
-  virtual const dom::MediaSourceEnum GetMediaSource() MOZ_OVERRIDE {
-      return dom::MediaSourceEnum::Camera;
   }
 
   virtual nsresult TakePhoto(PhotoCallback* aCallback) MOZ_OVERRIDE
@@ -109,7 +104,6 @@ protected:
   bool mHasDirectListeners;
   int mCaptureIndex;
   TrackID mTrackID;
-  int mFps; // Track rate (30 fps by default)
 
   webrtc::CaptureCapability mCapability; // Doesn't work on OS X.
 

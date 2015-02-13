@@ -199,13 +199,14 @@ bool
 CamerasChild::RecvDeliverFrame(mozilla::ipc::Shmem&& shmem,
                                const int& size,
                                const uint32_t& time_stamp,
+                               const int64_t& ntp_time,
                                const int64_t& render_time)
 {
   LOG((__PRETTY_FUNCTION__));
   if (Cameras()->Callback()) {
     unsigned char* image = shmem.get<unsigned char>();
     Cameras()->Callback()->DeliverFrame(image, size, time_stamp,
-                                        render_time, nullptr);
+                                        ntp_time, render_time, nullptr);
     Cameras()->SendReleaseFrame(shmem);
   } else {
     LOG(("DeliverFrame called with dead callback"));

@@ -27,8 +27,10 @@ using dom::ConstrainLongRange;
 NS_IMPL_ISUPPORTS0(MediaEngineRemoteVideoSource)
 
 MediaEngineRemoteVideoSource::MediaEngineRemoteVideoSource(
-  int aIndex, mozilla::camera::CaptureEngine aCapEngine, const char* aMonitorName)
+  int aIndex, mozilla::camera::CaptureEngine aCapEngine,
+  dom::MediaSourceEnum aMediaSource, const char* aMonitorName)
   : MediaEngineCameraVideoSource(aIndex, aMonitorName),
+    mMediaSource(aMediaSource),
     mCapEngine(aCapEngine)
 {
   Init();
@@ -57,7 +59,6 @@ MediaEngineRemoteVideoSource::Init() {
 void
 MediaEngineRemoteVideoSource::Shutdown() {
   LOG((__PRETTY_FUNCTION__));
-  // XXX: terminate PCameras / webrtc handles?
   mozilla::camera::Shutdown();
   return;
 }
@@ -191,9 +192,16 @@ int
 MediaEngineRemoteVideoSource::DeliverFrame(unsigned char* buffer,
                                            int size,
                                            uint32_t time_stamp,
+                                           int64_t ntp_time,
                                            int64_t render_time,
                                            void *handle)
 {
+  // Check for proper state.
+  if (mState != kStarted) {
+    LOG(("DeliverFrame: video not started"));
+    return 0;
+  }
+
   if (mWidth*mHeight + 2*(((mWidth+1)/2)*((mHeight+1)/2)) != size) {
     MOZ_ASSERT(false, "Wrong size frame in DeliverFrame!");
     return 0;
@@ -225,8 +233,8 @@ MediaEngineRemoteVideoSource::DeliverFrame(unsigned char* buffer,
 
 #ifdef DEBUG
   static uint32_t frame_num = 0;
-  LOG(("frame %d (%dx%d); timestamp %u, render_time %lu", frame_num++,
-       mWidth, mHeight, time_stamp, render_time));
+  LOGFRAME(("frame %d (%dx%d); timestamp %u, ntp_time %lu, render_time %lu", frame_num++,
+            mWidth, mHeight, time_stamp, ntp_time, render_time));
 #endif
 
   // we don't touch anything in 'this' until here (except for snapshot,
@@ -421,6 +429,28 @@ MediaEngineRemoteVideoSource::ChooseCapability(
   LOG(("chose cap %dx%d @%dfps codec %d raw %d",
        mCapability.width, mCapability.height, mCapability.maxFPS,
        mCapability.codecType, mCapability.rawType));
+}
+
+void MediaEngineRemoteVideoSource::Refresh(int aIndex) {
+  // NOTE: mCaptureIndex might have changed when allocated!
+  // Use aIndex to update information, but don't change mCaptureIndex!!
+  // Caller looked up this source by uniqueId, so it shouldn't change
+  char deviceName[kMaxDeviceNameLength];
+  char uniqueId[kMaxUniqueIdLength];
+
+  if (mozilla::camera::GetCaptureDevice(mCapEngine,
+                                        aIndex,
+                                        deviceName, sizeof(deviceName),
+                                        uniqueId, sizeof(uniqueId))) {
+    return;
+  }
+
+  CopyUTF8toUTF16(deviceName, mDeviceName);
+#ifdef DEBUG
+  nsString temp;
+  CopyUTF8toUTF16(uniqueId, temp);
+  MOZ_ASSERT(temp.Equals(mUniqueId));
+#endif
 }
 
 }

@@ -350,10 +350,6 @@ MediaEngineWebRTCVideoSource::Stop(SourceMediaStream *aSource, TrackID aID)
 void
 MediaEngineWebRTCVideoSource::Init()
 {
-  // fix compile warning for these being unused. (remove once used)
-  (void) mFps;
-  (void) mMinFps;
-
   LOG((__FUNCTION__));
   if (mVideoEngine == nullptr) {
     return;

@@ -26,7 +26,8 @@ sync protocol PCameras
 child:
   async FrameSizeChange(int w, int h);
   // transfers ownership of |buffer| from parent to child
-  async DeliverFrame(Shmem buffer, int size, uint32_t time_stamp, int64_t render_time);
+  async DeliverFrame(Shmem buffer, int size, uint32_t time_stamp,
+                     int64_t ntp_time, int64_t render_time);
 
 parent:
   sync NumberOfCaptureDevices(int engine) returns (int numdev);

@@ -54,12 +54,14 @@ public:
   virtual int DeliverFrame(unsigned char* buffer,
                            int size,
                            uint32_t time_stamp,
+                           int64_t ntp_time,
                            int64_t render_time,
                            void *handle) MOZ_OVERRIDE;
   virtual bool IsTextureSupported() MOZ_OVERRIDE { return false; };
 
   //
   MediaEngineRemoteVideoSource(int aIndex, mozilla::camera::CaptureEngine aCapEngine,
+                               dom::MediaSourceEnum aMediaSource,
                                const char* aMonitorName = "RemoteVideo.Monitor");
 
   virtual nsresult Allocate(const VideoTrackConstraintsN& aConstraints,
@@ -74,6 +76,10 @@ public:
   virtual bool SatisfiesConstraintSets(
       const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets)
       MOZ_OVERRIDE;
+  virtual const dom::MediaSourceEnum GetMediaSource() MOZ_OVERRIDE {
+    return mMediaSource;
+  }
+  void Refresh(int aIndex);
 
 protected:
   ~MediaEngineRemoteVideoSource() { Shutdown(); }
@@ -88,6 +94,7 @@ private:
   void ChooseCapability(const VideoTrackConstraintsN &aConstraints,
                         const MediaEnginePrefs &aPrefs);
 
+  dom::MediaSourceEnum mMediaSource; // source of media (camera | application | screen)
   mozilla::camera::CaptureEngine mCapEngine;
 };
 

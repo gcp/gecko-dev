@@ -115,7 +115,7 @@ MediaEngineWebRTC::EnumerateVideoDevices(dom::MediaSourceEnum aMediaSource,
 
   return;
 #else
-  mozilla::camera::CaptureEngine capEngine;
+  mozilla::camera::CaptureEngine capEngine = mozilla::camera::InvalidEngine;
 
 #ifdef MOZ_WIDGET_ANDROID
   // get the JVM
@@ -145,6 +145,7 @@ MediaEngineWebRTC::EnumerateVideoDevices(dom::MediaSourceEnum aMediaSource,
       break;
     default:
       // BOOM
+      MOZ_CRASH("No valid video engine");
       break;
   }
 
@@ -207,16 +208,11 @@ MediaEngineWebRTC::EnumerateVideoDevices(dom::MediaSourceEnum aMediaSource,
     nsRefPtr<MediaEngineVideoSource> vSource;
     NS_ConvertUTF8toUTF16 uuid(uniqueId);
     if (mVideoSources.Get(uuid, getter_AddRefs(vSource))) {
-      // RTTI would've actually been useful, we'll infer the type from the
-      // circumstances for now
-      //if (!capEngine) {
       // We've already seen this device, just refresh and append.
-      // XXX: implement this in RemoteVideoSource
-      //static_cast<MediaEngineWebRTCVideoSource*>(vSource.get())->Refresh(i);
-      //}
+      static_cast<MediaEngineRemoteVideoSource*>(vSource.get())->Refresh(i);
       aVSources->AppendElement(vSource.get());
     } else {
-      vSource = new MediaEngineRemoteVideoSource(i, capEngine);
+      vSource = new MediaEngineRemoteVideoSource(i, capEngine, aMediaSource);
       mVideoSources.Put(uuid, vSource); // Hashtable takes ownership.
       aVSources->AppendElement(vSource);
     }
