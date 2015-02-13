@@ -59,6 +59,9 @@ public:
   virtual void EnumerateAudioDevices(dom::MediaSourceEnum,
                                      nsTArray<nsRefPtr<MediaEngineAudioSource> >*) = 0;
 
+  /* Prepare for application shutdown */
+  virtual void Shutdown() {};
+
 protected:
   virtual ~MediaEngine() {}
 };

@@ -443,6 +443,8 @@ MediaEngineWebRTC::Shutdown()
   mBrowserEngine = nullptr;
   mAppEngine = nullptr;
 
+  mozilla::camera::Shutdown();
+
   if (mThread) {
     mThread->Shutdown();
     mThread = nullptr;

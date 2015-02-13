@@ -2011,13 +2011,17 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
       GetActiveWindows()->Clear();
       mActiveCallbacks.Clear();
       mCallIds.Clear();
+      LOG(("Releasing MediaManager backend"));
+      if (mBackend) {
+        mBackend->Shutdown();
+        mBackend = nullptr;
+      }
       LOG(("Releasing MediaManager singleton and thread"));
       // Note: won't be released immediately as the Observer has a ref to us
       sSingleton = nullptr;
       if (mMediaThread) {
         mMediaThread->Stop();
       }
-      mBackend = nullptr;
     }
 
     return NS_OK;

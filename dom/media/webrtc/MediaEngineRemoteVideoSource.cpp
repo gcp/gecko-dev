@@ -35,6 +35,7 @@ MediaEngineRemoteVideoSource::MediaEngineRemoteVideoSource(
 
 void
 MediaEngineRemoteVideoSource::Init() {
+  LOG((__PRETTY_FUNCTION__));
   char deviceName[kMaxDeviceNameLength];
   char uniqueId[kMaxUniqueIdLength];
   if (mozilla::camera::GetCaptureDevice(mCaptureIndex,
@@ -53,7 +54,9 @@ MediaEngineRemoteVideoSource::Init() {
 
 void
 MediaEngineRemoteVideoSource::Shutdown() {
+  LOG((__PRETTY_FUNCTION__));
   // XXX: terminate PCameras / webrtc handles?
+  mozilla::camera::Shutdown();
   return;
 }
 
@@ -61,7 +64,7 @@ nsresult
 MediaEngineRemoteVideoSource::Allocate(const VideoTrackConstraintsN& aConstraints,
                                        const MediaEnginePrefs& aPrefs)
 {
-  LOG((__FUNCTION__));
+  LOG((__PRETTY_FUNCTION__));
 
   ChooseCapability(aConstraints, aPrefs);
   if (mozilla::camera::AllocateCaptureDevice(NS_ConvertUTF16toUTF8(mUniqueId).get(),
@@ -94,7 +97,7 @@ MediaEngineRemoteVideoSource::Deallocate()
 nsresult
 MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
 {
-  LOG((__FUNCTION__));
+  LOG((__PRETTY_FUNCTION__));
   if (!mInitDone || !aStream) {
     LOG(("No stream or init not done"));
     return NS_ERROR_FAILURE;
@@ -126,7 +129,7 @@ nsresult
 MediaEngineRemoteVideoSource::Stop(mozilla::SourceMediaStream* aSource,
                                    mozilla::TrackID aID)
 {
-  LOG((__FUNCTION__));
+  LOG((__PRETTY_FUNCTION__));
   if (!mSources.RemoveElement(aSource)) {
     // Already stopped - this is allowed
     return NS_OK;

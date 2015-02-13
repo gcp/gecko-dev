@@ -136,7 +136,7 @@ CamerasParent::DeliverFrame(unsigned char* buffer,
                             int64_t render_time,
                             void *handle)
 {
-  LOG((__FUNCTION__));
+  LOG((__PRETTY_FUNCTION__));
   nsRefPtr<DeliverFrameRunnable> runnable =
     new DeliverFrameRunnable(buffer, size, time_stamp, render_time);
   mPBackgroundThread->Dispatch(runnable, NS_DISPATCH_SYNC);
@@ -152,7 +152,7 @@ CamerasParent::RecvReleaseFrame(mozilla::ipc::Shmem&& s) {
 bool
 CamerasParent::RecvAllocateCaptureDevice(const nsCString& unique_id, int* numdev)
 {
-  LOG(("RecvAllocateCaptureDevice"));
+  LOG((__PRETTY_FUNCTION__));
   if (mPtrViECapture->AllocateCaptureDevice(unique_id.get(),
                                             MediaEngineSource::kMaxUniqueIdLength,
                                             *numdev)) {
@@ -219,7 +219,7 @@ CamerasParent::EnsureInitialized()
 bool
 CamerasParent::RecvNumberOfCaptureDevices(int* numdev)
 {
-  LOG(("RecvNumberOfCaptureDevices"));
+  LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized()) {
     *numdev = 0;
     LOG(("RecvNumberOfCaptureDevices fails to initialize"));
@@ -241,7 +241,7 @@ bool
 CamerasParent::RecvNumberOfCapabilities(const nsCString& unique_id,
                                         int* numCaps)
 {
-  LOG(("RecvNumberOfCapabilities"));
+  LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized()) {
     *numCaps = 0;
     LOG(("RecvNumberOfCapabilities fails to initialize"));
@@ -385,6 +385,7 @@ void
 CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
 {
   // No more IPC from here
+  LOG((__PRETTY_FUNCTION__));
 }
 
 CamerasParent::CamerasParent()

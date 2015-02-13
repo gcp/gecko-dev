@@ -31,6 +31,7 @@ namespace mozilla {
 namespace camera {
 
 static PCamerasChild* sCameras;
+nsCOMPtr<nsIThread> sCamerasChildThread;
 
 static CamerasChild*
 Cameras()
@@ -49,6 +50,7 @@ Cameras()
     MOZ_RELEASE_ASSERT(existingBackgroundChild);
     // Create PCameras by sending a message to the parent
     sCameras = existingBackgroundChild->SendPCamerasConstructor();
+    sCamerasChildThread = NS_GetCurrentThread();
   }
   MOZ_ASSERT(sCameras);
   return static_cast<CamerasChild*>(sCameras);
@@ -97,7 +99,7 @@ int GetCaptureDevice(unsigned int list_number, char* device_nameUTF8,
                      char* unique_idUTF8,
                      const unsigned int unique_idUTF8Length)
 {
-  LOG(("GetCaptureDevice"));
+  LOG((__PRETTY_FUNCTION__));
   nsCString device_name;
   nsCString unique_id;
   if (Cameras()->SendGetCaptureDevice(list_number, &device_name, &unique_id)) {
@@ -114,7 +116,7 @@ int AllocateCaptureDevice(const char* unique_idUTF8,
                           const unsigned int unique_idUTF8Length,
                           int& capture_id)
 {
-  LOG((__FUNCTION__));
+  LOG((__PRETTY_FUNCTION__));
   nsCString unique_id(unique_idUTF8);
   if (Cameras()->SendAllocateCaptureDevice(unique_id, &capture_id)) {
     LOG(("Success allocating %s %d", unique_idUTF8, capture_id));
@@ -127,7 +129,7 @@ int AllocateCaptureDevice(const char* unique_idUTF8,
 
 int ReleaseCaptureDevice(const int capture_id)
 {
-  LOG((__FUNCTION__));
+  LOG((__PRETTY_FUNCTION__));
   if (Cameras()->SendReleaseCaptureDevice(capture_id)) {
     return 0;
   } else {
@@ -138,7 +140,7 @@ int ReleaseCaptureDevice(const int capture_id)
 int StartCapture(const int capture_id, webrtc::CaptureCapability& webrtcCaps,
                  webrtc::ExternalRenderer* cb)
 {
-  LOG((__FUNCTION__));
+  LOG((__PRETTY_FUNCTION__));
   Cameras()->Callback() = cb;
   CaptureCapability capCap(webrtcCaps.width,
                            webrtcCaps.height,
@@ -156,12 +158,33 @@ int StartCapture(const int capture_id, webrtc::CaptureCapability& webrtcCaps,
 
 int StopCapture(const int capture_id)
 
-{  LOG((__FUNCTION__));
+{
+  LOG((__PRETTY_FUNCTION__));
   if (Cameras()->SendStopCapture(capture_id)) {
     Cameras()->Callback() = nullptr;
     return 0;
   } else {
     return -1;
+  }
+}
+
+class ShutdownRunnable : public nsRunnable {
+public:
+  ShutdownRunnable() {};
+
+  NS_IMETHOD Run() {
+    ipc::BackgroundChild::CloseForCurrentThread();
+    return NS_OK;
+  }
+};
+
+void Shutdown()
+{
+  LOG((__PRETTY_FUNCTION__));
+  if (sCamerasChildThread) {
+    nsRefPtr<ShutdownRunnable> runnable = new ShutdownRunnable();
+    sCamerasChildThread->Dispatch(runnable, NS_DISPATCH_SYNC);
+    sCamerasChildThread = nullptr;
   }
 }
 
@@ -171,7 +194,7 @@ CamerasChild::RecvDeliverFrame(mozilla::ipc::Shmem&& shmem,
                                const uint32_t& time_stamp,
                                const int64_t& render_time)
 {
-  LOG((__FUNCTION__));
+  LOG((__PRETTY_FUNCTION__));
   if (Cameras()->Callback()) {
     unsigned char* image = shmem.get<unsigned char>();
     Cameras()->Callback()->DeliverFrame(image, size, time_stamp,
@@ -186,7 +209,7 @@ CamerasChild::RecvDeliverFrame(mozilla::ipc::Shmem&& shmem,
 bool
 CamerasChild::RecvFrameSizeChange(const int& w, const int& h)
 {
-  LOG((__FUNCTION__));
+  LOG((__PRETTY_FUNCTION__));
   // XXX: Needs a lock
   if (Cameras()->Callback()) {
     Cameras()->Callback()->FrameSizeChange(w, h, 0);
@@ -211,7 +234,10 @@ CamerasChild::CamerasChild()
 
 CamerasChild::~CamerasChild()
 {
-  LOG(("CamerasChild: %p", this));
+  LOG(("~CamerasChild: %p", this));
+
+  Shutdown();
+
   MOZ_COUNT_DTOR(CamerasChild);
 }
 

@@ -38,6 +38,7 @@ int ReleaseCaptureDevice(const int capture_id);
 int StartCapture(const int capture_id, webrtc::CaptureCapability& capability,
                  webrtc::ExternalRenderer* func);
 int StopCapture(const int capture_id);
+void Shutdown();
 
 class CamerasChild :
   public PCamerasChild
