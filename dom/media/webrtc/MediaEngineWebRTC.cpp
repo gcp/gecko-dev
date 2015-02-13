@@ -1,9 +1,12 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set sw=2 ts=8 et ft=cpp : */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
+#include "CamerasUtils.h"
 
 #include "CSFLog.h"
 #include "prenv.h"
@@ -23,6 +26,7 @@ GetUserMediaLog()
 #include "ImageContainer.h"
 #include "nsIComponentRegistrar.h"
 #include "MediaEngineTabVideoSource.h"
+#include "MediaEngineRemoteVideoSource.h"
 #include "nsITabSource.h"
 #include "MediaTrackConstraints.h"
 
@@ -184,28 +188,27 @@ MediaEngineWebRTC::EnumerateVideoDevices(dom::MediaSourceEnum aMediaSource,
     case dom::MediaSourceEnum::Camera:
       // fall through
     default:
-      if (!mVideoEngine) {
-        if (!(mVideoEngine = webrtc::VideoEngine::Create())) {
-          return;
-        }
-      }
-      videoEngine = mVideoEngine;
-      videoEngineInit = &mVideoEngineInit;
+      // use remote video cameras
+      videoEngine = nullptr;
+      videoEngineInit = nullptr;
       break;
   }
 
-  ptrViEBase = webrtc::ViEBase::GetInterface(videoEngine);
-  if (!ptrViEBase) {
-    return;
-  }
-  if (ptrViEBase->Init() < 0) {
-    return;
-  }
-  *videoEngineInit = true;
+  if (videoEngine) {
+    ptrViEBase = webrtc::ViEBase::GetInterface(videoEngine);
+    if (!ptrViEBase) {
+      return;
+    }
+    if (ptrViEBase->Init() < 0) {
+      return;
+    }
 
-  ptrViECapture = webrtc::ViECapture::GetInterface(videoEngine);
-  if (!ptrViECapture) {
-    return;
+    *videoEngineInit = true;
+
+    ptrViECapture = webrtc::ViECapture::GetInterface(videoEngine);
+    if (!ptrViECapture) {
+      return;
+    }
   }
 
   /**
@@ -216,7 +219,12 @@ MediaEngineWebRTC::EnumerateVideoDevices(dom::MediaSourceEnum aMediaSource,
    * for a given instance of the engine. Likewise, if a device was plugged out,
    * mVideoSources must be updated.
    */
-  int num = ptrViECapture->NumberOfCaptureDevices();
+  int num;
+  if (videoEngine) {
+    num = ptrViECapture->NumberOfCaptureDevices();
+  } else {
+    num = mozilla::camera::NumberOfCaptureDevices();
+  }
   if (num <= 0) {
     return;
   }
@@ -228,31 +236,42 @@ MediaEngineWebRTC::EnumerateVideoDevices(dom::MediaSourceEnum aMediaSource,
     // paranoia
     deviceName[0] = '\0';
     uniqueId[0] = '\0';
-    int error = ptrViECapture->GetCaptureDevice(i, deviceName,
-                                                sizeof(deviceName), uniqueId,
-                                                sizeof(uniqueId));
+    int error;
+    if (videoEngine) {
+      error = ptrViECapture->GetCaptureDevice(i, deviceName,
+                                              sizeof(deviceName), uniqueId,
+                                              sizeof(uniqueId));
+    } else {
+      error = mozilla::camera::GetCaptureDevice(i, deviceName,
+                                                 sizeof(deviceName), uniqueId,
+                                                 sizeof(uniqueId));
+    }
 
     if (error) {
-      LOG((" VieCapture:GetCaptureDevice: Failed %d",
-           ptrViEBase->LastError() ));
+      if (videoEngine) {
+        LOG((" VieCapture:GetCaptureDevice: Failed %d",
+             ptrViEBase->LastError() ));
+      } else {
+        LOG((" camera:GetCaptureDevice: Failed %d", error ));
+      }
       continue;
     }
 #ifdef DEBUG
-    LOG(("  Capture Device Index %d, Name %s", i, deviceName));
+    //LOG(("  Capture Device Index %d, Name %s", i, deviceName));
 
-    webrtc::CaptureCapability cap;
-    int numCaps = ptrViECapture->NumberOfCapabilities(uniqueId,
+    //webrtc::CaptureCapability cap;
+    //int numCaps = ptrViECapture->NumberOfCapabilities(uniqueId,
                                                       MediaEngineSource::kMaxUniqueIdLength);
-    LOG(("Number of Capabilities %d", numCaps));
-    for (int j = 0; j < numCaps; j++) {
-      if (ptrViECapture->GetCaptureCapability(uniqueId,
-                                              MediaEngineSource::kMaxUniqueIdLength,
-                                              j, cap ) != 0 ) {
-        break;
-      }
-      LOG(("type=%d width=%d height=%d maxFPS=%d",
-           cap.rawType, cap.width, cap.height, cap.maxFPS ));
-    }
+  //LOG(("Number of Capabilities %d", numCaps));
+  // for (int j = 0; j < numCaps; j++) {
+  //    if (ptrViECapture->GetCaptureCapability(uniqueId,
+  //                                            MediaEngineSource::kMaxUniqueIdLength,
+  //                                            j, cap ) != 0 ) {
+  //     break;
+  //    }
+  //    LOG(("type=%d width=%d height=%d maxFPS=%d",
+  //         cap.rawType, cap.width, cap.height, cap.maxFPS ));
+  //  }
 #endif
 
     if (uniqueId[0] == '\0') {
@@ -264,11 +283,19 @@ MediaEngineWebRTC::EnumerateVideoDevices(dom::MediaSourceEnum aMediaSource,
     nsRefPtr<MediaEngineVideoSource> vSource;
     NS_ConvertUTF8toUTF16 uuid(uniqueId);
     if (mVideoSources.Get(uuid, getter_AddRefs(vSource))) {
-      // We've already seen this device, just refresh and append.
-      static_cast<MediaEngineWebRTCVideoSource*>(vSource.get())->Refresh(i);
+      // RTTI would've actually been useful, we'll infer the type from the
+      // circumstances for now
+      if (videoEngine) {
+        // We've already seen this device, just refresh and append.
+        static_cast<MediaEngineWebRTCVideoSource*>(vSource.get())->Refresh(i);
+      }
       aVSources->AppendElement(vSource.get());
     } else {
-      vSource = new MediaEngineWebRTCVideoSource(videoEngine, i, aMediaSource);
+      if (videoEngine) {
+        vSource = new MediaEngineWebRTCVideoSource(videoEngine, i, aMediaSource);
+      } else {
+        vSource = new MediaEngineRemoteVideoSource(i);
+      }
       mVideoSources.Put(uuid, vSource); // Hashtable takes ownership.
       aVSources->AppendElement(vSource);
     }

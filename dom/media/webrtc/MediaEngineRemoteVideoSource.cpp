@@ -9,6 +9,7 @@
 #include "VideoUtils.h"
 #include "nsIPrefService.h"
 #include "MediaTrackConstraints.h"
+#include "CamerasChild.h"
 
 namespace mozilla {
 
@@ -98,6 +99,53 @@ MediaEngineRemoteVideoSource::NotifyPull(MediaStreamGraph*,
     // we've removed or finished the track.
     // aSource->AppendToTrack(aID, &(segment));
   }
+}
+
+typedef nsTArray<uint8_t> CapabilitySet;
+
+bool
+MediaEngineRemoteVideoSource::SatisfiesConstraintSet(const MediaTrackConstraintSet &aConstraints,
+                                                     const webrtc::CaptureCapability& aCandidate) {
+  if (!MediaEngineCameraVideoSource::IsWithin(aCandidate.width, aConstraints.mWidth) ||
+      !MediaEngineCameraVideoSource::IsWithin(aCandidate.height, aConstraints.mHeight)) {
+    return false;
+  }
+  if (!MediaEngineCameraVideoSource::IsWithin(aCandidate.maxFPS, aConstraints.mFrameRate)) {
+    return false;
+  }
+  return true;
+}
+
+bool
+MediaEngineRemoteVideoSource::SatisfiesConstraintSets(
+      const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets)
+{
+  NS_ConvertUTF16toUTF8 uniqueId(mUniqueId);
+  //int num = mViECapture->NumberOfCapabilities(uniqueId.get(), kMaxUniqueIdLength);
+  int num = mozilla::camera::NumberOfCapabilities(uniqueId.get(),
+                                                  kMaxUniqueIdLength);
+  if (num <= 0) {
+    return true;
+  }
+
+  CapabilitySet candidateSet;
+  for (int i = 0; i < num; i++) {
+    candidateSet.AppendElement(i);
+  }
+
+  for (size_t j = 0; j < aConstraintSets.Length(); j++) {
+    for (size_t i = 0; i < candidateSet.Length();  ) {
+      webrtc::CaptureCapability cap;
+      mozilla::camera::GetCaptureCapability(uniqueId.get(), kMaxUniqueIdLength,
+                                            candidateSet[i], cap);
+      if (!SatisfiesConstraintSet(*aConstraintSets[j], cap)) {
+        candidateSet.RemoveElementAt(i);
+      } else {
+        ++i;
+      }
+    }
+  }
+  return !!candidateSet.Length();
 }
 
 }

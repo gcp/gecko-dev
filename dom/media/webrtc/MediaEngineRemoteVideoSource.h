@@ -65,6 +65,9 @@ public:
                           SourceMediaStream* aSource,
                           TrackID aId,
                           StreamTime aDesiredTime) MOZ_OVERRIDE;
+  virtual bool SatisfiesConstraintSets(
+      const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets)
+      MOZ_OVERRIDE;
 
 protected:
   ~MediaEngineRemoteVideoSource() { Shutdown(); }
@@ -73,6 +76,9 @@ private:
   // Initialize the needed Video engine interfaces.
   void Init();
   void Shutdown();
+
+  static bool SatisfiesConstraintSet(const dom::MediaTrackConstraintSet& aConstraints,
+                                     const webrtc::CaptureCapability& aCandidate);
 };
 
 }
