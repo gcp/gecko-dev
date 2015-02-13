@@ -10,10 +10,10 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
+#include "prlog.h"
+
 #include "CamerasUtils.h"
 #include "CamerasChild.h"
-
-#include "prlog.h"
 
 PRLogModuleInfo *gCamerasChildLog;
 
@@ -56,12 +56,14 @@ Cameras()
 
 void GetCameraList(void)
 {
+  LOG(("GetCameraList"));
   Cameras()->SendEnumerateCameras();
 }
 
 int NumberOfCapabilities(const char* deviceUniqueIdUTF8,
                          const unsigned int unique_idUTF8Length)
 {
+  LOG(("NumberOfCapabilities"));
   return 0;
 }
 
@@ -70,12 +72,16 @@ int GetCaptureCapability(const char* unique_idUTF8,
                          const unsigned int capability_number,
                          webrtc::CaptureCapability& capability)
 {
+  LOG(("GetCaptureCapability"));
   return 0;
 }
 
 int NumberOfCaptureDevices()
 {
-  return 0;
+  int numCapDevs = 0;
+  Cameras()->SendNumberOfCaptureDevices(&numCapDevs);
+  LOG(("Capture Devices: %d", numCapDevs));
+  return numCapDevs;
 }
 
 int GetCaptureDevice(unsigned int list_number, char* device_nameUTF8,
@@ -83,12 +89,14 @@ int GetCaptureDevice(unsigned int list_number, char* device_nameUTF8,
                      char* unique_idUTF8,
                      const unsigned int unique_idUTF8Length)
 {
+  LOG(("GetCaptureDevice"));
   return 0;
 }
 
 bool
 CamerasChild::RecvDeliverFrame()
 {
+  LOG(("RecvDeliverFrame"));
   return false;
 }
 

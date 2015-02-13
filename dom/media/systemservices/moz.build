@@ -23,6 +23,7 @@ if CONFIG['MOZ_WEBRTC']:
         'PCameras.ipdl',
     ]
     LOCAL_INCLUDES += [
+        '/media/webrtc/signaling',
         '/media/webrtc/trunk',
     ]
 

@@ -9,6 +9,10 @@
 #include "CamerasUtils.h"
 #include "prlog.h"
 
+#include "webrtc/video_engine/include/vie_base.h"
+#include "webrtc/video_engine/include/vie_capture.h"
+#undef FF
+
 PRLogModuleInfo *gCamerasParentLog;
 
 #undef LOG
@@ -40,24 +44,80 @@ CamerasParent::RecvEnumerateCameras()
 bool
 CamerasParent::RecvAllocateCamera(bool* rv)
 {
+  LOG(("RecvAllocateCamera"));
   return false;
 }
 
 bool
 CamerasParent::RecvReleaseCamera(bool* rv)
 {
+  LOG(("RecvReleaseCamera"));
   return false;
+}
+
+bool
+CamerasParent::InitVideoEngine()
+{
+  mVideoEngine = webrtc::VideoEngine::Create();
+  if (!mVideoEngine) {
+    return false;
+  }
+
+  mPtrViEBase = webrtc::ViEBase::GetInterface(mVideoEngine);
+  if (!mPtrViEBase) {
+    return false;
+  }
+
+  if (mPtrViEBase->Init() < 0) {
+    return false;
+  }
+
+  mPtrViECapture = webrtc::ViECapture::GetInterface(mVideoEngine);
+  if (!mPtrViECapture) {
+    return false;
+  }
+
+  mVideoEngineInit = true;
+  return true;
+}
+
+bool
+CamerasParent::EnsureInitialized()
+{
+  if (!mVideoEngineInit) {
+    if (!InitVideoEngine()) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 bool
 CamerasParent::RecvNumberOfCaptureDevices(int* numdev)
 {
-  return false;
+  LOG(("RecvNumberOfCaptureDevices"));
+  if (!EnsureInitialized()) {
+    *numdev = 0;
+    LOG(("RecvNumberOfCaptureDevices fails to initialize"));
+    return false;
+  }
+
+  int num = mPtrViECapture->NumberOfCaptureDevices();
+  *numdev = num;
+  if (num < 0) {
+    LOG(("RecvNumberOfCaptureDevices couldn't find devices"));
+    return false;
+  } else {
+    LOG(("RecvNumberOfCaptureDevices: %d", *numdev));
+    return true;
+  }
 }
 
 bool
 CamerasParent::RecvNumberOfCapabilities(const nsCString&, int*)
 {
+  LOG(("RecvNumberOfCapabilities"));
   return false;
 }
 
@@ -65,12 +125,14 @@ bool
 CamerasParent::RecvGetCaptureCapability(const nsCString&, const int&,
                               CaptureCapability*)
 {
+  LOG(("RecvGetCaptureCapability"));
   return false;
 }
 
 bool
 CamerasParent::RecvGetCaptureDevice(const int&, nsCString*, nsCString*)
 {
+  LOG(("RecvGetCaptureDevice"));
   return false;
 }
 
@@ -81,6 +143,8 @@ CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 CamerasParent::CamerasParent()
+  : mVideoEngine(nullptr), mVideoEngineInit(false),
+    mPtrViEBase(nullptr), mPtrViECapture(nullptr)
 {
 #if defined(PR_LOGGING)
   if (!gCamerasParentLog)
@@ -96,6 +160,22 @@ CamerasParent::~CamerasParent()
   LOG(("~CamerasParent: %p", this));
 
   MOZ_COUNT_DTOR(CamerasParent);
+
+  if(mPtrViEBase) {
+    mPtrViEBase->Release();
+    mPtrViEBase = nullptr;
+  }
+  if (mPtrViECapture) {
+    mPtrViECapture->Release();
+    mPtrViECapture = nullptr;
+  }
+
+  if (mVideoEngine) {
+    mVideoEngine->SetTraceCallback(nullptr);
+    webrtc::VideoEngine::Delete(mVideoEngine);
+  }
+
+  mVideoEngine = nullptr;
 }
 
 PCamerasParent* CreateCamerasParent() {

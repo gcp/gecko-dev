@@ -10,6 +10,13 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/camera/PCamerasParent.h"
 
+namespace webrtc {
+  struct CaptureCapability;
+  struct VideoEngine;
+  struct ViEBase;
+  struct ViECapture;
+}
+
 namespace mozilla {
 namespace camera {
 
@@ -29,6 +36,15 @@ public:
 
   CamerasParent();
   virtual ~CamerasParent();
+
+protected:
+  bool InitVideoEngine();
+  bool EnsureInitialized();
+
+  webrtc::VideoEngine* mVideoEngine;
+  bool mVideoEngineInit;
+  webrtc::ViEBase *mPtrViEBase;
+  webrtc::ViECapture *mPtrViECapture;
 };
 
 PCamerasParent* CreateCamerasParent();
