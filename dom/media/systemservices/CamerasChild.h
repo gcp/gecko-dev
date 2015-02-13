@@ -7,6 +7,7 @@
 #ifndef mozilla_CamerasChild_h
 #define mozilla_CamerasChild_h
 
+#include "mozilla/Pair.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/camera/PCamerasChild.h"
 #include "mozilla/camera/PCamerasParent.h"
@@ -29,6 +30,12 @@ enum CaptureEngine : int {
   WinEngine,
   AppEngine,
   CameraEngine
+};
+
+struct CapturerElement {
+  CaptureEngine engine;
+  int id;
+  webrtc::ExternalRenderer* callback;
 };
 
 int NumberOfCapabilities(CaptureEngine aCapEngine,
@@ -59,18 +66,22 @@ class CamerasChild :
   public PCamerasChild
 {
 public:
-  virtual bool RecvDeliverFrame(mozilla::ipc::Shmem&&,
+  virtual bool RecvDeliverFrame(const int&, const int&, mozilla::ipc::Shmem&&,
                                 const int&, const uint32_t&, const int64_t&,
                                 const int64_t&) MOZ_OVERRIDE;
-  virtual bool RecvFrameSizeChange(const int& w, const int& h) MOZ_OVERRIDE;
+  virtual bool RecvFrameSizeChange(const int&, const int&,
+                                   const int& w, const int& h) MOZ_OVERRIDE;
 
-  webrtc::ExternalRenderer*& Callback() { return mCallback; };
+  webrtc::ExternalRenderer* Callback(CaptureEngine aCapEngine, int capture_id);
+  void AddCallback(const CaptureEngine aCapEngine, const int capture_id,
+                   webrtc::ExternalRenderer* render);
+  void RemoveCallback(const CaptureEngine aCapEngine, const int capture_id);
 
   CamerasChild();
   virtual ~CamerasChild();
 
 private:
-  webrtc::ExternalRenderer* mCallback;
+  nsTArray<CapturerElement> mCallbacks;
 };
 
 PCamerasChild* CreateCamerasChild();

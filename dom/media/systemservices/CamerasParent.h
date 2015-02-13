@@ -23,11 +23,14 @@
 namespace mozilla {
 namespace camera {
 
-class CamerasParent :
-  public PCamerasParent,
-  public webrtc::ExternalRenderer
+class CamerasParent;
+
+class CallbackHelper : public webrtc::ExternalRenderer
 {
 public:
+  CallbackHelper(CaptureEngine aCapEng, int aCapId)
+    : mCapEngine(aCapEng), mCapturerId(aCapId) {};
+
   //ViEExternalRenderer.
   virtual int FrameSizeChange(unsigned int w, unsigned int h,
                               unsigned int streams) MOZ_OVERRIDE;
@@ -39,6 +42,16 @@ public:
                            void *handle) MOZ_OVERRIDE;
   virtual bool IsTextureSupported() MOZ_OVERRIDE { return false; };
 
+  friend CamerasParent;
+
+private:
+  CaptureEngine mCapEngine;
+  int mCapturerId;
+};
+
+class CamerasParent :  public PCamerasParent
+{
+public:
   //
   virtual bool RecvAllocateCaptureDevice(const int&, const nsCString&, int *) MOZ_OVERRIDE;
   virtual bool RecvReleaseCaptureDevice(const int&, const int &) MOZ_OVERRIDE;
@@ -52,8 +65,12 @@ public:
   virtual bool RecvReleaseFrame(mozilla::ipc::Shmem&&) MOZ_OVERRIDE;
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
+  nsCOMPtr<nsIThread> GetBackgroundThread() { return mPBackgroundThread; };
+
   // forwarded to PBackground thread
-  int DeliverFrameOverIPC(unsigned char* buffer,
+  int DeliverFrameOverIPC(CaptureEngine capEng,
+                          int cap_id,
+                          unsigned char* buffer,
                           int size,
                           uint32_t time_stamp,
                           int64_t ntp_time,
@@ -81,13 +98,7 @@ protected:
   webrtc::VideoEngine* mWinEngine;
   webrtc::VideoEngine* mAppEngine;
 
-  // Need this to avoid unneccesary WebRTC calls while enumerating.
-  // XX: Nothing actually uses this
-  bool mCameraEngineInit;
-  bool mScreenEngineInit;
-  bool mBrowserEngineInit;
-  bool mWinEngineInit;
-  bool mAppEngineInit;
+  nsTArray<CallbackHelper*> mCallbacks;
 
   // image buffer
   bool mShmemInitialized;

@@ -24,9 +24,10 @@ sync protocol PCameras
   manager PBackground;
 
 child:
-  async FrameSizeChange(int w, int h);
+  async FrameSizeChange(int capEngine, int cap_id, int w, int h);
   // transfers ownership of |buffer| from parent to child
-  async DeliverFrame(Shmem buffer, int size, uint32_t time_stamp,
+  async DeliverFrame(int capEngine, int cap_id,
+                     Shmem buffer, int size, uint32_t time_stamp,
                      int64_t ntp_time, int64_t render_time);
 
 parent:

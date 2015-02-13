@@ -30,11 +30,14 @@ static CamerasParent* sCamerasParent = nullptr;
 
 class FrameSizeChangeRunnable : public nsRunnable {
 public:
-  FrameSizeChangeRunnable(unsigned int aWidth, unsigned int aHeight)
-    : mWidth(aWidth), mHeight(aHeight) {};
+  FrameSizeChangeRunnable(CaptureEngine capEngine, int cap_id,
+                          unsigned int aWidth, unsigned int aHeight)
+    : mCapEngine(capEngine), mCapId(cap_id),
+      mWidth(aWidth), mHeight(aHeight) {};
 
   NS_IMETHOD Run() {
-    if (!sCamerasParent->SendFrameSizeChange(mWidth, mHeight)) {
+    if (!sCamerasParent->SendFrameSizeChange(mCapEngine, mCapId,
+                                             mWidth, mHeight)) {
       mResult = -1;
     } else {
       mResult = 0;
@@ -47,33 +50,39 @@ public:
   }
 
 private:
+  CaptureEngine mCapEngine;
+  int mCapId;
   unsigned int mWidth;
   unsigned int mHeight;
   int mResult;
 };
 
 int
-CamerasParent::FrameSizeChange(unsigned int w, unsigned int h,
-                               unsigned int streams)
+CallbackHelper::FrameSizeChange(unsigned int w, unsigned int h,
+                                unsigned int streams)
 {
   LOG(("Video FrameSizeChange: %ux%u", w, h));
-  nsRefPtr<FrameSizeChangeRunnable> runnable = new FrameSizeChangeRunnable(w, h);
-  mPBackgroundThread->Dispatch(runnable, NS_DISPATCH_SYNC);
+  nsRefPtr<FrameSizeChangeRunnable> runnable =
+    new FrameSizeChangeRunnable(mCapEngine, mCapturerId, w, h);
+  sCamerasParent->GetBackgroundThread()->Dispatch(runnable, NS_DISPATCH_SYNC);
   return runnable->GetResult();
 }
 
 class DeliverFrameRunnable : public nsRunnable {
 public:
-  DeliverFrameRunnable(unsigned char* buffer,
+  DeliverFrameRunnable(CaptureEngine engine,
+                       int cap_id,
+                       unsigned char* buffer,
                        int size,
                        uint32_t time_stamp,
                        int64_t ntp_time,
                        int64_t render_time)
-    : mBuffer(buffer), mSize(size),
+    : mCapEngine(engine), mCapId(cap_id), mBuffer(buffer), mSize(size),
       mTimeStamp(time_stamp), mNtpTime(ntp_time), mRenderTime(render_time) {};
 
   NS_IMETHOD Run() {
-    if (!sCamerasParent->DeliverFrameOverIPC(mBuffer, mSize, mTimeStamp,
+    if (!sCamerasParent->DeliverFrameOverIPC(mCapEngine, mCapId,
+                                             mBuffer, mSize, mTimeStamp,
                                              mNtpTime, mRenderTime)) {
       mResult = -1;
     } else {
@@ -87,6 +96,8 @@ public:
   }
 
 private:
+  CaptureEngine mCapEngine;
+  int mCapId;
   unsigned char* mBuffer;
   int mSize;
   uint32_t mTimeStamp;
@@ -96,7 +107,9 @@ private:
 };
 
 int
-CamerasParent::DeliverFrameOverIPC(unsigned char* buffer,
+CamerasParent::DeliverFrameOverIPC(CaptureEngine cap_engine,
+                                   int cap_id,
+                                   unsigned char* buffer,
                                    int size,
                                    uint32_t time_stamp,
                                    int64_t ntp_time,
@@ -126,7 +139,8 @@ CamerasParent::DeliverFrameOverIPC(unsigned char* buffer,
   // get() and Size() check for proper alignment of the segment
   memcpy(mShmem.get<char>(), buffer, size);
 
-  if (!SendDeliverFrame(mShmem, size, time_stamp, ntp_time, render_time)) {
+  if (!SendDeliverFrame(cap_engine, cap_id,
+                        mShmem, size, time_stamp, ntp_time, render_time)) {
     return -1;
   }
 
@@ -134,17 +148,18 @@ CamerasParent::DeliverFrameOverIPC(unsigned char* buffer,
 }
 
 int
-CamerasParent::DeliverFrame(unsigned char* buffer,
-                            int size,
-                            uint32_t time_stamp,
-                            int64_t ntp_time,
-                            int64_t render_time,
-                            void *handle)
+CallbackHelper::DeliverFrame(unsigned char* buffer,
+                             int size,
+                             uint32_t time_stamp,
+                             int64_t ntp_time,
+                             int64_t render_time,
+                             void *handle)
 {
   LOG((__PRETTY_FUNCTION__));
   nsRefPtr<DeliverFrameRunnable> runnable =
-    new DeliverFrameRunnable(buffer, size, time_stamp, ntp_time, render_time);
-  mPBackgroundThread->Dispatch(runnable, NS_DISPATCH_SYNC);
+    new DeliverFrameRunnable(mCapEngine, mCapturerId,
+                             buffer, size, time_stamp, ntp_time, render_time);
+  sCamerasParent->GetBackgroundThread()->Dispatch(runnable, NS_DISPATCH_SYNC);
   return runnable->GetResult();
 }
 
@@ -196,7 +211,6 @@ bool
 CamerasParent::SetupEngine(CaptureEngine aCapEngine)
 {
   webrtc::VideoEngine *engine = nullptr;
-  bool *engineInit = nullptr;
 
   switch (aCapEngine) {
     case ScreenEngine:
@@ -206,7 +220,6 @@ CamerasParent::SetupEngine(CaptureEngine aCapEngine)
         mScreenEngine = webrtc::VideoEngine::Create(mActiveConfig);
       }
       engine = mScreenEngine;
-      engineInit = &mScreenEngineInit;
       break;
     case BrowserEngine:
       if (!mBrowserEngine) {
@@ -215,7 +228,6 @@ CamerasParent::SetupEngine(CaptureEngine aCapEngine)
         mBrowserEngine = webrtc::VideoEngine::Create(mActiveConfig);
       }
       engine = mBrowserEngine;
-      engineInit = &mBrowserEngineInit;
       break;
     case WinEngine:
       if (!mWinEngine) {
@@ -224,7 +236,6 @@ CamerasParent::SetupEngine(CaptureEngine aCapEngine)
         mWinEngine = webrtc::VideoEngine::Create(mActiveConfig);
       }
       engine = mWinEngine;
-      engineInit = &mWinEngineInit;
       break;
     case AppEngine:
       if (!mAppEngine) {
@@ -233,14 +244,12 @@ CamerasParent::SetupEngine(CaptureEngine aCapEngine)
         mAppEngine = webrtc::VideoEngine::Create(mActiveConfig);
       }
       engine = mAppEngine;
-      engineInit = &mAppEngineInit;
       break;
     case CameraEngine:
       if (!mCameraEngine) {
         mCameraEngine = webrtc::VideoEngine::Create();
       }
       engine = mCameraEngine;
-      engineInit = &mCameraEngineInit;
       break;
     default:
       LOG(("Invalid webrtc Video engine"));
@@ -263,8 +272,6 @@ CamerasParent::SetupEngine(CaptureEngine aCapEngine)
     LOG(("ViEBase::Init failed"));
     return false;
   }
-
-  *engineInit = true;
 
   mPtrViECapture = webrtc::ViECapture::GetInterface(engine);
   if (!mPtrViECapture) {
@@ -449,7 +456,11 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
     return false;
   }
 
-  int error = mPtrViERender->AddRenderer(capnum, webrtc::kVideoI420, (webrtc::ExternalRenderer*)this);
+  auto cbh = mCallbacks.AppendElement(
+    new CallbackHelper(static_cast<CaptureEngine>(aCapEngine), capnum));
+  auto render = static_cast<webrtc::ExternalRenderer*>(*cbh);
+
+  int error = mPtrViERender->AddRenderer(capnum, webrtc::kVideoI420, render);
   if (error == -1) {
     return false;
   }
@@ -489,6 +500,15 @@ CamerasParent::RecvStopCapture(const int& aCapEngine,
   mPtrViERender->RemoveRenderer(capnum);
   mPtrViECapture->StopCapture(capnum);
 
+  for (int i = 0; i < mCallbacks.Length(); i++) {
+    if (mCallbacks[i]->mCapEngine == aCapEngine
+        && mCallbacks[i]->mCapturerId == capnum) {
+      delete mCallbacks[i];
+      mCallbacks.RemoveElementAt(i);
+      break;
+    }
+  }
+
   return true;
 }
 
@@ -509,11 +529,6 @@ CamerasParent::CamerasParent()
     mBrowserEngine(nullptr),
     mWinEngine(nullptr),
     mAppEngine(nullptr),
-    mCameraEngineInit(false),
-    mScreenEngineInit(false),
-    mBrowserEngineInit(false),
-    mWinEngineInit(false),
-    mAppEngineInit(false),
     mShmemInitialized(false)
 {
 #if defined(PR_LOGGING)
@@ -564,6 +579,10 @@ CamerasParent::~CamerasParent()
   mWinEngine = nullptr;
   mBrowserEngine = nullptr;
   mAppEngine = nullptr;
+
+  for (int i = 0; i < mCallbacks.Length(); i++) {
+    delete mCallbacks[i];
+  }
 }
 
 PCamerasParent* CreateCamerasParent() {

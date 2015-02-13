@@ -143,12 +143,36 @@ int ReleaseCaptureDevice(CaptureEngine aCapEngine, const int capture_id)
   }
 }
 
+void
+CamerasChild::AddCallback(const CaptureEngine aCapEngine, const int capture_id,
+                          webrtc::ExternalRenderer* render)
+{
+  CapturerElement ce;
+  ce.engine = aCapEngine;
+  ce.id = capture_id;
+  ce.callback = render;
+  mCallbacks.AppendElement(ce);
+}
+
+void
+CamerasChild::RemoveCallback(const CaptureEngine aCapEngine, const int capture_id)
+{
+  for (int i = 0; i < mCallbacks.Length(); i++) {
+    CapturerElement ce = mCallbacks[i];
+    if (ce.engine == aCapEngine && ce.id == capture_id) {
+      mCallbacks.RemoveElementAt(i);
+      break;
+    }
+  }
+}
+
 int StartCapture(CaptureEngine aCapEngine,
-                 const int capture_id, webrtc::CaptureCapability& webrtcCaps,
+                 const int capture_id,
+                 webrtc::CaptureCapability& webrtcCaps,
                  webrtc::ExternalRenderer* cb)
 {
   LOG((__PRETTY_FUNCTION__));
-  Cameras()->Callback() = cb;
+  Cameras()->AddCallback(aCapEngine, capture_id, cb);
   CaptureCapability capCap(webrtcCaps.width,
                            webrtcCaps.height,
                            webrtcCaps.maxFPS,
@@ -168,7 +192,7 @@ int StopCapture(CaptureEngine aCapEngine, const int capture_id)
 {
   LOG((__PRETTY_FUNCTION__));
   if (Cameras()->SendStopCapture(aCapEngine, capture_id)) {
-    Cameras()->Callback() = nullptr;
+    Cameras()->RemoveCallback(aCapEngine, capture_id);
     return 0;
   } else {
     return -1;
@@ -196,17 +220,22 @@ void Shutdown()
 }
 
 bool
-CamerasChild::RecvDeliverFrame(mozilla::ipc::Shmem&& shmem,
+CamerasChild::RecvDeliverFrame(const int& capEngine,
+                               const int& capId,
+                               mozilla::ipc::Shmem&& shmem,
                                const int& size,
                                const uint32_t& time_stamp,
                                const int64_t& ntp_time,
                                const int64_t& render_time)
 {
   LOG((__PRETTY_FUNCTION__));
-  if (Cameras()->Callback()) {
+  CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
+  if (Cameras()->Callback(capEng, capId)) {
     unsigned char* image = shmem.get<unsigned char>();
-    Cameras()->Callback()->DeliverFrame(image, size, time_stamp,
-                                        ntp_time, render_time, nullptr);
+    Cameras()->Callback(capEng, capId)->DeliverFrame(image, size,
+                                                     time_stamp,
+                                                     ntp_time, render_time,
+                                                     nullptr);
     Cameras()->SendReleaseFrame(shmem);
   } else {
     LOG(("DeliverFrame called with dead callback"));
@@ -215,12 +244,15 @@ CamerasChild::RecvDeliverFrame(mozilla::ipc::Shmem&& shmem,
 }
 
 bool
-CamerasChild::RecvFrameSizeChange(const int& w, const int& h)
+CamerasChild::RecvFrameSizeChange(const int& capEngine,
+                                  const int& capId,
+                                  const int& w, const int& h)
 {
   LOG((__PRETTY_FUNCTION__));
   // XXX: Needs a lock
-  if (Cameras()->Callback()) {
-    Cameras()->Callback()->FrameSizeChange(w, h, 0);
+  CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
+  if (Cameras()->Callback(capEng, capId)) {
+    Cameras()->Callback(capEng, capId)->FrameSizeChange(w, h, 0);
   } else {
     LOG(("Frame size change with dead callback"));
   }
@@ -228,7 +260,6 @@ CamerasChild::RecvFrameSizeChange(const int& w, const int& h)
 }
 
 CamerasChild::CamerasChild()
-  : mCallback(nullptr)
 {
 #if defined(PR_LOGGING)
   if (!gCamerasChildLog)
@@ -251,6 +282,19 @@ CamerasChild::~CamerasChild()
 
 PCamerasChild* CreateCamerasChild() {
   return new CamerasChild();
+}
+
+webrtc::ExternalRenderer* CamerasChild::Callback(CaptureEngine aCapEngine,
+                                                 int capture_id)
+{
+  for (int i = 0; i < mCallbacks.Length(); i++) {
+    CapturerElement ce = mCallbacks[i];
+    if (ce.engine == aCapEngine && ce.id == capture_id) {
+      return ce.callback;
+    }
+  }
+
+  return nullptr;
 }
 
 }
