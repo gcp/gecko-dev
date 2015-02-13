@@ -1,0 +1,89 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set sw=2 ts=8 et ft=cpp : */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "mozilla/Assertions.h"
+#include "AudioParent.h"
+#include "nsThreadUtils.h"
+#include "prlog.h"
+
+PRLogModuleInfo *gAudioParentLog;
+
+#undef LOG
+#undef LOG_ENABLED
+#if defined(PR_LOGGING)
+#define LOG(args) PR_LOG(gAudioParentLog, PR_LOG_DEBUG, args)
+#define LOG_ENABLED() PR_LOG_TEST(gAudioParentLog, 5)
+#else
+#define LOG(args)
+#define LOG_ENABLED() (false)
+#endif
+
+namespace mozilla {
+namespace audio {
+
+static AudioParent* sAudioParent = nullptr;
+
+bool
+AudioParent::RecvGetMaxChannelCount(int *aChannelCount)
+{
+  return true;
+}
+
+bool
+AudioParent::RecvGetMinLatency(const StreamParams& aParams, int *aMinLatency)
+{
+  return true;
+}
+
+bool
+AudioParent::RecvGetPreferredSampleRate(int *aPreferredRate)
+{
+  return true;
+}
+
+bool
+AudioParent::RecvGetBackendId(nsCString* aBackendId)
+{
+  return true;
+}
+
+void
+AudioParent::ActorDestroy(ActorDestroyReason aWhy)
+{
+  // No more IPC from here
+  LOG((__PRETTY_FUNCTION__));
+}
+
+AudioParent::AudioParent()
+  : mShmemInitialized(false)
+{
+#if defined(PR_LOGGING)
+  if (!gAudioParentLog)
+    gAudioParentLog = PR_NewLogModule("AudioParent");
+#endif
+  LOG(("AudioParent: %p", this));
+
+  mPBackgroundThread = NS_GetCurrentThread();
+  sAudioParent = this;
+
+  MOZ_COUNT_CTOR(AudioParent);
+}
+
+AudioParent::~AudioParent()
+{
+  LOG(("~AudioParent: %p", this));
+
+  MOZ_COUNT_DTOR(AudioParent);
+
+  DeallocShmem(mShmem);
+}
+
+PAudioParent* CreateAudioParent() {
+  return new AudioParent();
+}
+
+}
+}

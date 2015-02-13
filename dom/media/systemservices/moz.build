@@ -5,14 +5,18 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 if CONFIG['MOZ_WEBRTC']:
-    EXPORTS += ['CamerasChild.h',
+    EXPORTS += ['AudioChild.h',
+                'AudioParent.h',
+                'CamerasChild.h',
                 'CamerasParent.h',
                 'CamerasUtils.h',
                 'LoadManager.h',
                 'LoadManagerFactory.h',
                 'LoadMonitor.h',
     ]
-    UNIFIED_SOURCES += ['CamerasChild.cpp',
+    UNIFIED_SOURCES += ['AudioChild.cpp',
+                        'AudioParent.cpp',
+                        'CamerasChild.cpp',
                         'CamerasParent.cpp',
                         'CamerasUtils.cpp',
                         'LoadManager.cpp',
@@ -20,6 +24,7 @@ if CONFIG['MOZ_WEBRTC']:
                         'LoadMonitor.cpp',
     ]
     IPDL_SOURCES = [
+        'PAudio.ipdl',
         'PCameras.ipdl',
     ]
     LOCAL_INCLUDES += [

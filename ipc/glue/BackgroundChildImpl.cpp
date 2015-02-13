@@ -8,6 +8,7 @@
 #include "BroadcastChannelChild.h"
 #include "FileDescriptorSetChild.h"
 #include "CamerasChild.h"
+#include "AudioChild.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/PBlobChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
@@ -240,6 +241,20 @@ BackgroundChildImpl::AllocPCamerasChild()
 
 bool
 BackgroundChildImpl::DeallocPCamerasChild(camera::PCamerasChild *aActor)
+{
+  MOZ_ASSERT(aActor);
+  delete aActor;
+  return true;
+}
+
+audio::PAudioChild*
+BackgroundChildImpl::AllocPAudioChild()
+{
+  return audio::CreateAudioChild();
+}
+
+bool
+BackgroundChildImpl::DeallocPAudioChild(audio::PAudioChild *aActor)
 {
   MOZ_ASSERT(aActor);
   delete aActor;

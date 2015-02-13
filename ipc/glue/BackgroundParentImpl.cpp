@@ -7,6 +7,7 @@
 #include "BroadcastChannelParent.h"
 #include "FileDescriptorSetParent.h"
 #include "CamerasParent.h"
+#include "AudioParent.h"
 #include "mozilla/AppProcessChecker.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/ContentParent.h"
@@ -368,6 +369,20 @@ BackgroundParentImpl::DeallocPBroadcastChannelParent(
   MOZ_ASSERT(aActor);
 
   delete static_cast<BroadcastChannelParent*>(aActor);
+  return true;
+}
+
+audio::PAudioParent*
+BackgroundParentImpl::AllocPAudioParent()
+{
+  return audio::CreateAudioParent();
+}
+
+bool
+BackgroundParentImpl::DeallocPAudioParent(audio::PAudioParent *aActor)
+{
+  MOZ_ASSERT(aActor);
+  delete aActor;
   return true;
 }
 

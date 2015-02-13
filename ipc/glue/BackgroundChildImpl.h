@@ -77,6 +77,12 @@ protected:
   virtual bool
   DeallocPCamerasChild(PCamerasChild* aActor) MOZ_OVERRIDE;
 
+  virtual PAudioChild*
+  AllocPAudioChild() MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPAudioChild(PAudioChild* aActor) MOZ_OVERRIDE;
+
   virtual PVsyncChild*
   AllocPVsyncChild() MOZ_OVERRIDE;
 

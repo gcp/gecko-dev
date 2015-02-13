@@ -1,0 +1,33 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PBackground;
+
+namespace mozilla {
+namespace audio {
+
+struct StreamParams
+{
+  int format;
+  int rate;
+  int channels;
+  int stream_type;
+};
+
+sync protocol PAudio
+{
+  manager PBackground;
+// child:
+
+parent:
+  sync GetMaxChannelCount() returns (int ch);
+  sync GetMinLatency(StreamParams params) returns (int latency);
+  sync GetPreferredSampleRate() returns (int rate);
+  sync GetBackendId() returns (nsCString backend);
+
+  async __delete__();
+};
+
+} // namespace camera
+} // namespace mozilla

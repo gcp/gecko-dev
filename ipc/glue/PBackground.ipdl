@@ -9,6 +9,7 @@ include protocol PBroadcastChannel;
 include protocol PFileDescriptorSet;
 include protocol PVsync;
 include protocol PCameras;
+include protocol PAudio;
 
 include DOMTypes;
 include PBackgroundSharedTypes;
@@ -27,6 +28,7 @@ sync protocol PBackground
   manages PFileDescriptorSet;
   manages PVsync;
   manages PCameras;
+  manages PAudio;
 
 parent:
   // Only called at startup during mochitests to check the basic infrastructure.
@@ -37,6 +39,8 @@ parent:
   PVsync();
 
   PCameras();
+
+  PAudio();
 
   PBroadcastChannel(PrincipalInfo pInfo, nsString origin, nsString channel);
 

@@ -90,6 +90,12 @@ protected:
   virtual bool
   DeallocPCamerasParent(PCamerasParent* aActor) MOZ_OVERRIDE;
 
+  virtual PAudioParent*
+  AllocPAudioParent() MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPAudioParent(PAudioParent* aActor) MOZ_OVERRIDE;
+
   virtual bool
   RecvRegisterServiceWorker(const ServiceWorkerRegistrationData& aData)
                             MOZ_OVERRIDE;
