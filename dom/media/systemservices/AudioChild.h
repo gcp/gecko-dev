@@ -13,6 +13,10 @@
 namespace mozilla {
 namespace audio {
 
+int GetMaxChannelCount();
+int GetMinLatency(AudioStreamParams params);
+int GetPreferredSampleRate();
+
 class AudioChild :
   public PAudioChild
 {

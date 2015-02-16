@@ -53,6 +53,39 @@ Audio()
   return static_cast<AudioChild*>(sAudio);
 }
 
+int GetMaxChannelCount()
+{
+  LOG((__PRETTY_FUNCTION__));
+  int channels = 0;
+  if (Audio()->SendGetMaxChannelCount(&channels)) {
+    return channels;
+  } else {
+    return 0;
+  }
+}
+
+int GetMinLatency(AudioStreamParams params)
+{
+  LOG((__PRETTY_FUNCTION__));
+  int minlatency = 0;
+  if (Audio()->SendGetMinLatency(params, &minlatency)) {
+    return minlatency;
+  } else {
+    return 0;
+  }
+}
+
+int GetPreferredSampleRate()
+{
+  LOG((__PRETTY_FUNCTION__));
+  int rate = 0;
+  if (Audio()->SendGetPreferredSampleRate(&rate)) {
+    return rate;
+  } else {
+    return 0;
+  }
+}
+
 AudioChild::AudioChild()
 {
 #if defined(PR_LOGGING)

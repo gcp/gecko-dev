@@ -29,24 +29,75 @@ static AudioParent* sAudioParent = nullptr;
 bool
 AudioParent::RecvGetMaxChannelCount(int *aChannelCount)
 {
+  LOG((__PRETTY_FUNCTION__));
+  if (!EnsureInitialized()) {
+    return false;
+  }
+  uint32_t channels;
+  int rv = cubeb_get_max_channel_count(mCubebContext,
+                                       &channels);
+  if (rv != CUBEB_OK) {
+    return false;
+  }
+  *aChannelCount = channels;
   return true;
 }
 
 bool
-AudioParent::RecvGetMinLatency(const StreamParams& aParams, int *aMinLatency)
+AudioParent::RecvGetMinLatency(const AudioStreamParams& aParams, int *aMinLatency)
 {
+  LOG((__PRETTY_FUNCTION__));
+  if (!EnsureInitialized()) {
+    return false;
+  }
+  uint32_t latency;
+  cubeb_stream_params params;
+  params.format = static_cast<cubeb_sample_format>(aParams.format());
+  params.rate = aParams.rate();
+  params.channels = aParams.channels();
+#ifdef ANDROID
+  params.stream_type = static_cast<cubeb_stream_type>(aParams.stream_type());
+#endif
+  int rv = cubeb_get_min_latency(mCubebContext,
+                                 params,
+                                 &latency);
+  if (rv != CUBEB_OK) {
+    return false;
+  }
+  *aMinLatency = latency;
   return true;
 }
 
 bool
 AudioParent::RecvGetPreferredSampleRate(int *aPreferredRate)
 {
+  LOG((__PRETTY_FUNCTION__));
+  if (!EnsureInitialized()) {
+    return false;
+  }
+  uint32_t rate;
+  int rv = cubeb_get_preferred_sample_rate(mCubebContext, &rate);
+  if (rv != CUBEB_OK) {
+    return false;
+  }
+  *aPreferredRate = rate;
   return true;
 }
 
-bool
-AudioParent::RecvGetBackendId(nsCString* aBackendId)
+bool AudioParent::EnsureInitialized()
 {
+  if (mCubebContext != nullptr) {
+    return true;
+  }
+
+  int rv = cubeb_init(&mCubebContext, "AudioParent");
+  if (rv != CUBEB_OK) {
+    MOZ_ASSERT(mCubebContext == nullptr);
+    return false;
+  }
+
+  MOZ_ASSERT(mCubebContext != nullptr);
+
   return true;
 }
 
@@ -58,7 +109,10 @@ AudioParent::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 AudioParent::AudioParent()
-  : mShmemInitialized(false)
+  : mShmemInitialized(false),
+    mCubebContext(nullptr),
+    mVolumeScale(1.0),
+    mCubebLatency(0)
 {
 #if defined(PR_LOGGING)
   if (!gAudioParentLog)
@@ -79,6 +133,8 @@ AudioParent::~AudioParent()
   MOZ_COUNT_DTOR(AudioParent);
 
   DeallocShmem(mShmem);
+
+  cubeb_destroy(mCubebContext);
 }
 
 PAudioParent* CreateAudioParent() {

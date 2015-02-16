@@ -7,7 +7,7 @@ include protocol PBackground;
 namespace mozilla {
 namespace audio {
 
-struct StreamParams
+struct AudioStreamParams
 {
   int format;
   int rate;
@@ -22,9 +22,8 @@ sync protocol PAudio
 
 parent:
   sync GetMaxChannelCount() returns (int ch);
-  sync GetMinLatency(StreamParams params) returns (int latency);
+  sync GetMinLatency(AudioStreamParams params) returns (int latency);
   sync GetPreferredSampleRate() returns (int rate);
-  sync GetBackendId() returns (nsCString backend);
 
   async __delete__();
 };

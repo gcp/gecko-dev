@@ -9,6 +9,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticMutex.h"
 #include "CubebUtils.h"
+#include "AudioChild.h"
 #include "nsAutoRef.h"
 #include "prdtoa.h"
 
@@ -149,15 +150,7 @@ void ShutdownLibrary()
 
 uint32_t MaxNumberOfChannels()
 {
-  cubeb* cubebContext = GetCubebContext();
-  uint32_t maxNumberOfChannels;
-  if (cubebContext &&
-      cubeb_get_max_channel_count(cubebContext,
-                                  &maxNumberOfChannels) == CUBEB_OK) {
-    return maxNumberOfChannels;
-  }
-
-  return 0;
+  return mozilla::audio::GetMaxChannelCount();
 }
 
 uint32_t PreferredSampleRate()

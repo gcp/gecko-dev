@@ -9,6 +9,7 @@
 
 #include "mozilla/audio/PAudioParent.h"
 #include "mozilla/ipc/Shmem.h"
+#include "cubeb/cubeb.h"
 
 #include "AudioChild.h"
 
@@ -21,9 +22,8 @@ class AudioParent :  public PAudioParent
 {
 public:
   virtual bool RecvGetMaxChannelCount(int *) MOZ_OVERRIDE;
-  virtual bool RecvGetMinLatency(const StreamParams&, int*) MOZ_OVERRIDE;
+  virtual bool RecvGetMinLatency(const AudioStreamParams&, int*) MOZ_OVERRIDE;
   virtual bool RecvGetPreferredSampleRate(int *) MOZ_OVERRIDE;
-  virtual bool RecvGetBackendId(nsCString *) MOZ_OVERRIDE;
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
@@ -33,9 +33,16 @@ public:
   virtual ~AudioParent();
 
 protected:
-  // image buffer
+  bool EnsureInitialized();
+
+  // audio buffers1
   bool mShmemInitialized;
   mozilla::ipc::Shmem mShmem;
+
+  // cubeb stuffs
+  cubeb* mCubebContext;
+  double mVolumeScale;
+  uint32_t mCubebLatency;
 
   // PBackground parent thread
   nsCOMPtr<nsIThread> mPBackgroundThread;
