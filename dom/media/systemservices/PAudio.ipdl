@@ -24,6 +24,8 @@ parent:
   sync GetMaxChannelCount() returns (int ch);
   sync GetMinLatency(AudioStreamParams params) returns (int latency);
   sync GetPreferredSampleRate() returns (int rate);
+  sync StreamInit(nsCString name, AudioStreamParams params, int latency)
+    returns (int id);
 
   async __delete__();
 };

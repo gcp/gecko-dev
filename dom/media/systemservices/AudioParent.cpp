@@ -134,6 +134,10 @@ AudioParent::~AudioParent()
 
   DeallocShmem(mShmem);
 
+  for (int i = 0; i < mStreams.Length(); i++) {
+    cubeb_stream_destroy(mStreams[i]);
+  }
+
   cubeb_destroy(mCubebContext);
 }
 

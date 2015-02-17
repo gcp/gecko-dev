@@ -24,6 +24,7 @@ public:
   virtual bool RecvGetMaxChannelCount(int *) MOZ_OVERRIDE;
   virtual bool RecvGetMinLatency(const AudioStreamParams&, int*) MOZ_OVERRIDE;
   virtual bool RecvGetPreferredSampleRate(int *) MOZ_OVERRIDE;
+  virtual bool RecvStreamInit(const nsCString&, const AudioStreamParams&, const int&, int*) MOZ_OVERRIDE;
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
@@ -35,7 +36,7 @@ public:
 protected:
   bool EnsureInitialized();
 
-  // audio buffers1
+  // audio buffers
   bool mShmemInitialized;
   mozilla::ipc::Shmem mShmem;
 
@@ -43,6 +44,9 @@ protected:
   cubeb* mCubebContext;
   double mVolumeScale;
   uint32_t mCubebLatency;
+
+  // streams
+  nsTArray<cubeb_stream*> mStreams;
 
   // PBackground parent thread
   nsCOMPtr<nsIThread> mPBackgroundThread;

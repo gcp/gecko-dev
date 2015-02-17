@@ -56,6 +56,7 @@ Audio()
 int GetMaxChannelCount()
 {
   LOG((__PRETTY_FUNCTION__));
+  MOZ_ASSERT(sAudioChildThread == NS_GetCurrentThread());
   int channels = 0;
   if (Audio()->SendGetMaxChannelCount(&channels)) {
     return channels;
@@ -67,6 +68,7 @@ int GetMaxChannelCount()
 int GetMinLatency(AudioStreamParams params)
 {
   LOG((__PRETTY_FUNCTION__));
+  MOZ_ASSERT(sAudioChildThread == NS_GetCurrentThread());
   int minlatency = 0;
   if (Audio()->SendGetMinLatency(params, &minlatency)) {
     return minlatency;
@@ -78,12 +80,47 @@ int GetMinLatency(AudioStreamParams params)
 int GetPreferredSampleRate()
 {
   LOG((__PRETTY_FUNCTION__));
+  MOZ_ASSERT(sAudioChildThread == NS_GetCurrentThread());
   int rate = 0;
   if (Audio()->SendGetPreferredSampleRate(&rate)) {
     return rate;
   } else {
     return 0;
   }
+}
+
+int StreamInit(const nsCString& name,
+               int * stream_id,
+               AudioStreamParams params,
+               unsigned int latency,
+               cubeb_data_callback data_callback,
+               cubeb_state_callback state_callback,
+               void * user_ptr)
+{
+  LOG((__PRETTY_FUNCTION__));
+  MOZ_ASSERT(sAudioChildThread == NS_GetCurrentThread());
+  return Audio()->StreamInit(name, stream_id, params, latency,
+                             data_callback, state_callback, user_ptr);
+}
+
+int
+AudioChild::StreamInit(const nsCString& name,
+                       int * stream_id,
+                       AudioStreamParams params,
+                       unsigned int latency,
+                       cubeb_data_callback data_callback,
+                       cubeb_state_callback state_callback,
+                       void * user_ptr)
+{
+  StreamHelper * helper = new StreamHelper();
+
+  helper->data_callback = data_callback;
+  helper->state_callback = state_callback;
+  helper->user_ptr = user_ptr;
+
+  SendStreamInit(name, params, latency, &helper->stream_id);
+
+  mChildStreams.AppendElement(helper);
 }
 
 AudioChild::AudioChild()
@@ -101,6 +138,10 @@ AudioChild::AudioChild()
 AudioChild::~AudioChild()
 {
   LOG(("~AudioChild: %p", this));
+
+  for (int i = 0; i < mChildStreams.Length(); i++) {
+    delete mChildStreams[i];
+  }
 
   MOZ_COUNT_DTOR(AudioChild);
 }
