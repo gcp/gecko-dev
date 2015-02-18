@@ -24,7 +24,8 @@ public:
   virtual bool RecvGetMaxChannelCount(int *) MOZ_OVERRIDE;
   virtual bool RecvGetMinLatency(const AudioStreamParams&, int*) MOZ_OVERRIDE;
   virtual bool RecvGetPreferredSampleRate(int *) MOZ_OVERRIDE;
-  virtual bool RecvStreamInit(const nsCString&, const AudioStreamParams&, const int&, int*) MOZ_OVERRIDE;
+  virtual bool RecvStreamInit(const nsCString& name, const AudioStreamParams& params,
+                              const int& latency, int* id) MOZ_OVERRIDE;
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
@@ -33,8 +34,19 @@ public:
   AudioParent();
   virtual ~AudioParent();
 
-protected:
+private:
   bool EnsureInitialized();
+  static cubeb_stream_params ToCubebParams(AudioStreamParams & params);
+  long DataCallback(cubeb_stream *aStream, void* aBuffer, long aFrames);
+  void StateCallback(cubeb_stream *aStream, cubeb_state aState);
+
+  // cubeb callbacks
+  static long DataCallback_S(cubeb_stream* aStream, void* aThis, void* aBuffer, long aFrames) {
+    return static_cast<AudioParent*>(aThis)->DataCallback(aStream, aBuffer, aFrames);
+  }
+  static void StateCallback_S(cubeb_stream* aStream, void* aThis, cubeb_state aState) {
+    static_cast<AudioParent*>(aThis)->StateCallback(aStream, aState);
+  }
 
   // audio buffers
   bool mShmemInitialized;

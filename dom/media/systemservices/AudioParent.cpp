@@ -43,6 +43,19 @@ AudioParent::RecvGetMaxChannelCount(int *aChannelCount)
   return true;
 }
 
+static cubeb_stream_params
+AudioParent::ToCubebParams(AudioStreamParams & aParams)
+{
+  cubeb_stream_params params;
+  params.format = static_cast<cubeb_sample_format>(aParams.format());
+  params.rate = aParams.rate();
+  params.channels = aParams.channels();
+#ifdef ANDROID
+  params.stream_type = static_cast<cubeb_stream_type>(aParams.stream_type());
+#endif
+  return params;
+}
+
 bool
 AudioParent::RecvGetMinLatency(const AudioStreamParams& aParams, int *aMinLatency)
 {
@@ -51,13 +64,7 @@ AudioParent::RecvGetMinLatency(const AudioStreamParams& aParams, int *aMinLatenc
     return false;
   }
   uint32_t latency;
-  cubeb_stream_params params;
-  params.format = static_cast<cubeb_sample_format>(aParams.format());
-  params.rate = aParams.rate();
-  params.channels = aParams.channels();
-#ifdef ANDROID
-  params.stream_type = static_cast<cubeb_stream_type>(aParams.stream_type());
-#endif
+  cubeb_stream_params params = ToCubebParams(aParams);
   int rv = cubeb_get_min_latency(mCubebContext,
                                  params,
                                  &latency);
@@ -81,6 +88,40 @@ AudioParent::RecvGetPreferredSampleRate(int *aPreferredRate)
     return false;
   }
   *aPreferredRate = rate;
+  return true;
+}
+
+long
+AudioParent::DataCallback(cubeb_stream *aStream, void* aBuffer, long aFrames)
+{
+}
+
+void
+AudioParent::StateCallback(cubeb_stream *aStream, cubeb_state aState)
+{
+}
+
+bool
+AudioParent::RecvStreamInit(const nsCString& aName,
+                            const AudioStreamParams& aParams,
+                            const int& aLatency,
+                            int* aId)
+{
+  cubeb_stream *stream;
+  cubeb_stream_params params = ToCubebParams(aParams);
+  int rv = cubeb_stream_init(mCubebContext,
+                             &stream,
+                             aName.get(),
+                             params,
+                             latency,
+                             DataCallback_S,
+                             StateCallback_S,
+                             this);
+  if (rv != CUBEB_OK) {
+    return false;
+  }
+  *aId = mStreams.Length();
+  mStreams.AppendElement(stream);
   return true;
 }
 
