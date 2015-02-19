@@ -29,6 +29,8 @@ class StreamHelper
 {
 public:
   int stream_id;
+  int channels;
+  int format;
   cubeb_data_callback data_callback;
   cubeb_state_callback state_callback;
   void * user_ptr;
@@ -38,6 +40,12 @@ class AudioChild :
   public PAudioChild
 {
 public:
+  // PAudio
+  bool RecvDataCallback(const int& stream_id,
+                        mozilla::ipc::Shmem&& aShmem,
+                        const int& num_frames) MOZ_OVERRIDE;
+
+  // own
   AudioChild();
   virtual ~AudioChild();
   int StreamInit(const nsCString& name,
@@ -47,9 +55,12 @@ public:
                  cubeb_data_callback data_callback,
                  cubeb_state_callback state_callback,
                  void * user_ptr);
-
 private:
+  static int CubebFormatToBytes(cubeb_sample_format aFormat);
+
   nsTArray<StreamHelper*> mChildStreams;
+  mozilla::ipc::Shmem mShmem;
+  bool mShmemInitialized;
 };
 
 PAudioChild* CreateAudioChild();

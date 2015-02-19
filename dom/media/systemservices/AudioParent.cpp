@@ -43,7 +43,7 @@ AudioParent::RecvGetMaxChannelCount(int *aChannelCount)
   return true;
 }
 
-static cubeb_stream_params
+cubeb_stream_params
 AudioParent::ToCubebParams(AudioStreamParams & aParams)
 {
   cubeb_stream_params params;
@@ -91,14 +91,84 @@ AudioParent::RecvGetPreferredSampleRate(int *aPreferredRate)
   return true;
 }
 
+class DataCallbackRunnable : public nsRunnable {
+public:
+  DataCallbackRunnable(int aStreamId, mozilla::ipc::Shmem&& aShmem, int aFrames)
+    : mStreamId(aStreamId), mShmem(aShmem), mFrames(aFrames) {};
+
+  NS_IMETHOD Run() {
+    sAudioParent->SendDataCallback(mStreamId, mShmem, mFrames);
+    return NS_OK;
+  }
+
+private:
+  int mStreamId;
+  mozilla::ipc::Shmem&& aShmem;
+  void *mBuffer;
+  int mFrames;
+};
+
 long
 AudioParent::DataCallback(cubeb_stream *aStream, void* aBuffer, long aFrames)
 {
+  MonitorAutoLock lock(mMonitor);
+  int stream_id = -1;
+  for (int i = 0; i < mStreams.Length(); i++) {
+    if (mStreams[i].stream == aStream) {
+      stream_id = i;
+      break;
+    }
+  }
+  if (stream_id == -1) {
+    return CUBEB_ERROR;
+  }
+
+  mStreams[i].buffer = aBuffer;
+  mStreams[i].filled_frames = 0;
+
+  nsRefPtr<DataCallbackRunnable> runnable =
+    new DataCallbackRunnable(stream_id, mShmem, aFrames);
+  sAudioParent->GetBackgroundThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+
+  // wait for signal that we received data back, effectively
+  // blocking us
+  do {
+    mMonitor.Wait();
+  } while (mStreams[i].filled_frames != 0);
+
+  return mStreams[i].filled_frames;
+}
+
+bool
+AudioParent::RecvDataDelivery(const int& stream_id,
+                              mozilla::ipc::Shmem&& buffer,
+                              const int& delivered_frames)
+{
+  MonitorAutoLock lock(mMonitor);
+  StreamInfo * stream_info = nullptr;
+  if (stream_id < mStreams.Length()) {
+    stream_info = &mStreams[stream_id];
+  } else {
+    return false;
+  }
+
+  if (stream_info->buffer == nullptr) {
+    return false;
+  }
+
+  size_t len = delivered_frames * stream_info->channels
+               * CubebFormatToBytes(stream_info->format);
+  memcpy(mShmem.get<char>(), stream_info->buffer, len);
+  streaminfo->filled_frames = delivered_frames;
+
+  // signal
+  mMonitor.NotifyAll();
 }
 
 void
 AudioParent::StateCallback(cubeb_stream *aStream, cubeb_state aState)
 {
+  // XXX
 }
 
 bool
@@ -107,6 +177,7 @@ AudioParent::RecvStreamInit(const nsCString& aName,
                             const int& aLatency,
                             int* aId)
 {
+  MonitorAutoLock lock(mMonitor);
   cubeb_stream *stream;
   cubeb_stream_params params = ToCubebParams(aParams);
   int rv = cubeb_stream_init(mCubebContext,
@@ -121,7 +192,13 @@ AudioParent::RecvStreamInit(const nsCString& aName,
     return false;
   }
   *aId = mStreams.Length();
-  mStreams.AppendElement(stream);
+  StreamInfo streaminfo;
+  streaminfo.stream = stream;
+  streaminfo.channels = aParams.channels;
+  streaminfo.format = aParams.format;
+  streaminfo.buffer = nullptr;
+  streaminfo.filled_frames = 0;
+  mStreams.AppendElement(streaminfo);
   return true;
 }
 
@@ -150,10 +227,11 @@ AudioParent::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 AudioParent::AudioParent()
-  : mShmemInitialized(false),
+  : //mShmemInitialized(false),
     mCubebContext(nullptr),
     mVolumeScale(1.0),
-    mCubebLatency(0)
+    mCubebLatency(0),
+    mMonitor("AudioParent")
 {
 #if defined(PR_LOGGING)
   if (!gAudioParentLog)
@@ -173,10 +251,11 @@ AudioParent::~AudioParent()
 
   MOZ_COUNT_DTOR(AudioParent);
 
+  // XXX who needs to do this
   DeallocShmem(mShmem);
 
   for (int i = 0; i < mStreams.Length(); i++) {
-    cubeb_stream_destroy(mStreams[i]);
+    cubeb_stream_destroy(mStreams[i].stream);
   }
 
   cubeb_destroy(mCubebContext);

@@ -18,7 +18,8 @@ struct AudioStreamParams
 sync protocol PAudio
 {
   manager PBackground;
-// child:
+child:
+  async DataCallback(int stream_id, Shmem buffer, int ask_frames);
 
 parent:
   sync GetMaxChannelCount() returns (int ch);
@@ -26,6 +27,7 @@ parent:
   sync GetPreferredSampleRate() returns (int rate);
   sync StreamInit(nsCString name, AudioStreamParams params, int latency)
     returns (int id);
+  async DataDelivery(int stream_id, Shmem buffer, int deliver_frames);
 
   async __delete__();
 };

@@ -10,13 +10,21 @@
 #include "mozilla/audio/PAudioParent.h"
 #include "mozilla/ipc/Shmem.h"
 #include "cubeb/cubeb.h"
+#include "mozilla/Monitor.h"
 
 #include "AudioChild.h"
 
 namespace mozilla {
 namespace audio {
 
-class AudioParent;
+struct StreamInfo
+{
+  cubeb_stream *stream;
+  int channels;
+  int format;
+  int filled_frames;
+  void *buffer;
+};
 
 class AudioParent :  public PAudioParent
 {
@@ -26,6 +34,9 @@ public:
   virtual bool RecvGetPreferredSampleRate(int *) MOZ_OVERRIDE;
   virtual bool RecvStreamInit(const nsCString& name, const AudioStreamParams& params,
                               const int& latency, int* id) MOZ_OVERRIDE;
+  virtual bool RecvDataDelivery(const int& stream_id,
+                                mozilla::ipc::Shmem&& buffer,
+                                const int& deliver_frames) MOZ_OVERRIDE;
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
@@ -49,7 +60,7 @@ private:
   }
 
   // audio buffers
-  bool mShmemInitialized;
+  // bool mShmemInitialized;
   mozilla::ipc::Shmem mShmem;
 
   // cubeb stuffs
@@ -57,8 +68,11 @@ private:
   double mVolumeScale;
   uint32_t mCubebLatency;
 
-  // streams
-  nsTArray<cubeb_stream*> mStreams;
+  // protects both data and streams
+  mozilla::Monitor mMonitor;
+
+  // stream info
+  nsTArray<StreamInfo> mStreams;
 
   // PBackground parent thread
   nsCOMPtr<nsIThread> mPBackgroundThread;
