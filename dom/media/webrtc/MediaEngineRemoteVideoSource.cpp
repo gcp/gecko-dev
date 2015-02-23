@@ -109,8 +109,7 @@ MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
 
   mSources.AppendElement(aStream);
 
-  aStream->AddTrack(aID, 0, new VideoSegment());
-  aStream->AdvanceKnownTracksTime(STREAM_TIME_MAX);
+  aStream->AddTrack(aID, 0, new VideoSegment(), SourceMediaStream::ADDTRACK_QUEUED);
 
   if (mState == kStarted) {
     LOG(("State is not started"));
