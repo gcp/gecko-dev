@@ -59,6 +59,31 @@ MediaEngineRemoteVideoSource::Init() {
 void
 MediaEngineRemoteVideoSource::Shutdown() {
   LOG((__PRETTY_FUNCTION__));
+  if (!mInitDone) {
+    return;
+  }
+  if (mState == kStarted) {
+    SourceMediaStream *source;
+    bool empty;
+
+    while (1) {
+      {
+        MonitorAutoLock lock(mMonitor);
+        empty = mSources.IsEmpty();
+        if (empty) {
+          break;
+        }
+        source = mSources[0];
+      }
+      Stop(source, kVideoTrack); // XXX change to support multiple tracks
+    }
+    MOZ_ASSERT(mState == kStopped);
+  }
+
+  if (mState == kAllocated || mState == kStopped) {
+    Deallocate();
+  }
+
   mozilla::camera::Shutdown();
   return;
 }
@@ -69,14 +94,31 @@ MediaEngineRemoteVideoSource::Allocate(const dom::MediaTrackConstraints& aConstr
 {
   LOG((__PRETTY_FUNCTION__));
 
-  ChooseCapability(aConstraints, aPrefs);
-  if (mozilla::camera::AllocateCaptureDevice(mCapEngine,
-                                             NS_ConvertUTF16toUTF8(mUniqueId).get(),
-                                             kMaxUniqueIdLength, mCaptureIndex)) {
-    return NS_ERROR_FAILURE;
+  if (mState == kReleased && mInitDone) {
+    // Note: if shared, we don't allow a later opener to affect the resolution.
+    // (This may change depending on spec changes for Constraints/settings)
+
+    if (!ChooseCapability(aConstraints, aPrefs)) {
+      return NS_ERROR_UNEXPECTED;
+    }
+
+    if (mozilla::camera::AllocateCaptureDevice(mCapEngine,
+                                               NS_ConvertUTF16toUTF8(mUniqueId).get(),
+                                               kMaxUniqueIdLength, mCaptureIndex)) {
+      return NS_ERROR_FAILURE;
+    }
+    mState = kAllocated;
+    LOG(("Video device %d allocated", mCaptureIndex));
+  } else {
+#ifdef PR_LOGGING
+    MonitorAutoLock lock(mMonitor);
+    if (mSources.IsEmpty()) {
+      LOG(("Video device %d reallocated", mCaptureIndex));
+    } else {
+      LOG(("Video device %d allocated shared", mCaptureIndex));
+    }
+#endif
   }
-  mState = kAllocated;
-  LOG(("Video device %d allocated", mCaptureIndex));
 
   return NS_OK;
 }
@@ -85,7 +127,12 @@ nsresult
 MediaEngineRemoteVideoSource::Deallocate()
 {
   LOG((__FUNCTION__));
-  if (mSources.IsEmpty()) {
+  bool empty;
+  {
+    MonitorAutoLock lock(mMonitor);
+    empty = mSources.IsEmpty();
+  }
+  if (empty) {
     if (mState != kStopped && mState != kAllocated) {
       return NS_ERROR_FAILURE;
     }
@@ -107,12 +154,14 @@ MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
     return NS_ERROR_FAILURE;
   }
 
-  mSources.AppendElement(aStream);
+  {
+    MonitorAutoLock lock(mMonitor);
+    mSources.AppendElement(aStream);
+  }
 
   aStream->AddTrack(aID, 0, new VideoSegment(), SourceMediaStream::ADDTRACK_QUEUED);
 
   if (mState == kStarted) {
-    LOG(("State is not started"));
     return NS_OK;
   }
   mImageContainer = layers::LayerManager::CreateImageContainer();
@@ -134,22 +183,23 @@ MediaEngineRemoteVideoSource::Stop(mozilla::SourceMediaStream* aSource,
                                    mozilla::TrackID aID)
 {
   LOG((__PRETTY_FUNCTION__));
-  if (!mSources.RemoveElement(aSource)) {
-    // Already stopped - this is allowed
-    return NS_OK;
-  }
-
-  aSource->EndTrack(aID);
-
-  if (!mSources.IsEmpty()) {
-    return NS_OK;
-  }
-  if (mState != kStarted) {
-    return NS_ERROR_FAILURE;
-  }
-
   {
     MonitorAutoLock lock(mMonitor);
+
+    if (!mSources.RemoveElement(aSource)) {
+      // Already stopped - this is allowed
+      return NS_OK;
+    }
+
+    aSource->EndTrack(aID);
+
+    if (!mSources.IsEmpty()) {
+      return NS_OK;
+    }
+    if (mState != kStarted) {
+      return NS_ERROR_FAILURE;
+    }
+
     mState = kStopped;
     // Drop any cached image so we don't start with a stale image on next
     // usage
@@ -262,8 +312,6 @@ MediaEngineRemoteVideoSource::DeliverFrame(unsigned char* buffer,
   return 0;
 }
 
-typedef nsTArray<uint8_t> CapabilitySet;
-
 size_t
 MediaEngineRemoteVideoSource::NumCapabilities()
 {
@@ -304,7 +352,7 @@ MediaEngineRemoteVideoSource::GetCapability(size_t aIndex,
                                             webrtc::CaptureCapability& aOut)
 {
   if (!mHardcodedCapabilities.IsEmpty()) {
-    MediaEngineRemoteVideoSource::GetCapability(aIndex, aOut);
+    MediaEngineCameraVideoSource::GetCapability(aIndex, aOut);
   }
   NS_ConvertUTF16toUTF8 uniqueId(mUniqueId); // TODO: optimize this?
   mozilla::camera::GetCaptureCapability(mCapEngine,
