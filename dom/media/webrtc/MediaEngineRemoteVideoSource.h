@@ -64,7 +64,7 @@ public:
                                dom::MediaSourceEnum aMediaSource,
                                const char* aMonitorName = "RemoteVideo.Monitor");
 
-  virtual nsresult Allocate(const VideoTrackConstraintsN& aConstraints,
+  virtual nsresult Allocate(const dom::MediaTrackConstraints& aConstraints,
                             const MediaEnginePrefs& aPrefs) MOZ_OVERRIDE;
   virtual nsresult Deallocate() MOZ_OVERRIDE;;
   virtual nsresult Start(SourceMediaStream*, TrackID) MOZ_OVERRIDE;
@@ -86,6 +86,7 @@ private:
   void Init();
   void Shutdown();
   size_t NumCapabilities();
+  void GetCapability(size_t aIndex, webrtc::CaptureCapability& aOut);
 
   dom::MediaSourceEnum mMediaSource; // source of media (camera | application | screen)
   mozilla::camera::CaptureEngine mCapEngine;

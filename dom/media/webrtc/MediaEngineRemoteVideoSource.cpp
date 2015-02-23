@@ -64,7 +64,7 @@ MediaEngineRemoteVideoSource::Shutdown() {
 }
 
 nsresult
-MediaEngineRemoteVideoSource::Allocate(const VideoTrackConstraintsN& aConstraints,
+MediaEngineRemoteVideoSource::Allocate(const dom::MediaTrackConstraints& aConstraints,
                                        const MediaEnginePrefs& aPrefs)
 {
   LOG((__PRETTY_FUNCTION__));
