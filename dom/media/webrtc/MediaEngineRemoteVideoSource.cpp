@@ -264,170 +264,53 @@ MediaEngineRemoteVideoSource::DeliverFrame(unsigned char* buffer,
 
 typedef nsTArray<uint8_t> CapabilitySet;
 
-bool
-MediaEngineRemoteVideoSource::SatisfiesConstraintSet(const MediaTrackConstraintSet &aConstraints,
-                                                     const webrtc::CaptureCapability& aCandidate) {
-  if (!MediaEngineCameraVideoSource::IsWithin(aCandidate.width, aConstraints.mWidth) ||
-      !MediaEngineCameraVideoSource::IsWithin(aCandidate.height, aConstraints.mHeight)) {
-    return false;
-  }
-  if (!MediaEngineCameraVideoSource::IsWithin(aCandidate.maxFPS, aConstraints.mFrameRate)) {
-    return false;
-  }
-  return true;
-}
-
-bool
-MediaEngineRemoteVideoSource::SatisfiesConstraintSets(
-      const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets)
+size_t
+MediaEngineRemoteVideoSource::NumCapabilities()
 {
-  NS_ConvertUTF16toUTF8 uniqueId(mUniqueId);
-  int num = mozilla::camera::NumberOfCapabilities(mCapEngine, uniqueId.get());
-  if (num <= 0) {
-    return true;
-  }
+  NS_ConvertUTF16toUTF8 uniqueId(mUniqueId); // TODO: optimize this?
 
-  CapabilitySet candidateSet;
-  for (int i = 0; i < num; i++) {
-    candidateSet.AppendElement(i);
+  int num = mozilla::camera::NumberOfCapabilities(mCapEngine,
+                                                  uniqueId.get());
+  if (num > 0) {
+    return num;
   }
+  // Mac doesn't support capabilities.
+  //
+  // Hardcode generic desktop capabilities modeled on OSX camera.
+  // Note: Values are empirically picked to be OSX friendly, as on OSX, values
+  // other than these cause the source to not produce.
 
-  for (size_t j = 0; j < aConstraintSets.Length(); j++) {
-    for (size_t i = 0; i < candidateSet.Length();  ) {
-      webrtc::CaptureCapability cap;
-      mozilla::camera::GetCaptureCapability(mCapEngine,
-                                            uniqueId.get(),
-                                            candidateSet[i], cap);
-      if (!SatisfiesConstraintSet(*aConstraintSets[j], cap)) {
-        candidateSet.RemoveElementAt(i);
-      } else {
-        ++i;
-      }
+  if (mHardcodedCapabilities.IsEmpty()) {
+    for (int i = 0; i < 9; i++) {
+      webrtc::CaptureCapability c;
+      c.width = 1920 - i*128;
+      c.height = 1080 - i*72;
+      c.maxFPS = 30;
+      mHardcodedCapabilities.AppendElement(c);
+    }
+    for (int i = 0; i < 16; i++) {
+      webrtc::CaptureCapability c;
+      c.width = 640 - i*40;
+      c.height = 480 - i*30;
+      c.maxFPS = 30;
+      mHardcodedCapabilities.AppendElement(c);
     }
   }
-  return !!candidateSet.Length();
+  return mHardcodedCapabilities.Length();
 }
 
 void
-MediaEngineRemoteVideoSource::ChooseCapability(
-    const VideoTrackConstraintsN &aConstraints,
-    const MediaEnginePrefs &aPrefs)
+MediaEngineRemoteVideoSource::GetCapability(size_t aIndex,
+                                            webrtc::CaptureCapability& aOut)
 {
-  NS_ConvertUTF16toUTF8 uniqueId(mUniqueId);
-  int num = mozilla::camera::NumberOfCapabilities(mCapEngine, uniqueId.get());
-  if (num <= 0) {
-    // Mac doesn't support capabilities.
-    return GuessCapability(aConstraints, aPrefs);
+  if (!mHardcodedCapabilities.IsEmpty()) {
+    MediaEngineRemoteVideoSource::GetCapability(aIndex, aOut);
   }
-
-  // The rest is the full algorithm for cameras that can list their capabilities.
-
-  LOG(("ChooseCapability: prefs: %dx%d @%d-%dfps",
-       aPrefs.mWidth, aPrefs.mHeight, aPrefs.mFPS, aPrefs.mMinFPS));
-
-  CapabilitySet candidateSet;
-  for (int i = 0; i < num; i++) {
-    candidateSet.AppendElement(i);
-  }
-
-  // Pick among capabilities: First apply required constraints.
-
-  for (uint32_t i = 0; i < candidateSet.Length();) {
-    webrtc::CaptureCapability cap;
-    mozilla::camera::GetCaptureCapability(mCapEngine,
-                                          uniqueId.get(),
-                                          candidateSet[i], cap);
-    if (!SatisfiesConstraintSet(aConstraints.mRequired, cap)) {
-      candidateSet.RemoveElementAt(i);
-    } else {
-      ++i;
-    }
-  }
-
-  CapabilitySet tailSet;
-
-  // Then apply advanced (formerly known as optional) constraints.
-
-  if (aConstraints.mAdvanced.WasPassed()) {
-    auto &array = aConstraints.mAdvanced.Value();
-
-    for (uint32_t i = 0; i < array.Length(); i++) {
-      CapabilitySet rejects;
-      for (uint32_t j = 0; j < candidateSet.Length();) {
-        webrtc::CaptureCapability cap;
-        mozilla::camera::GetCaptureCapability(mCapEngine,
-                                              uniqueId.get(),
-                                              candidateSet[j], cap);
-        if (!SatisfiesConstraintSet(array[i], cap)) {
-          rejects.AppendElement(candidateSet[j]);
-          candidateSet.RemoveElementAt(j);
-        } else {
-          ++j;
-        }
-      }
-      (candidateSet.Length()? tailSet : candidateSet).MoveElementsFrom(rejects);
-    }
-  }
-
-  if (!candidateSet.Length()) {
-    candidateSet.AppendElement(0);
-  }
-
-  int prefWidth = aPrefs.GetWidth();
-  int prefHeight = aPrefs.GetHeight();
-
-  // Default is closest to available capability but equal to or below;
-  // otherwise closest above.  Since we handle the num=0 case above and
-  // take the first entry always, we can never exit uninitialized.
-
-  webrtc::CaptureCapability cap;
-  bool higher = true;
-  for (uint32_t i = 0; i < candidateSet.Length(); i++) {
-    mozilla::camera::GetCaptureCapability(mCapEngine,
-                                          NS_ConvertUTF16toUTF8(mUniqueId).get(),
-                                          candidateSet[i], cap);
-    if (higher) {
-      if (i == 0 ||
-          (mCapability.width > cap.width && mCapability.height > cap.height)) {
-        // closer than the current choice
-        mCapability = cap;
-        // FIXME: expose expected capture delay?
-      }
-      if (cap.width <= (uint32_t) prefWidth && cap.height <= (uint32_t) prefHeight) {
-        higher = false;
-      }
-    } else {
-      if (cap.width > (uint32_t) prefWidth || cap.height > (uint32_t) prefHeight ||
-          cap.maxFPS < (uint32_t) aPrefs.mMinFPS) {
-        continue;
-      }
-      if (mCapability.width < cap.width && mCapability.height < cap.height) {
-        mCapability = cap;
-        // FIXME: expose expected capture delay?
-      }
-    }
-    // Same resolution, maybe better format or FPS match
-    if (mCapability.width == cap.width && mCapability.height == cap.height) {
-      // FPS too low
-      if (cap.maxFPS < (uint32_t) aPrefs.mMinFPS) {
-        continue;
-      }
-      // Better match
-      if (cap.maxFPS < mCapability.maxFPS) {
-        mCapability = cap;
-      } else if (cap.maxFPS == mCapability.maxFPS) {
-        // Resolution and FPS the same, check format
-        if (cap.rawType == webrtc::RawVideoType::kVideoI420
-          || cap.rawType == webrtc::RawVideoType::kVideoYUY2
-          || cap.rawType == webrtc::RawVideoType::kVideoYV12) {
-          mCapability = cap;
-        }
-      }
-    }
-  }
-  LOG(("chose cap %dx%d @%dfps codec %d raw %d",
-       mCapability.width, mCapability.height, mCapability.maxFPS,
-       mCapability.codecType, mCapability.rawType));
+  NS_ConvertUTF16toUTF8 uniqueId(mUniqueId); // TODO: optimize this?
+  mozilla::camera::GetCaptureCapability(mCapEngine,
+                                        uniqueId.get(),
+                                        aIndex,
+                                        aOut);
 }
 
 void MediaEngineRemoteVideoSource::Refresh(int aIndex) {

@@ -73,9 +73,6 @@ public:
                           SourceMediaStream* aSource,
                           TrackID aId,
                           StreamTime aDesiredTime) MOZ_OVERRIDE;
-  virtual bool SatisfiesConstraintSets(
-      const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets)
-      MOZ_OVERRIDE;
   virtual const dom::MediaSourceEnum GetMediaSource() MOZ_OVERRIDE {
     return mMediaSource;
   }
@@ -88,11 +85,7 @@ private:
   // Initialize the needed Video engine interfaces.
   void Init();
   void Shutdown();
-
-  static bool SatisfiesConstraintSet(const dom::MediaTrackConstraintSet& aConstraints,
-                                     const webrtc::CaptureCapability& aCandidate);
-  void ChooseCapability(const VideoTrackConstraintsN &aConstraints,
-                        const MediaEnginePrefs &aPrefs);
+  size_t NumCapabilities();
 
   dom::MediaSourceEnum mMediaSource; // source of media (camera | application | screen)
   mozilla::camera::CaptureEngine mCapEngine;
