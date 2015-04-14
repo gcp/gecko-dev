@@ -28,6 +28,8 @@
 #include "mozilla/docshell/OfflineCacheUpdateChild.h"
 #include "mozilla/dom/ContentBridgeChild.h"
 #include "mozilla/dom/ContentBridgeParent.h"
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/DOMStorageIPC.h"
 #include "mozilla/dom/ExternalHelperAppChild.h"
 #include "mozilla/dom/PCrashReporterChild.h"
@@ -48,13 +50,13 @@
 #include "mozilla/layers/PCompositorChild.h"
 #include "mozilla/layers/SharedBufferManagerChild.h"
 #include "mozilla/net/NeckoChild.h"
+#include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
 
 #if defined(MOZ_CONTENT_SANDBOX)
 #if defined(XP_WIN)
 #define TARGET_SANDBOX_EXPORTS
 #include "mozilla/sandboxTarget.h"
-#include "nsDirectoryServiceDefs.h"
 #elif defined(XP_LINUX)
 #include "mozilla/Sandbox.h"
 #include "mozilla/SandboxInfo.h"
@@ -68,6 +70,7 @@
 #include "mozInlineSpellChecker.h"
 #include "nsIConsoleListener.h"
 #include "nsICycleCollectorListener.h"
+#include "nsIDragService.h"
 #include "nsIIPCBackgroundChildCreateCallback.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIMemoryReporter.h"
@@ -110,8 +113,9 @@
 #include "mozilla/dom/PMemoryReportRequestChild.h"
 #include "mozilla/dom/PCycleCollectWithLogsChild.h"
 
-#ifdef MOZ_PERMISSIONS
 #include "nsIScriptSecurityManager.h"
+
+#ifdef MOZ_PERMISSIONS
 #include "nsPermission.h"
 #include "nsPermissionManager.h"
 #endif
@@ -148,6 +152,7 @@
 
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/cellbroadcast/CellBroadcastIPCService.h"
+#include "mozilla/dom/icc/IccChild.h"
 #include "mozilla/dom/mobileconnection/MobileConnectionChild.h"
 #include "mozilla/dom/mobilemessage/SmsChild.h"
 #include "mozilla/dom/devicestorage/DeviceStorageRequestChild.h"
@@ -168,29 +173,35 @@
 #include "nsIPrincipal.h"
 #include "nsDeviceStorage.h"
 #include "AudioChannelService.h"
+#include "DomainPolicy.h"
 #include "mozilla/dom/DataStoreService.h"
 #include "mozilla/dom/telephony/PTelephonyChild.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
 #include "mozilla/dom/voicemail/VoicemailIPCService.h"
 #include "mozilla/net/NeckoMessageUtils.h"
+#include "mozilla/widget/PuppetBidiKeyboard.h"
 #include "mozilla/RemoteSpellCheckEngineChild.h"
+#include "GMPServiceChild.h"
 
 using namespace mozilla;
 using namespace mozilla::docshell;
 using namespace mozilla::dom::bluetooth;
 using namespace mozilla::dom::cellbroadcast;
 using namespace mozilla::dom::devicestorage;
+using namespace mozilla::dom::icc;
 using namespace mozilla::dom::ipc;
 using namespace mozilla::dom::mobileconnection;
 using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::telephony;
 using namespace mozilla::dom::voicemail;
 using namespace mozilla::embedding;
+using namespace mozilla::gmp;
 using namespace mozilla::hal_sandbox;
 using namespace mozilla::ipc;
 using namespace mozilla::layers;
 using namespace mozilla::net;
 using namespace mozilla::jsipc;
+using namespace mozilla::widget;
 #if defined(MOZ_WIDGET_GONK)
 using namespace mozilla::system;
 #endif
@@ -220,7 +231,7 @@ public:
 
     MemoryReportRequestChild(uint32_t aGeneration, bool aAnonymize,
                              const MaybeFileDesc& aDMDFile);
-    NS_IMETHOD Run() MOZ_OVERRIDE;
+    NS_IMETHOD Run() override;
 private:
     virtual ~MemoryReportRequestChild();
 
@@ -247,7 +258,7 @@ MemoryReportRequestChild::~MemoryReportRequestChild()
 }
 
 // IPC sender for remote GC/CC logging.
-class CycleCollectWithLogsChild MOZ_FINAL
+class CycleCollectWithLogsChild final
     : public PCycleCollectWithLogsChild
     , public nsICycleCollectorLogSink
 {
@@ -261,7 +272,7 @@ public:
         mCCLog = FileDescriptorToFILE(aCCLog, "w");
     }
 
-    NS_IMETHOD Open(FILE** aGCLog, FILE** aCCLog) MOZ_OVERRIDE
+    NS_IMETHOD Open(FILE** aGCLog, FILE** aCCLog) override
     {
         if (NS_WARN_IF(!mGCLog) || NS_WARN_IF(!mCCLog)) {
             return NS_ERROR_FAILURE;
@@ -271,7 +282,7 @@ public:
         return NS_OK;
     }
 
-    NS_IMETHOD CloseGCLog() MOZ_OVERRIDE
+    NS_IMETHOD CloseGCLog() override
     {
         MOZ_ASSERT(mGCLog);
         fclose(mGCLog);
@@ -280,7 +291,7 @@ public:
         return NS_OK;
     }
 
-    NS_IMETHOD CloseCCLog() MOZ_OVERRIDE
+    NS_IMETHOD CloseCCLog() override
     {
         MOZ_ASSERT(mCCLog);
         fclose(mCCLog);
@@ -289,32 +300,32 @@ public:
         return NS_OK;
     }
 
-    NS_IMETHOD GetFilenameIdentifier(nsAString& aIdentifier) MOZ_OVERRIDE
+    NS_IMETHOD GetFilenameIdentifier(nsAString& aIdentifier) override
     {
         return UnimplementedProperty();
     }
 
-    NS_IMETHOD SetFilenameIdentifier(const nsAString& aIdentifier) MOZ_OVERRIDE
+    NS_IMETHOD SetFilenameIdentifier(const nsAString& aIdentifier) override
     {
         return UnimplementedProperty();
     }
 
-    NS_IMETHOD GetProcessIdentifier(int32_t *aIdentifier) MOZ_OVERRIDE
+    NS_IMETHOD GetProcessIdentifier(int32_t *aIdentifier) override
     {
         return UnimplementedProperty();
     }
 
-    NS_IMETHOD SetProcessIdentifier(int32_t aIdentifier) MOZ_OVERRIDE
+    NS_IMETHOD SetProcessIdentifier(int32_t aIdentifier) override
     {
         return UnimplementedProperty();
     }
 
-    NS_IMETHOD GetGcLog(nsIFile** aPath) MOZ_OVERRIDE
+    NS_IMETHOD GetGcLog(nsIFile** aPath) override
     {
         return UnimplementedProperty();
     }
 
-    NS_IMETHOD GetCcLog(nsIFile** aPath) MOZ_OVERRIDE
+    NS_IMETHOD GetCcLog(nsIFile** aPath) override
     {
         return UnimplementedProperty();
     }
@@ -383,7 +394,7 @@ private:
     nsString mData;
 };
 
-class ConsoleListener MOZ_FINAL : public nsIConsoleListener
+class ConsoleListener final : public nsIConsoleListener
 {
 public:
     explicit ConsoleListener(ContentChild* aChild)
@@ -449,7 +460,7 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
     return NS_OK;
 }
 
-class SystemMessageHandledObserver MOZ_FINAL : public nsIObserver
+class SystemMessageHandledObserver final : public nsIObserver
 {
     ~SystemMessageHandledObserver() {}
 
@@ -484,7 +495,7 @@ SystemMessageHandledObserver::Observe(nsISupports* aSubject,
 
 NS_IMPL_ISUPPORTS(SystemMessageHandledObserver, nsIObserver)
 
-class BackgroundChildPrimer MOZ_FINAL :
+class BackgroundChildPrimer final :
   public nsIIPCBackgroundChildCreateCallback
 {
 public:
@@ -498,13 +509,13 @@ private:
     { }
 
     virtual void
-    ActorCreated(PBackgroundChild* aActor) MOZ_OVERRIDE
+    ActorCreated(PBackgroundChild* aActor) override
     {
         MOZ_ASSERT(aActor, "Failed to create a PBackgroundChild actor!");
     }
 
     virtual void
-    ActorFailed() MOZ_OVERRIDE
+    ActorFailed() override
     {
         MOZ_CRASH("Failed to create a PBackgroundChild actor!");
     }
@@ -531,6 +542,14 @@ InitOnContentProcessCreated()
         return;
     }
     PostForkPreload();
+
+    nsCOMPtr<nsIPermissionManager> permManager =
+        services::GetPermissionManager();
+    MOZ_ASSERT(permManager, "Unable to get permission manager");
+    nsresult rv = permManager->RefreshPermission();
+    if (NS_FAILED(rv)) {
+        MOZ_ASSERT(false, "Failed updating permission in child process");
+    }
 #endif
 
     nsCOMPtr<nsISystemMessageCache> smc =
@@ -540,6 +559,26 @@ InitOnContentProcessCreated()
     // This will register cross-process observer.
     mozilla::dom::time::InitializeDateCacheCleaner();
 }
+
+#ifdef MOZ_NUWA_PROCESS
+static void
+ResetTransports(void* aUnused)
+{
+  ContentChild* child = ContentChild::GetSingleton();
+  mozilla::ipc::Transport* transport = child->GetTransport();
+  int fd = transport->GetFileDescriptor();
+  transport->ResetFileDescriptor(fd);
+
+  nsTArray<IToplevelProtocol*> actors;
+  child->GetOpenedActors(actors);
+  for (size_t i = 0; i < actors.Length(); i++) {
+      IToplevelProtocol* toplevel = actors[i];
+      transport = toplevel->GetTransport();
+      fd = transport->GetFileDescriptor();
+      transport->ResetFileDescriptor(fd);
+  }
+}
+#endif
 
 #if defined(MOZ_TASK_TRACER) && defined(MOZ_NUWA_PROCESS)
 static void
@@ -574,7 +613,7 @@ NS_INTERFACE_MAP_END
 
 bool
 ContentChild::Init(MessageLoop* aIOLoop,
-                   base::ProcessHandle aParentHandle,
+                   base::ProcessId aParentPid,
                    IPC::Channel* aChannel)
 {
 #ifdef MOZ_WIDGET_GTK
@@ -606,7 +645,7 @@ ContentChild::Init(MessageLoop* aIOLoop,
         return false;
     }
 
-    if (!Open(aChannel, aParentHandle, aIOLoop)) {
+    if (!Open(aChannel, aParentPid, aIOLoop)) {
       return false;
     }
     sSingleton = this;
@@ -614,6 +653,14 @@ ContentChild::Init(MessageLoop* aIOLoop,
     // Make sure there's an nsAutoScriptBlocker on the stack when dispatching
     // urgent messages.
     GetIPCChannel()->BlockScripts();
+
+    // If communications with the parent have broken down, take the process
+    // down so it's not hanging around.
+    bool abortOnError = true;
+#ifdef MOZ_NUWA_PROCESS
+    abortOnError &= !IsNuwaProcess();
+#endif
+    GetIPCChannel()->SetAbortOnError(abortOnError);
 
 #ifdef MOZ_X11
     // Send the parent our X socket to act as a proxy reference for our X
@@ -627,14 +674,18 @@ ContentChild::Init(MessageLoop* aIOLoop,
                                   XRE_GetProcessType());
 #endif
 
-    GetCPOWManager();
-
     SendGetProcessAttributes(&mID, &mIsForApp, &mIsForBrowser);
     InitProcessAttributes();
 
 #if defined(MOZ_TASK_TRACER) && defined (MOZ_NUWA_PROCESS)
     if (IsNuwaProcess()) {
         NuwaAddConstructor(ReinitTaskTracer, nullptr);
+    }
+#endif
+
+#ifdef MOZ_NUWA_PROCESS
+    if (IsNuwaProcess()) {
+      NuwaAddConstructor(ResetTransports, nullptr);
     }
 #endif
 
@@ -744,10 +795,24 @@ ContentChild::InitXPCOM()
     if (NS_FAILED(svc->RegisterListener(mConsoleListener)))
         NS_WARNING("Couldn't register console listener for child process");
 
-    bool isOffline;
+    bool isOffline, isLangRTL;
     ClipboardCapabilities clipboardCaps;
-    SendGetXPCOMProcessAttributes(&isOffline, &mAvailableDictionaries, &clipboardCaps);
+    DomainPolicyClone domainPolicy;
+
+    SendGetXPCOMProcessAttributes(&isOffline, &isLangRTL, &mAvailableDictionaries,
+                                  &clipboardCaps, &domainPolicy);
     RecvSetOffline(isOffline);
+    RecvBidiKeyboardNotify(isLangRTL);
+
+    if (domainPolicy.active()) {
+        nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
+        MOZ_ASSERT(ssm);
+        ssm->ActivateDomainPolicyInternal(getter_AddRefs(mPolicy));
+        if (!mPolicy) {
+            MOZ_CRASH("Failed to activate domain policy.");
+        }
+        mPolicy->ApplyClone(&domainPolicy);
+    }
 
     nsCOMPtr<nsIClipboard> clipboard(do_GetService("@mozilla.org/widget/clipboard;1"));
     if (nsCOMPtr<nsIClipboardProxy> clipboardProxy = do_QueryInterface(clipboard)) {
@@ -795,7 +860,7 @@ ContentChild::AllocPMemoryReportRequestChild(const uint32_t& aGeneration,
 
 // This is just a wrapper for InfallibleTArray<MemoryReport> that implements
 // nsISupports, so it can be passed to nsIMemoryReporter::CollectReports.
-class MemoryReportsWrapper MOZ_FINAL : public nsISupports {
+class MemoryReportsWrapper final : public nsISupports {
     ~MemoryReportsWrapper() {}
 public:
     NS_DECL_ISUPPORTS
@@ -804,7 +869,7 @@ public:
 };
 NS_IMPL_ISUPPORTS0(MemoryReportsWrapper)
 
-class MemoryReportCallback MOZ_FINAL : public nsIMemoryReporterCallback
+class MemoryReportCallback final : public nsIMemoryReporterCallback
 {
 public:
     NS_DECL_ISUPPORTS
@@ -817,7 +882,7 @@ public:
     NS_IMETHOD Callback(const nsACString& aProcess, const nsACString &aPath,
                         int32_t aKind, int32_t aUnits, int64_t aAmount,
                         const nsACString& aDescription,
-                        nsISupports* aiWrappedReports) MOZ_OVERRIDE
+                        nsISupports* aiWrappedReports) override
     {
         MemoryReportsWrapper *wrappedReports =
             static_cast<MemoryReportsWrapper *>(aiWrappedReports);
@@ -979,6 +1044,13 @@ ContentChild::AllocPContentBridgeParent(mozilla::ipc::Transport* aTransport,
     return mLastBridge;
 }
 
+PGMPServiceChild*
+ContentChild::AllocPGMPServiceChild(mozilla::ipc::Transport* aTransport,
+                                    base::ProcessId aOtherProcess)
+{
+    return GMPServiceChild::Create(aTransport, aOtherProcess);
+}
+
 PCompositorChild*
 ContentChild::AllocPCompositorChild(mozilla::ipc::Transport* aTransport,
                                     base::ProcessId aOtherProcess)
@@ -1013,74 +1085,6 @@ ContentChild::AllocPProcessHangMonitorChild(Transport* aTransport,
 {
     return CreateHangMonitorChild(aTransport, aOtherProcess);
 }
-
-#if defined(XP_WIN) && defined(MOZ_CONTENT_SANDBOX)
-static void
-SetUpSandboxEnvironment()
-{
-    // Set up a low integrity temp directory. This only makes sense if the
-    // delayed integrity level for the content process is INTEGRITY_LEVEL_LOW.
-    nsresult rv;
-    nsCOMPtr<nsIProperties> directoryService =
-        do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID, &rv);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-    }
-
-    nsCOMPtr<nsIFile> lowIntegrityTemp;
-    rv = directoryService->Get(NS_WIN_LOW_INTEGRITY_TEMP, NS_GET_IID(nsIFile),
-                               getter_AddRefs(lowIntegrityTemp));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-    }
-
-    // Undefine returns a failure if the property is not already set.
-    unused << directoryService->Undefine(NS_OS_TEMP_DIR);
-    rv = directoryService->Set(NS_OS_TEMP_DIR, lowIntegrityTemp);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-    }
-
-    // Set TEMP and TMP environment variables.
-    nsAutoString lowIntegrityTempPath;
-    rv = lowIntegrityTemp->GetPath(lowIntegrityTempPath);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-    }
-
-    bool setOK = SetEnvironmentVariableW(L"TEMP", lowIntegrityTempPath.get());
-    NS_WARN_IF_FALSE(setOK, "Failed to set TEMP to low integrity temp path");
-    setOK = SetEnvironmentVariableW(L"TMP", lowIntegrityTempPath.get());
-    NS_WARN_IF_FALSE(setOK, "Failed to set TMP to low integrity temp path");
-}
-
-void
-ContentChild::CleanUpSandboxEnvironment()
-{
-    // Sandbox environment is only currently set up with the more strict sandbox.
-    if (!Preferences::GetBool("security.sandbox.windows.content.moreStrict")) {
-        return;
-    }
-
-    nsresult rv;
-    nsCOMPtr<nsIProperties> directoryService =
-        do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID, &rv);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-    }
-
-    nsCOMPtr<nsIFile> lowIntegrityTemp;
-    rv = directoryService->Get(NS_WIN_LOW_INTEGRITY_TEMP, NS_GET_IID(nsIFile),
-                               getter_AddRefs(lowIntegrityTemp));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-    }
-
-    // Don't check the return value as the directory will only have been created
-    // if it has been used.
-    unused << lowIntegrityTemp->Remove(/* aRecursive */ true);
-}
-#endif
 
 #if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
 
@@ -1167,13 +1171,14 @@ StartMacOSContentSandbox()
 
   MacSandboxInfo info;
   info.type = MacSandboxType_Content;
-  info.appPath.Assign(appPath);
-  info.appBinaryPath.Assign(appBinaryPath);
-  info.appDir.Assign(appDir);
+  info.level = Preferences::GetInt("security.sandbox.content.level");
+  info.appPath.assign(appPath.get());
+  info.appBinaryPath.assign(appBinaryPath.get());
+  info.appDir.assign(appDir.get());
 
-  nsAutoCString err;
+  std::string err;
   if (!mozilla::StartMacSandbox(info, err)) {
-    NS_WARNING(err.get());
+    NS_WARNING(err.c_str());
     MOZ_CRASH("sandbox_init() failed");
   }
 }
@@ -1199,9 +1204,6 @@ ContentChild::RecvSetProcessSandbox()
     SetContentProcessSandbox();
 #elif defined(XP_WIN)
     mozilla::SandboxTarget::Instance()->StartSandbox();
-    if (Preferences::GetBool("security.sandbox.windows.content.moreStrict")) {
-        SetUpSandboxEnvironment();
-    }
 #elif defined(XP_MACOSX)
     StartMacOSContentSandbox();
 #endif
@@ -1222,6 +1224,18 @@ ContentChild::RecvSpeakerManagerNotify()
     return true;
 #endif
     return false;
+}
+
+bool
+ContentChild::RecvBidiKeyboardNotify(const bool& aIsLangRTL)
+{
+    // bidi is always of type PuppetBidiKeyboard* (because in the child, the only
+    // possible implementation of nsIBidiKeyboard is PuppetBidiKeyboard).
+    PuppetBidiKeyboard* bidi = static_cast<PuppetBidiKeyboard*>(nsContentUtils::GetBidiKeyboard());
+    if (bidi) {
+        bidi->SetIsLangRTL(aIsLangRTL);
+    }
+    return true;
 }
 
 static CancelableTask* sFirstIdleTask;
@@ -1407,6 +1421,31 @@ ContentChild::DeallocPHalChild(PHalChild* aHal)
     return true;
 }
 
+PIccChild*
+ContentChild::SendPIccConstructor(PIccChild* aActor,
+                                  const uint32_t& aServiceId)
+{
+    // Add an extra ref for IPDL. Will be released in
+    // ContentChild::DeallocPIccChild().
+    static_cast<IccChild*>(aActor)->AddRef();
+    return PContentChild::SendPIccConstructor(aActor, aServiceId);
+}
+
+PIccChild*
+ContentChild::AllocPIccChild(const uint32_t& aServiceId)
+{
+    NS_NOTREACHED("No one should be allocating PIccChild actors");
+    return nullptr;
+}
+
+bool
+ContentChild::DeallocPIccChild(PIccChild* aActor)
+{
+    // IccChild is refcounted, must not be freed manually.
+    static_cast<IccChild*>(aActor)->Release();
+    return true;
+}
+
 asmjscache::PAsmJSCacheEntryChild*
 ContentChild::AllocPAsmJSCacheEntryChild(
                                     const asmjscache::OpenMode& aOpenMode,
@@ -1536,11 +1575,10 @@ ContentChild::DeallocPNeckoChild(PNeckoChild* necko)
 PPrintingChild*
 ContentChild::AllocPPrintingChild()
 {
-    // The ContentParent should never attempt to allocate the
-    // nsPrintingPromptServiceProxy, which implements PPrintingChild. Instead,
-    // the nsPrintingPromptServiceProxy service is requested and instantiated
-    // via XPCOM, and the constructor of nsPrintingPromptServiceProxy sets up
-    // the IPC connection.
+    // The ContentParent should never attempt to allocate the nsPrintingProxy,
+    // which implements PPrintingChild. Instead, the nsPrintingProxy service is
+    // requested and instantiated via XPCOM, and the constructor of
+    // nsPrintingProxy sets up the IPC connection.
     NS_NOTREACHED("Should never get here!");
     return nullptr;
 }
@@ -1834,6 +1872,14 @@ ContentChild::ActorDestroy(ActorDestroyReason why)
         mConsoleListener->mChild = nullptr;
     }
     mIsAlive = false;
+
+#ifdef MOZ_NUWA_PROCESS
+    if (IsNuwaProcess()) {
+        // The Nuwa cannot go through the full XPCOM shutdown path or deadlock
+        // will result.
+        QuickExit();
+    }
+#endif
 
     XRE_ShutdownChildProcess();
 }
@@ -2395,18 +2441,6 @@ public:
         // In the new process.
         ContentChild* child = ContentChild::GetSingleton();
         child->SetProcessName(NS_LITERAL_STRING("(Preallocated app)"), false);
-        mozilla::ipc::Transport* transport = child->GetTransport();
-        int fd = transport->GetFileDescriptor();
-        transport->ResetFileDescriptor(fd);
-
-        IToplevelProtocol* toplevel = child->GetFirstOpenedActors();
-        while (toplevel != nullptr) {
-            transport = toplevel->GetTransport();
-            fd = transport->GetFileDescriptor();
-            transport->ResetFileDescriptor(fd);
-
-            toplevel = toplevel->getNext();
-        }
 
         // Perform other after-fork initializations.
         InitOnContentProcessCreated();
@@ -2564,12 +2598,88 @@ ContentChild::RecvAssociatePluginId(const uint32_t& aPluginId,
 }
 
 bool
+ContentChild::RecvDomainSetChanged(const uint32_t& aSetType, const uint32_t& aChangeType,
+                                   const OptionalURIParams& aDomain)
+{
+    if (aChangeType == ACTIVATE_POLICY) {
+        if (mPolicy) {
+            return true;
+        }
+        nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
+        MOZ_ASSERT(ssm);
+        ssm->ActivateDomainPolicyInternal(getter_AddRefs(mPolicy));
+        return !!mPolicy;
+    } else if (!mPolicy) {
+        MOZ_ASSERT_UNREACHABLE("If the domain policy is not active yet,"
+                               " the first message should be ACTIVATE_POLICY");
+        return false;
+    }
+
+    NS_ENSURE_TRUE(mPolicy, false);
+
+    if (aChangeType == DEACTIVATE_POLICY) {
+        mPolicy->Deactivate();
+        mPolicy = nullptr;
+        return true;
+    }
+
+    nsCOMPtr<nsIDomainSet> set;
+    switch(aSetType) {
+        case BLACKLIST:
+            mPolicy->GetBlacklist(getter_AddRefs(set));
+            break;
+        case SUPER_BLACKLIST:
+            mPolicy->GetSuperBlacklist(getter_AddRefs(set));
+            break;
+        case WHITELIST:
+            mPolicy->GetWhitelist(getter_AddRefs(set));
+            break;
+        case SUPER_WHITELIST:
+            mPolicy->GetSuperWhitelist(getter_AddRefs(set));
+            break;
+        default:
+            NS_NOTREACHED("Unexpected setType");
+            return false;
+    }
+
+    MOZ_ASSERT(set);
+
+    nsCOMPtr<nsIURI> uri = DeserializeURI(aDomain);
+
+    switch(aChangeType) {
+        case ADD_DOMAIN:
+            NS_ENSURE_TRUE(uri, false);
+            set->Add(uri);
+            break;
+        case REMOVE_DOMAIN:
+            NS_ENSURE_TRUE(uri, false);
+            set->Remove(uri);
+            break;
+        case CLEAR_DOMAINS:
+            set->Clear();
+            break;
+        default:
+            NS_NOTREACHED("Unexpected changeType");
+            return false;
+    }
+
+    return true;
+}
+
+bool
 ContentChild::RecvShutdown()
 {
+    if (mPolicy) {
+        mPolicy->Deactivate();
+        mPolicy = nullptr;
+    }
+
     nsCOMPtr<nsIObserverService> os = services::GetObserverService();
     if (os) {
         os->NotifyObservers(this, "content-child-shutdown", nullptr);
     }
+
+    GetIPCChannel()->SetAbortOnError(false);
 
     // Ignore errors here. If this fails, the parent will kill us after a
     // timeout.
@@ -2587,6 +2697,26 @@ ContentChild::GetBrowserOrId(TabChild* aTabChild)
     else {
         return PBrowserOrId(aTabChild->GetTabId());
     }
+}
+
+bool
+ContentChild::RecvUpdateWindow(const uintptr_t& aChildId)
+{
+#if defined(XP_WIN)
+  NS_ASSERTION(aChildId, "Expected child hwnd value for remote plugin instance.");
+  mozilla::plugins::PluginInstanceParent* parentInstance =
+    mozilla::plugins::PluginInstanceParent::LookupPluginInstanceByID(aChildId);
+  NS_ASSERTION(parentInstance, "Expected matching plugin instance");
+  if (parentInstance) {
+    // sync! update call to the plugin instance that forces the
+    // plugin to paint its child window.
+    parentInstance->CallUpdateWindow();
+  }
+  return true;
+#else
+  NS_NOTREACHED("ContentChild::RecvUpdateWindow calls unexpected on this platform.");
+  return false;
+#endif
 }
 
 // This code goes here rather than nsGlobalWindow.cpp because nsGlobalWindow.cpp
@@ -2624,6 +2754,64 @@ NextWindowID()
   return (processBits << kWindowIDWindowBits) | windowBits;
 }
 
+bool
+ContentChild::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
+                                    const uint32_t& aAction)
+{
+  nsCOMPtr<nsIDragService> dragService =
+    do_GetService("@mozilla.org/widget/dragservice;1");
+  if (dragService) {
+    dragService->StartDragSession();
+    nsCOMPtr<nsIDragSession> session;
+    dragService->GetCurrentSession(getter_AddRefs(session));
+    if (session) {
+      session->SetDragAction(aAction);
+      nsCOMPtr<DataTransfer> dataTransfer =
+        new DataTransfer(nullptr, NS_DRAGDROP_START, false, -1);
+      for (uint32_t i = 0; i < aTransfers.Length(); ++i) {
+        auto& items = aTransfers[i].items();
+        for (uint32_t j = 0; j < items.Length(); ++j) {
+          const IPCDataTransferItem& item = items[j];
+          nsCOMPtr<nsIWritableVariant> variant =
+             do_CreateInstance(NS_VARIANT_CONTRACTID);
+          NS_ENSURE_TRUE(variant, false);
+          if (item.data().type() == IPCDataTransferData::TnsString) {
+            const nsString& data = item.data().get_nsString();
+            variant->SetAsAString(data);
+          } else if (item.data().type() == IPCDataTransferData::TPBlobChild) {
+            BlobChild* blob = static_cast<BlobChild*>(item.data().get_PBlobChild());
+            nsRefPtr<FileImpl> fileImpl = blob->GetBlobImpl();
+            variant->SetAsISupports(fileImpl);
+          }
+          dataTransfer->SetDataWithPrincipal(NS_ConvertUTF8toUTF16(item.flavor()),
+                                             variant, i,
+                                             nsContentUtils::GetSystemPrincipal());
+        }
+      }
+      session->SetDataTransfer(dataTransfer);
+    }
+  }
+  return true;
+}
+
+bool
+ContentChild::RecvEndDragSession(const bool& aDoneDrag,
+                                 const bool& aUserCancelled)
+{
+  nsCOMPtr<nsIDragService> dragService =
+    do_GetService("@mozilla.org/widget/dragservice;1");
+  if (dragService) {
+    if (aUserCancelled) {
+      nsCOMPtr<nsIDragSession> dragSession = nsContentUtils::GetDragSession();
+      if (dragSession) {
+        dragSession->UserCancelled();
+      }
+    }
+    dragService->EndDragSession(aDoneDrag);
+  }
+  return true;
+}
+
 } // namespace dom
 } // namespace mozilla
 
@@ -2644,9 +2832,10 @@ GetProtoFdInfos(NuwaProtoFdInfo* aInfoList,
         content->GetTransport()->GetFileDescriptor();
     i++;
 
-    for (IToplevelProtocol* actor = content->GetFirstOpenedActors();
-         actor != nullptr;
-         actor = actor->getNext()) {
+    IToplevelProtocol* actors[NUWA_TOPLEVEL_MAX];
+    size_t count = content->GetOpenedActorsUnsafe(actors, ArrayLength(actors));
+    for (size_t j = 0; j < count; j++) {
+        IToplevelProtocol* actor = actors[j];
         if (i >= aInfoListSize) {
             NS_RUNTIMEABORT("Too many top level protocols!");
         }
@@ -2724,6 +2913,9 @@ NS_EXPORT void
 AfterNuwaFork()
 {
     SetCurrentProcessPrivileges(base::PRIVILEGES_DEFAULT);
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
+    mozilla::SandboxEarlyInit(XRE_GetProcessType(), /* isNuwa: */ false);
+#endif
 }
 
 #endif // MOZ_NUWA_PROCESS

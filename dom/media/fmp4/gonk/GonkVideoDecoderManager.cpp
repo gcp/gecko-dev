@@ -43,10 +43,6 @@ using namespace android;
 typedef android::MediaCodecProxy MediaCodecProxy;
 
 namespace mozilla {
-enum {
-  kNotifyCodecReserved = 'core',
-  kNotifyCodecCanceled = 'coca',
-};
 
 GonkVideoDecoderManager::GonkVideoDecoderManager(
   MediaTaskQueue* aTaskQueue,
@@ -112,12 +108,16 @@ GonkVideoDecoderManager::Init(MediaDataDecoderCallback* aCallback)
   if (mLooper->start() != OK || mManagerLooper->start() != OK ) {
     return nullptr;
   }
-  mDecoder = MediaCodecProxy::CreateByType(mLooper, "video/avc", false, true, mVideoListener);
+  mDecoder = MediaCodecProxy::CreateByType(mLooper, "video/avc", false, mVideoListener);
+  mDecoder->AskMediaCodecAndWait();
+
   uint32_t capability = MediaCodecProxy::kEmptyCapability;
   if (mDecoder->getCapability(&capability) == OK && (capability &
       MediaCodecProxy::kCanExposeGraphicBuffer)) {
     mNativeWindow = new GonkNativeWindow();
   }
+
+  mReaderCallback->NotifyResourcesStatusChanged();
 
   return mDecoder;
 }
@@ -438,32 +438,18 @@ void GonkVideoDecoderManager::ReleaseVideoBuffer() {
 }
 
 status_t
-GonkVideoDecoderManager::SendSampleToOMX(mp4_demuxer::MP4Sample* aSample)
+GonkVideoDecoderManager::SendSampleToOMX(MediaRawData* aSample)
 {
-  // An empty MP4Sample is going to notify EOS to decoder. It doesn't need
+  // An empty MediaRawData is going to notify EOS to decoder. It doesn't need
   // to keep PTS and duration.
-  if (aSample->data && aSample->duration && aSample->composition_timestamp) {
-    QueueFrameTimeIn(aSample->composition_timestamp, aSample->duration);
+  if (aSample->mData && aSample->mDuration && aSample->mTime) {
+    QueueFrameTimeIn(aSample->mTime, aSample->mDuration);
   }
 
-  return mDecoder->Input(reinterpret_cast<const uint8_t*>(aSample->data),
-                         aSample->size,
-                         aSample->composition_timestamp,
+  return mDecoder->Input(reinterpret_cast<const uint8_t*>(aSample->mData),
+                         aSample->mSize,
+                         aSample->mTime,
                          0);
-}
-
-bool
-GonkVideoDecoderManager::PerformFormatSpecificProcess(mp4_demuxer::MP4Sample* aSample)
-{
-  if (aSample != nullptr) {
-    // We must prepare samples in AVC Annex B.
-    if (!mp4_demuxer::AnnexB::ConvertSampleToAnnexB(aSample)) {
-      GVDM_LOG("Failed to convert sample to annex B!");
-      return false;
-    }
-  }
-
-  return true;
 }
 
 void
@@ -503,14 +489,9 @@ GonkVideoDecoderManager::Flush()
 }
 
 void
-GonkVideoDecoderManager::AllocateMediaResources()
-{
-  mDecoder->RequestMediaResources();
-}
-
-void
 GonkVideoDecoderManager::codecReserved()
 {
+  GVDM_LOG("codecReserved");
   sp<AMessage> format = new AMessage;
   sp<Surface> surface;
 
@@ -523,24 +504,12 @@ GonkVideoDecoderManager::codecReserved()
   }
   mDecoder->configure(format, surface, nullptr, 0);
   mDecoder->Prepare();
-
-  if (mHandler != nullptr) {
-    // post kNotifyCodecReserved to Looper thread.
-    sp<AMessage> notify = new AMessage(kNotifyCodecReserved, mHandler->id());
-    notify->post();
-  }
 }
 
 void
 GonkVideoDecoderManager::codecCanceled()
 {
   mDecoder = nullptr;
-  if (mHandler != nullptr) {
-    // post kNotifyCodecCanceled to Looper thread.
-    sp<AMessage> notify = new AMessage(kNotifyCodecCanceled, mHandler->id());
-    notify->post();
-  }
-
 }
 
 // Called on GonkVideoDecoderManager::mManagerLooper thread.
@@ -548,21 +517,6 @@ void
 GonkVideoDecoderManager::onMessageReceived(const sp<AMessage> &aMessage)
 {
   switch (aMessage->what()) {
-    case kNotifyCodecReserved:
-    {
-      // Our decode may have acquired the hardware resource that it needs
-      // to start. Notify the state machine to resume loading metadata.
-      GVDM_LOG("CodecReserved!");
-      mReaderCallback->NotifyResourcesStatusChanged();
-      break;
-    }
-
-    case kNotifyCodecCanceled:
-    {
-      mReaderCallback->ReleaseMediaResources();
-      break;
-    }
-
     case kNotifyPostReleaseBuffer:
     {
       ReleaseAllPendingVideoBuffers();

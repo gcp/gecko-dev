@@ -74,6 +74,9 @@
 #define DEVICESTORAGE_PROPERTIES \
   "chrome://global/content/devicestorage.properties"
 #define DEFAULT_THREAD_TIMEOUT_MS 30000
+#define PREF_STORAGE_WRITABLE_NAME \
+  "device.storage.writable.name"
+#define STORAGE_CHANGE_EVENT "change"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -723,7 +726,7 @@ DeviceStorageFile::Init()
 // device.storage.overrideRootDir preference. The preference is normally
 // only read once during initialization, but since the test environment has
 // no convenient way to restart, we use a pref watcher instead.
-class OverrideRootDir MOZ_FINAL : public nsIObserver
+class OverrideRootDir final : public nsIObserver
 {
   ~OverrideRootDir();
 
@@ -1948,7 +1951,7 @@ StringToJsval(nsPIDOMWindow* aWindow, nsAString& aString,
   return true;
 }
 
-class DeviceStorageCursorRequest MOZ_FINAL
+class DeviceStorageCursorRequest final
   : public nsIContentPermissionRequest
 {
 public:
@@ -2830,7 +2833,7 @@ private:
   nsRefPtr<DOMRequest> mRequest;
 };
 
-class DeviceStorageRequest MOZ_FINAL
+class DeviceStorageRequest final
   : public nsIContentPermissionRequest
   , public nsIRunnable
 {
@@ -2900,7 +2903,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(DeviceStorageRequest,
                                            nsIContentPermissionRequest)
 
-  NS_IMETHOD Run() MOZ_OVERRIDE
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -2912,7 +2915,7 @@ public:
     return nsContentPermissionUtils::AskPermission(this, mWindow);
   }
 
-  NS_IMETHODIMP GetTypes(nsIArray** aTypes) MOZ_OVERRIDE
+  NS_IMETHODIMP GetTypes(nsIArray** aTypes) override
   {
     nsCString type;
     nsresult rv =
@@ -2932,25 +2935,25 @@ public:
     return nsContentPermissionUtils::CreatePermissionArray(type, access, emptyOptions, aTypes);
   }
 
-  NS_IMETHOD GetPrincipal(nsIPrincipal * *aRequestingPrincipal) MOZ_OVERRIDE
+  NS_IMETHOD GetPrincipal(nsIPrincipal * *aRequestingPrincipal) override
   {
     NS_IF_ADDREF(*aRequestingPrincipal = mPrincipal);
     return NS_OK;
   }
 
-  NS_IMETHOD GetWindow(nsIDOMWindow * *aRequestingWindow) MOZ_OVERRIDE
+  NS_IMETHOD GetWindow(nsIDOMWindow * *aRequestingWindow) override
   {
     NS_IF_ADDREF(*aRequestingWindow = mWindow);
     return NS_OK;
   }
 
-  NS_IMETHOD GetElement(nsIDOMElement * *aRequestingElement) MOZ_OVERRIDE
+  NS_IMETHOD GetElement(nsIDOMElement * *aRequestingElement) override
   {
     *aRequestingElement = nullptr;
     return NS_OK;
   }
 
-  NS_IMETHOD Cancel() MOZ_OVERRIDE
+  NS_IMETHOD Cancel() override
   {
     nsCOMPtr<nsIRunnable> event
       = new PostErrorEvent(mRequest.forget(),
@@ -2958,7 +2961,7 @@ public:
     return NS_DispatchToMainThread(event);
   }
 
-  NS_IMETHOD Allow(JS::HandleValue aChoices) MOZ_OVERRIDE
+  NS_IMETHOD Allow(JS::HandleValue aChoices) override
   {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(aChoices.isUndefined());
@@ -3344,9 +3347,9 @@ nsDOMDeviceStorage::nsDOMDeviceStorage(nsPIDOMWindow* aWindow)
 }
 
 /* virtual */ JSObject*
-nsDOMDeviceStorage::WrapObject(JSContext* aCx)
+nsDOMDeviceStorage::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return DeviceStorageBinding::Wrap(aCx, this);
+  return DeviceStorageBinding::Wrap(aCx, this, aGivenProto);
 }
 
 nsresult
@@ -3364,6 +3367,8 @@ nsDOMDeviceStorage::Init(nsPIDOMWindow* aWindow, const nsAString &aType,
     return NS_ERROR_NOT_AVAILABLE;
   }
   if (!mStorageName.IsEmpty()) {
+    Preferences::AddStrongObserver(this, PREF_STORAGE_WRITABLE_NAME);
+    mIsDefaultLocation = Default();
     RegisterForSDCardChanges(this);
 
 #ifdef MOZ_WIDGET_GONK
@@ -3437,6 +3442,7 @@ nsDOMDeviceStorage::Shutdown()
   }
 
   if (!mStorageName.IsEmpty()) {
+    Preferences::RemoveObserver(this, PREF_STORAGE_WRITABLE_NAME);
     UnregisterForSDCardChanges(this);
   }
 
@@ -3625,20 +3631,29 @@ nsDOMDeviceStorage::GetDefaultStorageName(const nsAString& aStorageType,
                                           nsAString& aStorageName)
 {
   // See if the preferred volume is available.
-  nsRefPtr<nsDOMDeviceStorage> ds;
   nsAdoptingString prefStorageName =
-    mozilla::Preferences::GetString("device.storage.writable.name");
+    mozilla::Preferences::GetString(PREF_STORAGE_WRITABLE_NAME);
+
   if (prefStorageName) {
-    aStorageName = prefStorageName;
-    return;
+    nsString status;
+    nsRefPtr<DeviceStorageFile> dsf = new DeviceStorageFile(aStorageType,
+                                                            prefStorageName);
+    dsf->GetStorageStatus(status);
+
+    if (!status.EqualsLiteral("NoMedia")) {
+      aStorageName = prefStorageName;
+      return;
+    }
   }
 
-  // No preferred storage, we'll use the first one (which should be sdcard).
-
+  // If there is no preferred storage or preferred storage is not presented,
+  // we'll use the first one (which should be sdcard).
   VolumeNameArray volNames;
   GetOrderedVolumeNames(volNames);
   if (volNames.Length() > 0) {
     aStorageName = volNames[0];
+    // overwrite the value of "device.storage.writable.name"
+    mozilla::Preferences::SetString(PREF_STORAGE_WRITABLE_NAME, aStorageName);
     return;
   }
 
@@ -4319,6 +4334,34 @@ nsDOMDeviceStorage::EnumerateInternal(const nsAString& aPath,
   return cursor.forget();
 }
 
+void
+nsDOMDeviceStorage::DispatchDefaultChangeEvent()
+{
+  nsAdoptingString DefaultLocation;
+  GetDefaultStorageName(mStorageType, DefaultLocation);
+
+  DeviceStorageChangeEventInit init;
+  init.mBubbles = true;
+  init.mCancelable = false;
+  init.mPath = DefaultLocation;
+
+  if (mIsDefaultLocation) {
+    init.mReason.AssignLiteral("default-location-changed");
+  } else {
+    init.mReason.AssignLiteral("became-default-location");
+  }
+
+  nsRefPtr<DeviceStorageChangeEvent> event =
+    DeviceStorageChangeEvent::Constructor(this,
+                                          NS_LITERAL_STRING(STORAGE_CHANGE_EVENT),
+                                          init);
+  event->SetTrusted(true);
+
+  bool ignore;
+  DispatchEvent(event, &ignore);
+  mIsDefaultLocation = Default();
+}
+
 #ifdef MOZ_WIDGET_GONK
 void
 nsDOMDeviceStorage::DispatchStatusChangeEvent(nsAString& aStatus)
@@ -4336,7 +4379,8 @@ nsDOMDeviceStorage::DispatchStatusChangeEvent(nsAString& aStatus)
   init.mReason = aStatus;
 
   nsRefPtr<DeviceStorageChangeEvent> event =
-    DeviceStorageChangeEvent::Constructor(this, NS_LITERAL_STRING("change"),
+    DeviceStorageChangeEvent::Constructor(this,
+                                          NS_LITERAL_STRING(STORAGE_CHANGE_EVENT),
                                           init);
   event->SetTrusted(true);
 
@@ -4397,6 +4441,14 @@ nsDOMDeviceStorage::Observe(nsISupports *aSubject,
     return NS_OK;
   }
 
+  if (!strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) &&
+               aData &&
+               nsDependentString(aData).Equals(NS_LITERAL_STRING(PREF_STORAGE_WRITABLE_NAME)))
+  {
+    DispatchDefaultChangeEvent();
+    return NS_OK;
+  }
+
 #ifdef MOZ_WIDGET_GONK
   else if (!strcmp(aTopic, NS_VOLUME_STATE_CHANGED)) {
     // We invalidate the used space cache for the volume that actually changed
@@ -4454,7 +4506,8 @@ nsDOMDeviceStorage::Notify(const char* aReason, DeviceStorageFile* aFile)
   init.mReason.AssignWithConversion(aReason);
 
   nsRefPtr<DeviceStorageChangeEvent> event =
-    DeviceStorageChangeEvent::Constructor(this, NS_LITERAL_STRING("change"),
+    DeviceStorageChangeEvent::Constructor(this,
+                                          NS_LITERAL_STRING(STORAGE_CHANGE_EVENT),
                                           init);
   event->SetTrusted(true);
 

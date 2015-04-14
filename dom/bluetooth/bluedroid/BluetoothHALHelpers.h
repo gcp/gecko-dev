@@ -14,20 +14,22 @@
 #if ANDROID_VERSION >= 18
 #include <hardware/bt_rc.h>
 #endif
+#ifdef MOZ_B2G_BT_API_V2
+#if ANDROID_VERSION >= 19
+#include <hardware/bt_gatt.h>
+#endif
+#else
+// Support GATT
+#endif
 #include "BluetoothCommon.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
-#include "nsThreadUtils.h"
-
-#if MOZ_IS_GCC && MOZ_GCC_VERSION_AT_LEAST(4, 7, 0)
-/* use designated array initializers if supported */
-#define CONVERT(in_, out_) \
-  [in_] = out_
+#ifdef MOZ_B2G_BT_API_V2
+#include "mozilla/dom/TypedArray.h"
 #else
-/* otherwise init array element by position */
-#define CONVERT(in_, out_) \
-  out_
+// Support GATT
 #endif
+#include "nsThreadUtils.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
 
@@ -117,22 +119,29 @@ Convert(ConvertNamedValue& aIn, bt_property_t& aOut);
 nsresult
 Convert(const nsAString& aIn, bt_bdaddr_t& aOut);
 
+#ifdef MOZ_B2G_BT_API_V2
+nsresult
+Convert(BluetoothSspVariant aIn, bt_ssp_variant_t& aOut);
+#else
 nsresult
 Convert(const nsAString& aIn, bt_ssp_variant_t& aOut);
+#endif
 
 inline nsresult
-Convert(const bt_ssp_variant_t& aIn, nsAString& aOut)
+Convert(const bt_ssp_variant_t& aIn, BluetoothSspVariant& aOut)
 {
-  static const char * const sSspVariant[] = {
-    CONVERT(BT_SSP_VARIANT_PASSKEY_CONFIRMATION, "PasskeyConfirmation"),
-    CONVERT(BT_SSP_VARIANT_PASSKEY_ENTRY, "PasskeyEntry"),
-    CONVERT(BT_SSP_VARIANT_CONSENT, "Consent"),
-    CONVERT(BT_SSP_VARIANT_PASSKEY_NOTIFICATION, "PasskeyNotification")
+  static const BluetoothSspVariant sSspVariant[] = {
+    CONVERT(BT_SSP_VARIANT_PASSKEY_CONFIRMATION,
+      SSP_VARIANT_PASSKEY_CONFIRMATION),
+    CONVERT(BT_SSP_VARIANT_PASSKEY_ENTRY, SSP_VARIANT_PASSKEY_ENTRY),
+    CONVERT(BT_SSP_VARIANT_CONSENT, SSP_VARIANT_CONSENT),
+    CONVERT(BT_SSP_VARIANT_PASSKEY_NOTIFICATION,
+      SSP_VARIANT_PASSKEY_NOTIFICATION)
   };
   if (aIn >= MOZ_ARRAY_LENGTH(sSspVariant)) {
     return NS_ERROR_ILLEGAL_VALUE;
   }
-  aOut = NS_ConvertUTF8toUTF16(sSspVariant[aIn]);
+  aOut = sSspVariant[aIn];
   return NS_OK;
 }
 
@@ -149,6 +158,13 @@ Convert(const uint8_t aIn[16], bt_uuid_t& aOut);
 
 nsresult
 Convert(const bt_uuid_t& aIn, BluetoothUuid& aOut);
+
+#ifdef MOZ_B2G_BT_API_V2
+nsresult
+Convert(const BluetoothUuid& aIn, bt_uuid_t& aOut);
+#else
+// TODO: Support GATT
+#endif
 
 nsresult
 Convert(const nsAString& aIn, bt_pin_code_t& aOut);
@@ -294,18 +310,18 @@ Convert(bt_acl_state_t aIn, bool& aOut)
 }
 
 inline nsresult
-Convert(bt_device_type_t aIn, BluetoothDeviceType& aOut)
+Convert(bt_device_type_t aIn, BluetoothTypeOfDevice& aOut)
 {
-  static const BluetoothDeviceType sDeviceType[] = {
-    CONVERT(0, static_cast<BluetoothDeviceType>(0)), // invalid, required by gcc
-    CONVERT(BT_DEVICE_DEVTYPE_BREDR, DEVICE_TYPE_BREDR),
-    CONVERT(BT_DEVICE_DEVTYPE_BLE, DEVICE_TYPE_BLE),
-    CONVERT(BT_DEVICE_DEVTYPE_DUAL, DEVICE_TYPE_DUAL)
+  static const BluetoothTypeOfDevice sTypeOfDevice[] = {
+    CONVERT(0, static_cast<BluetoothTypeOfDevice>(0)), // invalid, required by gcc
+    CONVERT(BT_DEVICE_DEVTYPE_BREDR, TYPE_OF_DEVICE_BREDR),
+    CONVERT(BT_DEVICE_DEVTYPE_BLE, TYPE_OF_DEVICE_BLE),
+    CONVERT(BT_DEVICE_DEVTYPE_DUAL, TYPE_OF_DEVICE_DUAL)
   };
-  if (aIn >= MOZ_ARRAY_LENGTH(sDeviceType)) {
+  if (aIn >= MOZ_ARRAY_LENGTH(sTypeOfDevice)) {
     return NS_ERROR_ILLEGAL_VALUE;
   }
-  aOut = sDeviceType[aIn];
+  aOut = sTypeOfDevice[aIn];
   return NS_OK;
 }
 
@@ -768,6 +784,61 @@ Convert(btrc_remote_features_t aIn, unsigned long& aOut)
 }
 #endif // ANDROID_VERSION >= 19
 
+#ifdef MOZ_B2G_BT_API_V2
+inline nsresult
+Convert(int aIn, BluetoothGattStatus& aOut)
+{
+  /**
+   * Currently we only map bluedroid's GATT status into GATT_STATUS_SUCCESS and
+   * GATT_STATUS_ERROR. This function needs to be revised if we want to support
+   * specific error status.
+   */
+  if (!aIn) {
+    aOut = GATT_STATUS_SUCCESS;
+  } else {
+    aOut = GATT_STATUS_ERROR;
+  }
+
+  return NS_OK;
+}
+
+nsresult
+Convert(const uint8_t* aIn, BluetoothGattAdvData& aOut);
+
+#if ANDROID_VERSION >= 19
+nsresult
+Convert(const BluetoothGattId& aIn, btgatt_gatt_id_t& aOut);
+
+nsresult
+Convert(const btgatt_gatt_id_t& aIn, BluetoothGattId& aOut);
+
+nsresult
+Convert(const BluetoothGattServiceId& aIn, btgatt_srvc_id_t& aOut);
+
+nsresult
+Convert(const btgatt_srvc_id_t& aIn, BluetoothGattServiceId& aOut);
+
+nsresult
+Convert(const btgatt_read_params_t& aIn, BluetoothGattReadParam& aOut);
+
+nsresult
+Convert(const btgatt_write_params_t& aIn, BluetoothGattWriteParam& aOut);
+
+nsresult
+Convert(const btgatt_notify_params_t& aIn, BluetoothGattNotifyParam& aOut);
+#endif // ANDROID_VERSION >= 19
+
+inline nsresult
+Convert(const ArrayBuffer& aIn, char* aOut)
+{
+  aIn.ComputeLengthAndData();
+  memcpy(aOut, aIn.Data(), aIn.Length());
+  return NS_OK;
+}
+#else
+// TODO: Support GATT
+#endif
+
 #if ANDROID_VERSION >= 21
 inline nsresult
 Convert(BluetoothTransport aIn, int& aOut)
@@ -914,7 +985,7 @@ public:
   }
 
   NS_METHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     ((*mObj).*mMethod)();
     return NS_OK;
@@ -940,7 +1011,7 @@ public:
   }
 
   NS_METHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     ((*mObj).*mMethod)(mArg1);
     return NS_OK;
@@ -973,7 +1044,7 @@ public:
   }
 
   NS_METHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     ((*mObj).*mMethod)(mArg1, mArg2, mArg3);
     return NS_OK;
@@ -1021,7 +1092,7 @@ public:
   }
 
   NS_METHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -1083,7 +1154,7 @@ public:
   }
 
   NS_METHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -1160,7 +1231,7 @@ public:
   }
 
   NS_METHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -1244,7 +1315,7 @@ public:
   }
 
   NS_METHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -1333,7 +1404,7 @@ public:
   }
 
   NS_METHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -1431,7 +1502,7 @@ public:
   }
 
   NS_METHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 

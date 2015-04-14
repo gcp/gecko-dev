@@ -221,6 +221,7 @@ static const char* const gOmxTypes[] = {
   "audio/mp4",
   "audio/amr",
   "audio/3gpp",
+  "audio/flac",
   "video/mp4",
   "video/3gpp",
   "video/3gpp2",
@@ -655,6 +656,9 @@ MediaDecoderReader* DecoderTraits::CreateReader(const nsACString& aType, Abstrac
 {
   MediaDecoderReader* decoderReader = nullptr;
 
+  if (!aDecoder) {
+    return decoderReader;
+  }
 #ifdef MOZ_FMP4
   if (IsMP4SupportedType(aType)) {
     decoderReader = new MP4Reader(aDecoder);

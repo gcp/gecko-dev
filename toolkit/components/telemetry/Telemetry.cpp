@@ -42,6 +42,7 @@
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
 #include "nsBaseHashtable.h"
+#include "nsClassHashtable.h"
 #include "nsXULAppAPI.h"
 #include "nsReadableUtils.h"
 #include "nsThreadUtils.h"
@@ -243,7 +244,7 @@ public:
    */
   struct AnnotationInfo {
     AnnotationInfo(uint32_t aHangIndex,
-                   UniquePtr<HangAnnotations> aAnnotations)
+                   HangAnnotationsPtr aAnnotations)
       : mHangIndex(aHangIndex)
       , mAnnotations(Move(aAnnotations))
     {}
@@ -259,7 +260,7 @@ public:
       return *this;
     }
     uint32_t mHangIndex;
-    UniquePtr<HangAnnotations> mAnnotations;
+    HangAnnotationsPtr mAnnotations;
 
   private:
     // Force move constructor
@@ -269,7 +270,7 @@ public:
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
   void AddHang(const Telemetry::ProcessedStack& aStack, uint32_t aDuration,
                int32_t aSystemUptime, int32_t aFirefoxUptime,
-               UniquePtr<HangAnnotations> aAnnotations);
+               HangAnnotationsPtr aAnnotations);
   uint32_t GetDuration(unsigned aIndex) const;
   int32_t GetSystemUptime(unsigned aIndex) const;
   int32_t GetFirefoxUptime(unsigned aIndex) const;
@@ -298,7 +299,7 @@ HangReports::AddHang(const Telemetry::ProcessedStack& aStack,
                      uint32_t aDuration,
                      int32_t aSystemUptime,
                      int32_t aFirefoxUptime,
-                     UniquePtr<HangAnnotations> aAnnotations) {
+                     HangAnnotationsPtr aAnnotations) {
   HangInfo info = { aDuration, aSystemUptime, aFirefoxUptime };
   mHangInfo.push_back(info);
   if (aAnnotations) {
@@ -637,7 +638,7 @@ ClearIOReporting()
 
 class KeyedHistogram;
 
-class TelemetryImpl MOZ_FINAL
+class TelemetryImpl final
   : public nsITelemetry
   , public nsIMemoryReporter
 {
@@ -648,7 +649,8 @@ class TelemetryImpl MOZ_FINAL
 public:
   void InitMemoryReporter();
 
-  static bool CanRecord();
+  static bool CanRecordBase();
+  static bool CanRecordExtended();
   static already_AddRefed<nsITelemetry> CreateTelemetryInstance();
   static void ShutdownTelemetry();
   static void RecordSlowStatement(const nsACString &sql, const nsACString &dbName,
@@ -658,7 +660,7 @@ public:
                                Telemetry::ProcessedStack &aStack,
                                int32_t aSystemUptime,
                                int32_t aFirefoxUptime,
-                               UniquePtr<HangAnnotations> aAnnotations);
+                               HangAnnotationsPtr aAnnotations);
 #endif
   static void RecordThreadHangStats(Telemetry::ThreadHangStats& aStats);
   static nsresult GetHistogramEnumId(const char *name, Telemetry::ID *id);
@@ -731,7 +733,8 @@ private:
   typedef nsBaseHashtableET<nsDepCharHashKey, Telemetry::ID> CharPtrEntryType;
   typedef AutoHashtable<CharPtrEntryType> HistogramMapType;
   HistogramMapType mHistogramMap;
-  bool mCanRecord;
+  bool mCanRecordBase;
+  bool mCanRecordExtended;
   static TelemetryImpl *sTelemetry;
   AutoHashtable<SlowSQLEntryType> mPrivateSQL;
   AutoHashtable<SlowSQLEntryType> mSanitizedSQL;
@@ -819,9 +822,6 @@ private:
   const uint32_t mMax;
   const uint32_t mBucketCount;
 };
-
-// A initializer to initialize histogram collection
-StatisticsRecorder gStatisticsRecorder;
 
 // Hardcoded probes
 struct TelemetryHistogram {
@@ -1210,7 +1210,7 @@ JSHistogram_Add(JSContext *cx, unsigned argc, JS::Value *vp)
     }
   }
 
-  if (TelemetryImpl::CanRecord()) {
+  if (TelemetryImpl::CanRecordExtended()) {
     HistogramAdd(*h, value);
   }
 
@@ -1751,7 +1751,7 @@ TelemetryImpl::AsyncFetchTelemetryData(nsIFetchTelemetryDataCallback *aCallback)
   // We make this check so that GetShutdownTimeFileName() doesn't get
   // called; calling that function without telemetry enabled violates
   // assumptions that the write-the-shutdown-timestamp machinery makes.
-  if (!Telemetry::CanRecord()) {
+  if (!Telemetry::CanRecordExtended()) {
     mCachedTelemetryData = true;
     aCallback->Complete();
     return NS_OK;
@@ -1805,7 +1805,10 @@ TelemetryImpl::AsyncFetchTelemetryData(nsIFetchTelemetryDataCallback *aCallback)
 
 TelemetryImpl::TelemetryImpl():
 mHistogramMap(Telemetry::HistogramCount),
-mCanRecord(XRE_GetProcessType() == GeckoProcessType_Default),
+mCanRecordBase(XRE_GetProcessType() == GeckoProcessType_Default ||
+               XRE_GetProcessType() == GeckoProcessType_Content),
+mCanRecordExtended(XRE_GetProcessType() == GeckoProcessType_Default ||
+                   XRE_GetProcessType() == GeckoProcessType_Content),
 mHashMutex("Telemetry::mHashMutex"),
 mHangReportsMutex("Telemetry::mHangReportsMutex"),
 mThreadHangStatsMutex("Telemetry::mThreadHangStatsMutex"),
@@ -1815,11 +1818,23 @@ mFailedLockCount(0)
 {
   // A whitelist to prevent Telemetry reporting on Addon & Thunderbird DBs
   const char *trackedDBs[] = {
-    "addons.sqlite", "content-prefs.sqlite", "cookies.sqlite",
-    "downloads.sqlite", "extensions.sqlite", "formhistory.sqlite",
-    "index.sqlite", "healthreport.sqlite", "netpredictions.sqlite",
-    "permissions.sqlite", "places.sqlite", "search.sqlite", "signons.sqlite",
-    "urlclassifier3.sqlite", "webappsstore.sqlite"
+    "818200132aebmoouht.sqlite", // IndexedDB for about:home, see aboutHome.js
+    "addons.sqlite",
+    "content-prefs.sqlite",
+    "cookies.sqlite",
+    "downloads.sqlite",
+    "extensions.sqlite",
+    "formhistory.sqlite",
+    "healthreport.sqlite",
+    "index.sqlite",
+    "netpredictions.sqlite",
+    "permissions.sqlite",
+    "places.sqlite",
+    "reading-list.sqlite",
+    "search.sqlite",
+    "signons.sqlite",
+    "urlclassifier3.sqlite",
+    "webappsstore.sqlite"
   };
 
   for (size_t i = 0; i < ArrayLength(trackedDBs); i++)
@@ -1923,8 +1938,8 @@ TelemetryImpl::ReflectSQL(const SlowSQLEntryType *entry,
   if (!arrayObj) {
     return false;
   }
-  return (JS_SetElement(cx, arrayObj, 0, stat->hitCount)
-          && JS_SetElement(cx, arrayObj, 1, stat->totalTime)
+  return (JS_DefineElement(cx, arrayObj, 0, stat->hitCount, JSPROP_ENUMERATE)
+          && JS_DefineElement(cx, arrayObj, 1, stat->totalTime, JSPROP_ENUMERATE)
           && JS_DefineProperty(cx, obj, sql.BeginReading(), arrayObj,
                                JSPROP_ENUMERATE));
 }
@@ -2523,13 +2538,16 @@ TelemetryImpl::GetChromeHangs(JSContext *cx, JS::MutableHandle<JS::Value> ret)
 
   const size_t length = stacks.GetStackCount();
   for (size_t i = 0; i < length; ++i) {
-    if (!JS_SetElement(cx, durationArray, i, mHangReports.GetDuration(i))) {
+    if (!JS_DefineElement(cx, durationArray, i, mHangReports.GetDuration(i),
+                          JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
-    if (!JS_SetElement(cx, systemUptimeArray, i, mHangReports.GetSystemUptime(i))) {
+    if (!JS_DefineElement(cx, systemUptimeArray, i, mHangReports.GetSystemUptime(i),
+                          JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
-    if (!JS_SetElement(cx, firefoxUptimeArray, i, mHangReports.GetFirefoxUptime(i))) {
+    if (!JS_DefineElement(cx, firefoxUptimeArray, i, mHangReports.GetFirefoxUptime(i),
+                          JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
     const nsTArray<HangReports::AnnotationInfo>& annotationInfo =
@@ -2542,16 +2560,16 @@ TelemetryImpl::GetChromeHangs(JSContext *cx, JS::MutableHandle<JS::Value> ret)
       }
       JS::RootedValue indexValue(cx);
       indexValue.setNumber(annotationInfo[iterIndex].mHangIndex);
-      if (!JS_SetElement(cx, keyValueArray, 0, indexValue)) {
+      if (!JS_DefineElement(cx, keyValueArray, 0, indexValue, JSPROP_ENUMERATE)) {
         return NS_ERROR_FAILURE;
       }
       JS::Rooted<JSObject*> jsAnnotation(cx, JS_NewPlainObject(cx));
       if (!jsAnnotation) {
         return NS_ERROR_FAILURE;
       }
-      nsAutoPtr<HangAnnotations::Enumerator> annotationsEnum;
-      if (!annotationInfo[iterIndex].mAnnotations->GetEnumerator(
-            annotationsEnum.StartAssignment())) {
+      UniquePtr<HangAnnotations::Enumerator> annotationsEnum =
+        annotationInfo[iterIndex].mAnnotations->GetEnumerator();
+      if (!annotationsEnum) {
         return NS_ERROR_FAILURE;
       }
       nsAutoString  key;
@@ -2564,11 +2582,11 @@ TelemetryImpl::GetChromeHangs(JSContext *cx, JS::MutableHandle<JS::Value> ret)
           return NS_ERROR_FAILURE;
         }
       }
-      if (!JS_SetElement(cx, keyValueArray, 1, jsAnnotation)) {
+      if (!JS_DefineElement(cx, keyValueArray, 1, jsAnnotation, JSPROP_ENUMERATE)) {
         return NS_ERROR_FAILURE;
       }
-      if (!JS_SetElement(cx, annotationsArray, iterIndex,
-                         keyValueArray)) {
+      if (!JS_DefineElement(cx, annotationsArray, iterIndex,
+                         keyValueArray, JSPROP_ENUMERATE)) {
         return NS_ERROR_FAILURE;
       }
     }
@@ -2604,7 +2622,8 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
     if (!moduleInfoArray) {
       return nullptr;
     }
-    if (!JS_SetElement(cx, moduleArray, moduleIndex, moduleInfoArray)) {
+    if (!JS_DefineElement(cx, moduleArray, moduleIndex, moduleInfoArray,
+                          JSPROP_ENUMERATE)) {
       return nullptr;
     }
 
@@ -2615,7 +2634,7 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
     if (!str) {
       return nullptr;
     }
-    if (!JS_SetElement(cx, moduleInfoArray, index++, str)) {
+    if (!JS_DefineElement(cx, moduleInfoArray, index++, str, JSPROP_ENUMERATE)) {
       return nullptr;
     }
 
@@ -2624,7 +2643,7 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
     if (!id) {
       return nullptr;
     }
-    if (!JS_SetElement(cx, moduleInfoArray, index++, id)) {
+    if (!JS_DefineElement(cx, moduleInfoArray, index++, id, JSPROP_ENUMERATE)) {
       return nullptr;
     }
   }
@@ -2646,7 +2665,7 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
       return nullptr;
     }
 
-    if (!JS_SetElement(cx, reportArray, i, pcArray)) {
+    if (!JS_DefineElement(cx, reportArray, i, pcArray, JSPROP_ENUMERATE)) {
       return nullptr;
     }
 
@@ -2660,13 +2679,14 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
       }
       int modIndex = (std::numeric_limits<uint16_t>::max() == frame.mModIndex) ?
         -1 : frame.mModIndex;
-      if (!JS_SetElement(cx, framePair, 0, modIndex)) {
+      if (!JS_DefineElement(cx, framePair, 0, modIndex, JSPROP_ENUMERATE)) {
         return nullptr;
       }
-      if (!JS_SetElement(cx, framePair, 1, static_cast<double>(frame.mOffset))) {
+      if (!JS_DefineElement(cx, framePair, 1, static_cast<double>(frame.mOffset),
+                            JSPROP_ENUMERATE)) {
         return nullptr;
       }
-      if (!JS_SetElement(cx, pcArray, pcIndex, framePair)) {
+      if (!JS_DefineElement(cx, pcArray, pcIndex, framePair, JSPROP_ENUMERATE)) {
         return nullptr;
       }
     }
@@ -2799,13 +2819,14 @@ CreateJSTimeHistogram(JSContext* cx, const Telemetry::TimeHistogram& time)
   }
   /* In a Chromium-style histogram, the first bucket is an "under" bucket
      that represents all values below the histogram's range. */
-  if (!JS_SetElement(cx, ranges, 0, time.GetBucketMin(0)) ||
-      !JS_SetElement(cx, counts, 0, 0)) {
+  if (!JS_DefineElement(cx, ranges, 0, time.GetBucketMin(0), JSPROP_ENUMERATE) ||
+      !JS_DefineElement(cx, counts, 0, 0, JSPROP_ENUMERATE)) {
     return nullptr;
   }
   for (size_t i = 0; i < ArrayLength(time); i++) {
-    if (!JS_SetElement(cx, ranges, i + 1, time.GetBucketMax(i)) ||
-        !JS_SetElement(cx, counts, i + 1, time[i])) {
+    if (!JS_DefineElement(cx, ranges, i + 1, time.GetBucketMax(i),
+                          JSPROP_ENUMERATE) ||
+        !JS_DefineElement(cx, counts, i + 1, time[i], JSPROP_ENUMERATE)) {
       return nullptr;
     }
   }
@@ -2825,11 +2846,49 @@ CreateJSHangStack(JSContext* cx, const Telemetry::HangStack& stack)
   }
   for (size_t i = 0; i < stack.length(); i++) {
     JS::RootedString string(cx, JS_NewStringCopyZ(cx, stack[i]));
-    if (!JS_SetElement(cx, ret, i, string)) {
+    if (!JS_DefineElement(cx, ret, i, string, JSPROP_ENUMERATE)) {
       return nullptr;
     }
   }
   return ret;
+}
+
+static JSObject*
+CreateJSHangAnnotations(JSContext* cx, const HangAnnotationsVector& annotations)
+{
+  JS::RootedObject annotationsArray(cx, JS_NewArrayObject(cx, 0));
+  if (!annotationsArray) {
+    return nullptr;
+  }
+  size_t annotationIndex = 0;
+  for (const HangAnnotationsPtr *i = annotations.begin(), *e = annotations.end();
+       i != e; ++i) {
+    JS::RootedObject jsAnnotation(cx, JS_NewPlainObject(cx));
+    if (!jsAnnotation) {
+      continue;
+    }
+    const HangAnnotationsPtr& curAnnotations = *i;
+    UniquePtr<HangAnnotations::Enumerator> annotationsEnum =
+      curAnnotations->GetEnumerator();
+    if (!annotationsEnum) {
+      continue;
+    }
+    nsAutoString key;
+    nsAutoString value;
+    while (annotationsEnum->Next(key, value)) {
+      JS::RootedValue jsValue(cx);
+      jsValue.setString(JS_NewUCStringCopyN(cx, value.get(), value.Length()));
+      if (!JS_DefineUCProperty(cx, jsAnnotation, key.get(), key.Length(),
+                               jsValue, JSPROP_ENUMERATE)) {
+        return nullptr;
+      }
+    }
+    if (!JS_SetElement(cx, annotationsArray, annotationIndex, jsAnnotation)) {
+      continue;
+    }
+    ++annotationIndex;
+  }
+  return annotationsArray;
 }
 
 static JSObject*
@@ -2842,11 +2901,16 @@ CreateJSHangHistogram(JSContext* cx, const Telemetry::HangHistogram& hang)
 
   JS::RootedObject stack(cx, CreateJSHangStack(cx, hang.GetStack()));
   JS::RootedObject time(cx, CreateJSTimeHistogram(cx, hang));
+  auto& hangAnnotations = hang.GetAnnotations();
+  JS::RootedObject annotations(cx, CreateJSHangAnnotations(cx, hangAnnotations));
 
   if (!stack ||
       !time ||
+      !annotations ||
       !JS_DefineProperty(cx, ret, "stack", stack, JSPROP_ENUMERATE) ||
-      !JS_DefineProperty(cx, ret, "histogram", time, JSPROP_ENUMERATE)) {
+      !JS_DefineProperty(cx, ret, "histogram", time, JSPROP_ENUMERATE) ||
+      (!hangAnnotations.empty() && // <-- Only define annotations when nonempty
+        !JS_DefineProperty(cx, ret, "annotations", annotations, JSPROP_ENUMERATE))) {
     return nullptr;
   }
 
@@ -2885,13 +2949,14 @@ CreateJSThreadHangStats(JSContext* cx, const Telemetry::ThreadHangStats& thread)
   }
   for (size_t i = 0; i < thread.mHangs.length(); i++) {
     JS::RootedObject obj(cx, CreateJSHangHistogram(cx, thread.mHangs[i]));
-    if (!JS_SetElement(cx, hangs, i, obj)) {
+    if (!JS_DefineElement(cx, hangs, i, obj, JSPROP_ENUMERATE)) {
       return nullptr;
     }
   }
   if (!JS_DefineProperty(cx, ret, "hangs", hangs, JSPROP_ENUMERATE)) {
     return nullptr;
   }
+
   return ret;
 }
 
@@ -2904,28 +2969,27 @@ TelemetryImpl::GetThreadHangStats(JSContext* cx, JS::MutableHandle<JS::Value> re
   }
   size_t threadIndex = 0;
 
-#ifdef MOZ_ENABLE_BACKGROUND_HANG_MONITOR
-  /* First add active threads; we need to hold |iter| (and its lock)
-     throughout this method to avoid a race condition where a thread can
-     be recorded twice if the thread is destroyed while this method is
-     running */
-  BackgroundHangMonitor::ThreadHangStatsIterator iter;
-  for (Telemetry::ThreadHangStats* histogram = iter.GetNext();
-       histogram; histogram = iter.GetNext()) {
-    JS::RootedObject obj(cx,
-      CreateJSThreadHangStats(cx, *histogram));
-    if (!JS_SetElement(cx, retObj, threadIndex++, obj)) {
-      return NS_ERROR_FAILURE;
+  if (!BackgroundHangMonitor::IsDisabled()) {
+    /* First add active threads; we need to hold |iter| (and its lock)
+       throughout this method to avoid a race condition where a thread can
+       be recorded twice if the thread is destroyed while this method is
+       running */
+    BackgroundHangMonitor::ThreadHangStatsIterator iter;
+    for (Telemetry::ThreadHangStats* histogram = iter.GetNext();
+         histogram; histogram = iter.GetNext()) {
+      JS::RootedObject obj(cx, CreateJSThreadHangStats(cx, *histogram));
+      if (!JS_DefineElement(cx, retObj, threadIndex++, obj, JSPROP_ENUMERATE)) {
+        return NS_ERROR_FAILURE;
+      }
     }
   }
-#endif
 
   // Add saved threads next
   MutexAutoLock autoLock(mThreadHangStatsMutex);
   for (size_t i = 0; i < mThreadHangStats.length(); i++) {
     JS::RootedObject obj(cx,
       CreateJSThreadHangStats(cx, mThreadHangStats[i]));
-    if (!JS_SetElement(cx, retObj, threadIndex++, obj)) {
+    if (!JS_DefineElement(cx, retObj, threadIndex++, obj, JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -3022,7 +3086,7 @@ GetRegisteredHistogramIds(bool keyed, uint32_t dataset, uint32_t *aCount,
   }
 
   const size_t bytes = collection.Length() * sizeof(char*);
-  char** histograms = static_cast<char**>(nsMemory::Alloc(bytes));
+  char** histograms = static_cast<char**>(moz_xmalloc(bytes));
   memcpy(histograms, collection.Elements(), bytes);
   *aHistograms = histograms;
   *aCount = collection.Length();
@@ -3082,24 +3146,56 @@ TelemetryImpl::GetKeyedHistogramById(const nsACString &name)
 }
 
 NS_IMETHODIMP
-TelemetryImpl::GetCanRecord(bool *ret) {
-  *ret = mCanRecord;
+TelemetryImpl::GetCanRecordBase(bool *ret) {
+  *ret = mCanRecordBase;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-TelemetryImpl::SetCanRecord(bool canRecord) {
-  mCanRecord = !!canRecord;
+TelemetryImpl::SetCanRecordBase(bool canRecord) {
+  mCanRecordBase = canRecord;
   return NS_OK;
 }
 
+/**
+ * Indicates if Telemetry can record base data (FHR data). This is true if the
+ * FHR data reporting service or self-support are enabled.
+ *
+ * In the unlikely event that adding a new base probe is needed, please check the data
+ * collection wiki at https://wiki.mozilla.org/Firefox/Data_Collection and talk to the
+ * Telemetry team.
+ */
 bool
-TelemetryImpl::CanRecord() {
-  return !sTelemetry || sTelemetry->mCanRecord;
+TelemetryImpl::CanRecordBase() {
+  return !sTelemetry || sTelemetry->mCanRecordBase;
 }
 
 NS_IMETHODIMP
-TelemetryImpl::GetCanSend(bool *ret) {
+TelemetryImpl::GetCanRecordExtended(bool *ret) {
+  *ret = mCanRecordExtended;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TelemetryImpl::SetCanRecordExtended(bool canRecord) {
+  mCanRecordExtended = canRecord;
+  return NS_OK;
+}
+
+/**
+ * Indicates if Telemetry is allowed to record extended data. Returns false if the user
+ * hasn't opted into "extended Telemetry" on the Release channel, when the user has
+ * explicitly opted out of Telemetry on Nightly/Aurora/Beta or if manually set to false
+ * during tests.
+ * If the returned value is false, gathering of extended telemetry statistics is disabled.
+ */
+bool
+TelemetryImpl::CanRecordExtended() {
+  return !sTelemetry || sTelemetry->mCanRecordExtended;
+}
+
+NS_IMETHODIMP
+TelemetryImpl::GetIsOfficialTelemetry(bool *ret) {
 #if defined(MOZILLA_OFFICIAL) && defined(MOZ_TELEMETRY_REPORTING)
   *ret = true;
 #else
@@ -3294,7 +3390,7 @@ TelemetryImpl::RecordSlowStatement(const nsACString &sql,
                                    const nsACString &dbName,
                                    uint32_t delay)
 {
-  if (!sTelemetry || !sTelemetry->mCanRecord)
+  if (!sTelemetry || !sTelemetry->mCanRecordExtended)
     return;
 
   bool isFirefoxDB = sTelemetry->mTrackedDBs.Contains(dbName);
@@ -3327,12 +3423,12 @@ TelemetryImpl::RecordChromeHang(uint32_t aDuration,
                                 Telemetry::ProcessedStack &aStack,
                                 int32_t aSystemUptime,
                                 int32_t aFirefoxUptime,
-                                UniquePtr<HangAnnotations> aAnnotations)
+                                HangAnnotationsPtr aAnnotations)
 {
-  if (!sTelemetry || !sTelemetry->mCanRecord)
+  if (!sTelemetry || !sTelemetry->mCanRecordExtended)
     return;
 
-  UniquePtr<HangAnnotations> annotations;
+  HangAnnotationsPtr annotations;
   // We only pass aAnnotations if it is not empty.
   if (aAnnotations && !aAnnotations->IsEmpty()) {
     annotations = Move(aAnnotations);
@@ -3349,7 +3445,7 @@ TelemetryImpl::RecordChromeHang(uint32_t aDuration,
 void
 TelemetryImpl::RecordThreadHangStats(Telemetry::ThreadHangStats& aStats)
 {
-  if (!sTelemetry || !sTelemetry->mCanRecord)
+  if (!sTelemetry || !sTelemetry->mCanRecordExtended)
     return;
 
   MutexAutoLock autoLock(sTelemetry->mThreadHangStatsMutex);
@@ -3469,7 +3565,7 @@ RecordShutdownStartTimeStamp() {
   recorded = true;
 #endif
 
-  if (!Telemetry::CanRecord())
+  if (!Telemetry::CanRecordExtended())
     return;
 
   gRecordedShutdownStartTime = TimeStamp::Now();
@@ -3518,7 +3614,7 @@ namespace Telemetry {
 void
 Accumulate(ID aHistogram, uint32_t aSample)
 {
-  if (!TelemetryImpl::CanRecord()) {
+  if (!TelemetryImpl::CanRecordExtended()) {
     return;
   }
   Histogram *h;
@@ -3530,7 +3626,7 @@ Accumulate(ID aHistogram, uint32_t aSample)
 void
 Accumulate(ID aID, const nsCString& aKey, uint32_t aSample)
 {
-  if (!TelemetryImpl::CanRecord()) {
+  if (!TelemetryImpl::CanRecordExtended()) {
     return;
   }
 
@@ -3543,7 +3639,7 @@ Accumulate(ID aID, const nsCString& aKey, uint32_t aSample)
 void
 Accumulate(const char* name, uint32_t sample)
 {
-  if (!TelemetryImpl::CanRecord()) {
+  if (!TelemetryImpl::CanRecordExtended()) {
     return;
   }
   ID id;
@@ -3567,9 +3663,15 @@ AccumulateTimeDelta(ID aHistogram, TimeStamp start, TimeStamp end)
 }
 
 bool
-CanRecord()
+CanRecordBase()
 {
-  return TelemetryImpl::CanRecord();
+  return TelemetryImpl::CanRecordBase();
+}
+
+bool
+CanRecordExtended()
+{
+  return TelemetryImpl::CanRecordExtended();
 }
 
 base::Histogram*
@@ -3601,7 +3703,7 @@ void RecordChromeHang(uint32_t duration,
                       ProcessedStack &aStack,
                       int32_t aSystemUptime,
                       int32_t aFirefoxUptime,
-                      UniquePtr<HangAnnotations> aAnnotations)
+                      HangAnnotationsPtr aAnnotations)
 {
   TelemetryImpl::RecordChromeHang(duration, aStack,
                                   aSystemUptime, aFirefoxUptime,
@@ -4052,7 +4154,7 @@ KeyedHistogram::ClearHistogramEnumerator(KeyedHistogramEntry* entry, void*)
 nsresult
 KeyedHistogram::Add(const nsCString& key, uint32_t sample)
 {
-  if (!TelemetryImpl::CanRecord()) {
+  if (!TelemetryImpl::CanRecordExtended()) {
     return NS_OK;
   }
 

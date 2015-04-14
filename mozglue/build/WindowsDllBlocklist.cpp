@@ -169,6 +169,9 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
   { "rndlnpshimswf.dll", ALL_VERSIONS },
   { "rndlmainbrowserrecordplugin.dll", ALL_VERSIONS },
 
+  // Crashes with CyberLink YouCam, bug 1136968
+  { "ycwebcamerasource.ax", MAKE_VERSION(2, 0, 0, 1611) },
+
   { nullptr, 0 }
 };
 
@@ -572,6 +575,16 @@ patched_LdrLoadDll (PWCHAR filePath, PULONG flags, PUNICODE_STRING moduleFileNam
     char * end = nullptr;
     _strtoui64(dot+1, &end, 16);
     if (end == dot+13) {
+      return STATUS_DLL_NOT_FOUND;
+    }
+  }
+  // Block binaries where the filename is at least 16 hex digits
+  if (dot && ((dot - dllName) >= 16)) {
+    char * current = dllName;
+    while (current < dot && isxdigit(*current)) {
+      current++;
+    }
+    if (current == dot) {
       return STATUS_DLL_NOT_FOUND;
     }
   }

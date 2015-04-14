@@ -33,7 +33,7 @@ namespace dom {
 
 using namespace workers;
 
-class BroadcastChannelMessage MOZ_FINAL
+class BroadcastChannelMessage final
 {
 public:
   NS_INLINE_DECL_REFCOUNTING(BroadcastChannelMessage)
@@ -56,53 +56,68 @@ GetOrigin(nsIPrincipal* aPrincipal, nsAString& aOrigin, ErrorResult& aRv)
 {
   MOZ_ASSERT(aPrincipal);
 
-  uint16_t appStatus = aPrincipal->GetAppStatus();
+  bool unknownAppId;
+  aRv = aPrincipal->GetUnknownAppId(&unknownAppId);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
 
-  if (appStatus == nsIPrincipal::APP_STATUS_NOT_INSTALLED) {
-    nsAutoString tmp;
-    aRv = nsContentUtils::GetUTFOrigin(aPrincipal, tmp);
+  if (!unknownAppId) {
+    uint32_t appId;
+    aRv = aPrincipal->GetAppId(&appId);
     if (NS_WARN_IF(aRv.Failed())) {
       return;
     }
 
-    aOrigin = tmp;
-    if (aOrigin.EqualsASCII("null")) {
-      nsCOMPtr<nsIURI> uri;
-      aRv = aPrincipal->GetURI(getter_AddRefs(uri));
-      if (NS_WARN_IF(aRv.Failed())) {
+    if (appId != nsIScriptSecurityManager::NO_APP_ID) {
+      // If we are in "app code", use manifest URL as unique origin since
+      // multiple apps can share the same origin but not same broadcast
+      // messages.
+      nsresult rv;
+      nsCOMPtr<nsIAppsService> appsService =
+        do_GetService("@mozilla.org/AppsService;1", &rv);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        aRv.Throw(rv);
         return;
       }
 
-      if (NS_WARN_IF(!uri)) {
-        aRv.Throw(NS_ERROR_FAILURE);
-        return;
-      }
-
-      nsAutoCString spec;
-      aRv = uri->GetSpec(spec);
-      if (NS_WARN_IF(aRv.Failed())) {
-        return;
-      }
-
-      aOrigin = NS_ConvertUTF8toUTF16(spec);
+      appsService->GetManifestURLByLocalId(appId, aOrigin);
+      return;
     }
+  }
 
+  nsAutoString tmp;
+  aRv = nsContentUtils::GetUTFOrigin(aPrincipal, tmp);
+  if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
 
-  uint32_t appId = aPrincipal->GetAppId();
+  // 'null' means an unknown origin (it can be chrome code or it can be some
+  // about: page).
 
-  // If we are in "app code", use manifest URL as unique origin since
-  // multiple apps can share the same origin but not same broadcast messages.
-  nsresult rv;
-  nsCOMPtr<nsIAppsService> appsService =
-    do_GetService("@mozilla.org/AppsService;1", &rv);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    aRv.Throw(rv);
+  aOrigin = tmp;
+  if (!aOrigin.EqualsASCII("null")) {
     return;
   }
 
-  appsService->GetManifestURLByLocalId(appId, aOrigin);
+  nsCOMPtr<nsIURI> uri;
+  aRv = aPrincipal->GetURI(getter_AddRefs(uri));
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
+
+  if (NS_WARN_IF(!uri)) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return;
+  }
+
+  nsAutoCString spec;
+  aRv = uri->GetSpec(spec);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
+
+  aOrigin = NS_ConvertUTF8toUTF16(spec);
 }
 
 nsIPrincipal*
@@ -122,21 +137,23 @@ GetPrincipalFromWorkerPrivate(WorkerPrivate* aWorkerPrivate)
   return wp->GetPrincipal();
 }
 
-class InitializeRunnable MOZ_FINAL : public WorkerMainThreadRunnable
+class InitializeRunnable final : public WorkerMainThreadRunnable
 {
 public:
   InitializeRunnable(WorkerPrivate* aWorkerPrivate, nsAString& aOrigin,
-                     PrincipalInfo& aPrincipalInfo, ErrorResult& aRv)
+                     PrincipalInfo& aPrincipalInfo, bool& aPrivateBrowsing,
+                     ErrorResult& aRv)
     : WorkerMainThreadRunnable(aWorkerPrivate)
     , mWorkerPrivate(GetCurrentThreadWorkerPrivate())
     , mOrigin(aOrigin)
     , mPrincipalInfo(aPrincipalInfo)
+    , mPrivateBrowsing(aPrivateBrowsing)
     , mRv(aRv)
   {
     MOZ_ASSERT(mWorkerPrivate);
   }
 
-  bool MainThreadRun() MOZ_OVERRIDE
+  bool MainThreadRun() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -180,8 +197,10 @@ public:
     }
 
     nsIDocument* doc = window->GetExtantDoc();
-    // No bfcache when BroadcastChannel is used.
     if (doc) {
+      mPrivateBrowsing = nsContentUtils::IsInPrivateBrowsing(doc);
+
+      // No bfcache when BroadcastChannel is used.
       doc->DisallowBFCaching();
     }
 
@@ -192,10 +211,11 @@ private:
   WorkerPrivate* mWorkerPrivate;
   nsAString& mOrigin;
   PrincipalInfo& mPrincipalInfo;
+  bool& mPrivateBrowsing;
   ErrorResult& mRv;
 };
 
-class BCPostMessageRunnable MOZ_FINAL : public nsICancelableRunnable
+class BCPostMessageRunnable final : public nsICancelableRunnable
 {
 public:
   NS_DECL_ISUPPORTS
@@ -208,7 +228,7 @@ public:
     MOZ_ASSERT(mActor);
   }
 
-  NS_IMETHODIMP Run() MOZ_OVERRIDE
+  NS_IMETHODIMP Run() override
   {
     MOZ_ASSERT(mActor);
     if (mActor->IsActorDestroyed()) {
@@ -242,7 +262,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHODIMP Cancel() MOZ_OVERRIDE
+  NS_IMETHODIMP Cancel() override
   {
     mActor = nullptr;
     return NS_OK;
@@ -257,7 +277,7 @@ private:
 
 NS_IMPL_ISUPPORTS(BCPostMessageRunnable, nsICancelableRunnable, nsIRunnable)
 
-class CloseRunnable MOZ_FINAL : public nsICancelableRunnable
+class CloseRunnable final : public nsICancelableRunnable
 {
 public:
   NS_DECL_ISUPPORTS
@@ -268,13 +288,13 @@ public:
     MOZ_ASSERT(mBC);
   }
 
-  NS_IMETHODIMP Run() MOZ_OVERRIDE
+  NS_IMETHODIMP Run() override
   {
     mBC->Shutdown();
     return NS_OK;
   }
 
-  NS_IMETHODIMP Cancel() MOZ_OVERRIDE
+  NS_IMETHODIMP Cancel() override
   {
     mBC = nullptr;
     return NS_OK;
@@ -288,7 +308,7 @@ private:
 
 NS_IMPL_ISUPPORTS(CloseRunnable, nsICancelableRunnable, nsIRunnable)
 
-class TeardownRunnable MOZ_FINAL : public nsICancelableRunnable
+class TeardownRunnable final : public nsICancelableRunnable
 {
 public:
   NS_DECL_ISUPPORTS
@@ -299,7 +319,7 @@ public:
     MOZ_ASSERT(mActor);
   }
 
-  NS_IMETHODIMP Run() MOZ_OVERRIDE
+  NS_IMETHODIMP Run() override
   {
     MOZ_ASSERT(mActor);
     if (!mActor->IsActorDestroyed()) {
@@ -308,7 +328,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHODIMP Cancel() MOZ_OVERRIDE
+  NS_IMETHODIMP Cancel() override
   {
     mActor = nullptr;
     return NS_OK;
@@ -322,7 +342,7 @@ private:
 
 NS_IMPL_ISUPPORTS(TeardownRunnable, nsICancelableRunnable, nsIRunnable)
 
-class BroadcastChannelFeature MOZ_FINAL : public workers::WorkerFeature
+class BroadcastChannelFeature final : public workers::WorkerFeature
 {
   BroadcastChannel* mChannel;
 
@@ -333,7 +353,7 @@ public:
     MOZ_COUNT_CTOR(BroadcastChannelFeature);
   }
 
-  virtual bool Notify(JSContext* aCx, workers::Status aStatus) MOZ_OVERRIDE
+  virtual bool Notify(JSContext* aCx, workers::Status aStatus) override
   {
     if (aStatus >= Closing) {
       mChannel->Shutdown();
@@ -349,7 +369,7 @@ private:
   }
 };
 
-class PrefEnabledRunnable MOZ_FINAL : public WorkerMainThreadRunnable
+class PrefEnabledRunnable final : public WorkerMainThreadRunnable
 {
 public:
   explicit PrefEnabledRunnable(WorkerPrivate* aWorkerPrivate)
@@ -357,7 +377,7 @@ public:
     , mEnabled(false)
   { }
 
-  bool MainThreadRun() MOZ_OVERRIDE
+  bool MainThreadRun() override
   {
     AssertIsOnMainThread();
     mEnabled = Preferences::GetBool("dom.broadcastChannel.enabled", false);
@@ -396,12 +416,14 @@ BroadcastChannel::IsEnabled(JSContext* aCx, JSObject* aGlobal)
 BroadcastChannel::BroadcastChannel(nsPIDOMWindow* aWindow,
                                    const PrincipalInfo& aPrincipalInfo,
                                    const nsAString& aOrigin,
-                                   const nsAString& aChannel)
+                                   const nsAString& aChannel,
+                                   bool aPrivateBrowsing)
   : DOMEventTargetHelper(aWindow)
   , mWorkerFeature(nullptr)
   , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
   , mOrigin(aOrigin)
   , mChannel(aChannel)
+  , mPrivateBrowsing(aPrivateBrowsing)
   , mIsKeptAlive(false)
   , mInnerID(0)
   , mState(StateActive)
@@ -416,9 +438,9 @@ BroadcastChannel::~BroadcastChannel()
 }
 
 JSObject*
-BroadcastChannel::WrapObject(JSContext* aCx)
+BroadcastChannel::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return BroadcastChannelBinding::Wrap(aCx, this);
+  return BroadcastChannelBinding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<BroadcastChannel>
@@ -431,6 +453,7 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
 
   nsAutoString origin;
   PrincipalInfo principalInfo;
+  bool privateBrowsing = false;
   WorkerPrivate* workerPrivate = nullptr;
 
   if (NS_IsMainThread()) {
@@ -469,8 +492,10 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
     }
 
     nsIDocument* doc = window->GetExtantDoc();
-    // No bfcache when BroadcastChannel is used.
     if (doc) {
+      privateBrowsing = nsContentUtils::IsInPrivateBrowsing(doc);
+
+      // No bfcache when BroadcastChannel is used.
       doc->DisallowBFCaching();
     }
   } else {
@@ -479,7 +504,8 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
     MOZ_ASSERT(workerPrivate);
 
     nsRefPtr<InitializeRunnable> runnable =
-      new InitializeRunnable(workerPrivate, origin, principalInfo, aRv);
+      new InitializeRunnable(workerPrivate, origin, principalInfo,
+                             privateBrowsing, aRv);
     runnable->Dispatch(cx);
   }
 
@@ -488,7 +514,8 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
   }
 
   nsRefPtr<BroadcastChannel> bc =
-    new BroadcastChannel(window, principalInfo, origin, aChannel);
+    new BroadcastChannel(window, principalInfo, origin, aChannel,
+                         privateBrowsing);
 
   // Register this component to PBackground.
   PBackgroundChild* actor = BackgroundChild::GetForCurrentThread();
@@ -513,6 +540,8 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
     JSContext* cx = workerPrivate->GetJSContext();
     if (NS_WARN_IF(!workerPrivate->AddFeature(cx, bc->mWorkerFeature))) {
       NS_WARNING("Failed to register the BroadcastChannel worker feature.");
+      bc->mWorkerFeature = nullptr;
+      aRv.Throw(NS_ERROR_FAILURE);
       return nullptr;
     }
   }
@@ -612,7 +641,8 @@ BroadcastChannel::ActorCreated(PBackgroundChild* aActor)
   }
 
   PBroadcastChannelChild* actor =
-    aActor->SendPBroadcastChannelConstructor(*mPrincipalInfo, mOrigin, mChannel);
+    aActor->SendPBroadcastChannelConstructor(*mPrincipalInfo, mOrigin, mChannel,
+                                             mPrivateBrowsing);
 
   mActor = static_cast<BroadcastChannelChild*>(actor);
   MOZ_ASSERT(mActor);

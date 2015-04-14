@@ -143,11 +143,11 @@ public:
   IMPL_EVENT_HANDLER(timeout)
   IMPL_EVENT_HANDLER(loadend)
   
-  virtual void DisconnectFromOwner() MOZ_OVERRIDE;
+  virtual void DisconnectFromOwner() override;
 };
 
-class nsXMLHttpRequestUpload MOZ_FINAL : public nsXHREventTarget,
-                                         public nsIXMLHttpRequestUpload
+class nsXMLHttpRequestUpload final : public nsXHREventTarget,
+                                     public nsIXMLHttpRequestUpload
 {
 public:
   explicit nsXMLHttpRequestUpload(mozilla::DOMEventTargetHelper* aOwner)
@@ -160,7 +160,7 @@ public:
   NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsXHREventTarget)
   NS_DECL_NSIXMLHTTPREQUESTUPLOAD
 
-  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override;
   nsISupports* GetParentObject()
   {
     return GetOwner();
@@ -179,16 +179,16 @@ class nsXMLHttpRequestXPCOMifier;
 
 // Make sure that any non-DOM interfaces added here are also added to
 // nsXMLHttpRequestXPCOMifier.
-class nsXMLHttpRequest MOZ_FINAL : public nsXHREventTarget,
-                                   public nsIXMLHttpRequest,
-                                   public nsIJSXMLHttpRequest,
-                                   public nsIStreamListener,
-                                   public nsIChannelEventSink,
-                                   public nsIProgressEventSink,
-                                   public nsIInterfaceRequestor,
-                                   public nsSupportsWeakReference,
-                                   public nsITimerCallback,
-                                   public nsISizeOfEventTarget
+class nsXMLHttpRequest final : public nsXHREventTarget,
+                               public nsIXMLHttpRequest,
+                               public nsIJSXMLHttpRequest,
+                               public nsIStreamListener,
+                               public nsIChannelEventSink,
+                               public nsIProgressEventSink,
+                               public nsIInterfaceRequestor,
+                               public nsSupportsWeakReference,
+                               public nsITimerCallback,
+                               public nsISizeOfEventTarget
 {
   friend class nsXHRParseEndListener;
   friend class nsXMLHttpRequestXPCOMifier;
@@ -196,9 +196,9 @@ class nsXMLHttpRequest MOZ_FINAL : public nsXHREventTarget,
 public:
   nsXMLHttpRequest();
 
-  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE
+  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return mozilla::dom::XMLHttpRequestBinding::Wrap(cx, this);
+    return mozilla::dom::XMLHttpRequestBinding::Wrap(cx, this, aGivenProto);
   }
   nsISupports* GetParentObject()
   {
@@ -291,7 +291,7 @@ public:
 
   // nsISizeOfEventTarget
   virtual size_t
-    SizeOfEventTargetIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+    SizeOfEventTargetIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
 
   NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsXHREventTarget)
 
@@ -428,6 +428,11 @@ private:
 
   bool IsDeniedCrossSiteRequest();
 
+  // Tell our channel what network interface ID we were told to use.
+  // If it's an HTTP channel and we were told to use a non-default
+  // interface ID.
+  void PopulateNetworkInterfaceId();
+
 public:
   void Send(JSContext* /*aCx*/, ErrorResult& aRv)
   {
@@ -538,6 +543,16 @@ public:
     return mChannel;
   }
 
+  void GetNetworkInterfaceId(nsACString& aId) const
+  {
+    aId = mNetworkInterfaceId;
+  }
+
+  void SetNetworkInterfaceId(const nsACString& aId)
+  {
+    mNetworkInterfaceId = aId;
+  }
+
   // We need a GetInterface callable from JS for chrome JS
   void GetInterface(JSContext* aCx, nsIJSID* aIID,
                     JS::MutableHandle<JS::Value> aRetval, ErrorResult& aRv);
@@ -570,7 +585,7 @@ public:
   bool AllowUploadProgress();
   void RootJSResultObjects();
 
-  virtual void DisconnectFromOwner() MOZ_OVERRIDE;
+  virtual void DisconnectFromOwner() override;
 
   static void SetDontWarnAboutSyncXHR(bool aVal)
   {
@@ -634,7 +649,8 @@ protected:
   nsCOMPtr<nsIStreamListener> mXMLParserStreamListener;
 
   // used to implement getAllResponseHeaders()
-  class nsHeaderVisitor : public nsIHttpHeaderVisitor {
+  class nsHeaderVisitor : public nsIHttpHeaderVisitor
+  {
   public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIHTTPHEADERVISITOR
@@ -761,6 +777,10 @@ protected:
   bool mIsSystem;
   bool mIsAnon;
 
+  // A platform-specific identifer to represent the network interface
+  // that this request is associated with.
+  nsCString mNetworkInterfaceId;
+
   /**
    * Close the XMLHttpRequest's channels and dispatch appropriate progress
    * events.
@@ -819,11 +839,11 @@ private:
 
 // A shim class designed to expose the non-DOM interfaces of
 // XMLHttpRequest via XPCOM stuff.
-class nsXMLHttpRequestXPCOMifier MOZ_FINAL : public nsIStreamListener,
-                                             public nsIChannelEventSink,
-                                             public nsIProgressEventSink,
-                                             public nsIInterfaceRequestor,
-                                             public nsITimerCallback
+class nsXMLHttpRequestXPCOMifier final : public nsIStreamListener,
+                                         public nsIChannelEventSink,
+                                         public nsIProgressEventSink,
+                                         public nsIInterfaceRequestor,
+                                         public nsITimerCallback
 {
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsXMLHttpRequestXPCOMifier,
@@ -858,7 +878,7 @@ class nsXHRParseEndListener : public nsIDOMEventListener
 {
 public:
   NS_DECL_ISUPPORTS
-  NS_IMETHOD HandleEvent(nsIDOMEvent *event) MOZ_OVERRIDE
+  NS_IMETHOD HandleEvent(nsIDOMEvent *event) override
   {
     nsCOMPtr<nsIXMLHttpRequest> xhr = do_QueryReferent(mXHR);
     if (xhr) {

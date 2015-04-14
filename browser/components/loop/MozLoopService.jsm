@@ -15,6 +15,33 @@ const LOOP_SESSION_TYPE = {
   FXA: 2,
 };
 
+/***
+ * Buckets that we segment 2-way media connection length telemetry probes
+ * into.
+ *
+ * @type {{SHORTER_THAN_10S: string, BETWEEN_10S_AND_30S: string,
+ *   BETWEEN_30S_AND_5M: string, MORE_THAN_5M: string}}
+ */
+const TWO_WAY_MEDIA_CONN_LENGTH = {
+  SHORTER_THAN_10S: "SHORTER_THAN_10S",
+  BETWEEN_10S_AND_30S: "BETWEEN_10S_AND_30S",
+  BETWEEN_30S_AND_5M: "BETWEEN_30S_AND_5M",
+  MORE_THAN_5M: "MORE_THAN_5M",
+};
+
+/**
+ * Buckets that we segment sharing state change telemetry probes into.
+ *
+ * @type {{WINDOW_ENABLED: String, WINDOW_DISABLED: String,
+ *   BROWSER_ENABLED: String, BROWSER_DISABLED: String}}
+ */
+const SHARING_STATE_CHANGE = {
+  WINDOW_ENABLED: "WINDOW_ENABLED",
+  WINDOW_DISABLED: "WINDOW_DISABLED",
+  BROWSER_ENABLED: "BROWSER_ENABLED",
+  BROWSER_DISABLED: "BROWSER_DISABLED"
+};
+
 // See LOG_LEVELS in Console.jsm. Common examples: "All", "Info", "Warn", & "Error".
 const PREF_LOG_LEVEL = "loop.debug.loglevel";
 
@@ -28,13 +55,18 @@ Cu.import("resource://gre/modules/FxAccountsOAuthClient.jsm");
 
 Cu.importGlobalProperties(["URL"]);
 
-this.EXPORTED_SYMBOLS = ["MozLoopService", "LOOP_SESSION_TYPE"];
+this.EXPORTED_SYMBOLS = ["MozLoopService", "LOOP_SESSION_TYPE",
+  "TWO_WAY_MEDIA_CONN_LENGTH", "SHARING_STATE_CHANGE"];
 
 XPCOMUtils.defineLazyModuleGetter(this, "injectLoopAPI",
   "resource:///modules/loop/MozLoopAPI.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "convertToRTCStatsReport",
   "resource://gre/modules/media/RTCStatsReport.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "loopUtils",
+  "resource:///modules/loop/utils.js", "utils")
+XPCOMUtils.defineLazyModuleGetter(this, "loopCrypto",
+  "resource:///modules/loop/crypto.js", "LoopCrypto");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Chat", "resource:///modules/Chat.jsm");
 
@@ -137,10 +169,14 @@ let MozLoopServiceInternal = {
    */
   deferredRegistrations: new Map(),
 
-  get pushHandler() this.mocks.pushHandler || MozLoopPushHandler,
+  get pushHandler() {
+    return this.mocks.pushHandler || MozLoopPushHandler
+  },
 
   // The uri of the Loop server.
-  get loopServerUri() Services.prefs.getCharPref("loop.server"),
+  get loopServerUri() {
+    return Services.prefs.getCharPref("loop.server")
+  },
 
   /**
    * The initial delay for push registration. This ensures we don't start
@@ -155,37 +191,6 @@ let MozLoopServiceInternal = {
       return 5000;
     }
     return initialDelay;
-  },
-
-  /**
-   * Gets the current latest expiry time for urls.
-   *
-   * In seconds since epoch.
-   */
-  get expiryTimeSeconds() {
-    try {
-      return Services.prefs.getIntPref("loop.urlsExpiryTimeSeconds");
-    } catch (x) {
-      // It is ok for the pref not to exist.
-      return 0;
-    }
-  },
-
-  /**
-   * Sets the expiry time to either the specified time, or keeps it the same
-   * depending on which is latest.
-   */
-  set expiryTimeSeconds(time) {
-    if (time > this.expiryTimeSeconds) {
-      Services.prefs.setIntPref("loop.urlsExpiryTimeSeconds", time);
-    }
-  },
-
-  /**
-   * Returns true if the expiry time is in the future.
-   */
-  urlExpiryTimeIsInFuture: function() {
-    return this.expiryTimeSeconds * 1000 > Date.now();
   },
 
   /**
@@ -390,17 +395,20 @@ let MozLoopServiceInternal = {
     let options = this.mocks.webSocket ? { mockWebSocket: this.mocks.webSocket } : {};
     this.pushHandler.initialize(options); // This can be called more than once.
 
-    let callsID = sessionType == LOOP_SESSION_TYPE.GUEST ?
-          MozLoopService.channelIDs.callsGuest :
-          MozLoopService.channelIDs.callsFxA,
-        roomsID = sessionType == LOOP_SESSION_TYPE.GUEST ?
-          MozLoopService.channelIDs.roomsGuest :
-          MozLoopService.channelIDs.roomsFxA;
-
-    let regPromise = this.createNotificationChannel(
-      callsID, sessionType, "calls", LoopCalls.onNotification).then(() => {
-        return this.createNotificationChannel(
-          roomsID, sessionType, "rooms", roomsPushNotification)});
+    let regPromise;
+    if (sessionType == LOOP_SESSION_TYPE.GUEST) {
+      regPromise = this.createNotificationChannel(
+        MozLoopService.channelIDs.roomsGuest, sessionType, "rooms",
+        roomsPushNotification);
+    } else {
+      regPromise = this.createNotificationChannel(
+        MozLoopService.channelIDs.callsFxA, sessionType, "calls",
+        LoopCalls.onNotification).then(() => {
+          return this.createNotificationChannel(
+            MozLoopService.channelIDs.roomsFxA, sessionType, "rooms",
+            roomsPushNotification);
+        });
+    }
 
     log.debug("assigning to deferredRegistrations for sessionType:", sessionType);
     this.deferredRegistrations.set(sessionType, regPromise);
@@ -587,11 +595,8 @@ let MozLoopServiceInternal = {
           this.setError("login", error);
           throw error;
         });
-      } else if (this.urlExpiryTimeIsInFuture()) {
-        // If there are no Guest URLs in the future, don't use setError to notify the user since
-        // there isn't a need for a Guest registration at this time.
-        this.setError("registration", error);
       }
+      this.setError("registration", error);
       throw error;
     };
 
@@ -826,7 +831,8 @@ let MozLoopServiceInternal = {
    *
    * @param {Object} conversationWindowData The data to be obtained by the
    *                                        window when it opens.
-   * @returns {Number} The id of the window.
+   * @returns {Number} The id of the window, null if a window could not
+   *                   be opened.
    */
   openChatWindow: function(conversationWindowData) {
     // So I guess the origin is the loop server!?
@@ -897,8 +903,7 @@ let MozLoopServiceInternal = {
             switch(pc.iceConnectionState) {
               case "failed":
               case "disconnected":
-                if (Services.telemetry.canSend ||
-                    Services.prefs.getBoolPref("toolkit.telemetry.test")) {
+                if (Services.telemetry.canRecordExtended) {
                   this.stageForTelemetryUpload(window, pc);
                 }
                 break;
@@ -913,7 +918,9 @@ let MozLoopServiceInternal = {
       }.bind(this), true);
     };
 
-    Chat.open(null, origin, "", url, undefined, undefined, callback);
+    if (!Chat.open(null, origin, "", url, undefined, undefined, callback)) {
+      return null;
+    }
     return windowId;
   },
 
@@ -981,6 +988,7 @@ let MozLoopServiceInternal = {
     this.promiseFxAOAuthClient().then(
       client => {
         client.onComplete = this._fxAOAuthComplete.bind(this, deferred);
+        client.onError = this._fxAOAuthError.bind(this, deferred);
         client.launchWebFlow();
       },
       error => {
@@ -1020,18 +1028,24 @@ let MozLoopServiceInternal = {
   /**
    * Called once gFxAOAuthClient fires onComplete.
    *
-   * @param {Deferred} deferred used to resolve or reject the gFxAOAuthClientPromise
+   * @param {Deferred} deferred used to resolve the gFxAOAuthClientPromise
    * @param {Object} result (with code and state)
    */
   _fxAOAuthComplete: function(deferred, result) {
     gFxAOAuthClientPromise = null;
-
     // Note: The state was already verified in FxAccountsOAuthClient.
-    if (result) {
-      deferred.resolve(result);
-    } else {
-      deferred.reject("Invalid token data");
-    }
+    deferred.resolve(result);
+  },
+
+  /**
+   * Called if gFxAOAuthClient fires onError.
+   *
+   * @param {Deferred} deferred used to reject the gFxAOAuthClientPromise
+   * @param {Object} error object returned by FxAOAuthClient
+   */
+  _fxAOAuthError: function(deferred, err) {
+    gFxAOAuthClientPromise = null;
+    deferred.reject(err);
   },
 };
 Object.freeze(MozLoopServiceInternal);
@@ -1058,7 +1072,6 @@ this.MozLoopService = {
     // Channel ids that will be registered with the PushServer for notifications
     return {
       callsFxA: "25389583-921f-4169-a426-a4673658944b",
-      callsGuest: "801f754b-686b-43ec-bd83-1419bbf58388",
       roomsFxA: "6add272a-d316-477c-8335-f00f73dfde71",
       roomsGuest: "19d3f799-a8f3-4328-9822-b7cd02765832",
     };
@@ -1082,13 +1095,6 @@ this.MozLoopService = {
     // Do this here, rather than immediately after definition, so that we can
     // stub out API functions for unit testing
     Object.freeze(this);
-
-    // Clear the old throttling mechanism. This code will be removed in bug 1094915,
-    // should be around Fx 39.
-    Services.prefs.clearUserPref("loop.throttled");
-    Services.prefs.clearUserPref("loop.throttled2");
-    Services.prefs.clearUserPref("loop.soft_start_ticket_number");
-    Services.prefs.clearUserPref("loop.soft_start_hostname");
 
     // Don't do anything if loop is not enabled.
     if (!Services.prefs.getBoolPref("loop.enabled")) {
@@ -1122,7 +1128,8 @@ this.MozLoopService = {
       if (window) {
         window.LoopUI.showNotification({
           sound: "room-joined",
-          title: room.roomName,
+          // Fallback to the brand short name if the roomName isn't available.
+          title: room.roomName || MozLoopServiceInternal.localizedStrings.get("clientShortname2"),
           message: MozLoopServiceInternal.localizedStrings.get("rooms_room_joined_label"),
           selectTab: "rooms"
         });
@@ -1131,10 +1138,9 @@ this.MozLoopService = {
 
     LoopRooms.on("joined", this.maybeResumeTourOnRoomJoined.bind(this));
 
-    // If expiresTime is not in the future and the user hasn't
+    // If there's no guest room created and the user hasn't
     // previously authenticated then skip registration.
-    if (!MozLoopServiceInternal.urlExpiryTimeIsInFuture() &&
-        !LoopRooms.getGuestCreatedRoom() &&
+    if (!LoopRooms.getGuestCreatedRoom() &&
         !MozLoopServiceInternal.fxAOAuthTokenData) {
       return Promise.resolve("registration not needed");
     }
@@ -1205,17 +1211,16 @@ this.MozLoopService = {
     },
     error => {
       // If we get a non-object then setError was already called for a different error type.
-      if (typeof(error) == "object") {
+      if (typeof error == "object") {
         MozLoopServiceInternal.setError("initialization", error, () => MozLoopService.delayedInitialize(Promise.defer()));
       }
     });
 
     try {
-      if (MozLoopServiceInternal.urlExpiryTimeIsInFuture() ||
-          LoopRooms.getGuestCreatedRoom()) {
+      if (LoopRooms.getGuestCreatedRoom()) {
         yield this.promiseRegisteredWithServers(LOOP_SESSION_TYPE.GUEST);
       } else {
-        log.debug("delayedInitialize: URL expiry time isn't in the future so not registering as a guest");
+        log.debug("delayedInitialize: Guest Room hasn't been created so not registering as a guest");
       }
     } catch (ex) {
       log.debug("MozLoopService: Failure of guest registration", ex);
@@ -1317,6 +1322,36 @@ this.MozLoopService = {
   get userProfile() {
     return getJSONPref("loop.fxa_oauth.tokendata") &&
            getJSONPref("loop.fxa_oauth.profile");
+  },
+
+  /**
+   * Gets the encryption key for this profile.
+   */
+  promiseProfileEncryptionKey: function() {
+    return new Promise((resolve, reject) => {
+      if (this.userProfile) {
+        // We're an FxA user.
+        // XXX Bug 1153788 will implement this for FxA.
+        reject(new Error("unimplemented"));
+        return;
+      }
+
+      // XXX Temporarily save in preferences until we've got some
+      // extra storage (bug 1152761).
+      if (!Services.prefs.prefHasUserValue("loop.key")) {
+        // Get a new value.
+        loopCrypto.generateKey().then(key => {
+          Services.prefs.setCharPref("loop.key", key);
+          resolve(key);
+        }).catch(function(error) {
+          MozLoopService.log.error(error);
+          reject(error);
+        });
+        return;
+      }
+
+      resolve(MozLoopService.getLoopPref("key"));
+    });
   },
 
   get errors() {
@@ -1468,7 +1503,7 @@ this.MozLoopService = {
       yield MozLoopServiceInternal.unregisterFromLoopServer(LOOP_SESSION_TYPE.FXA);
     }
     catch (err) {
-      throw err
+      throw err;
     }
     finally {
       MozLoopServiceInternal.clearSessionToken(LOOP_SESSION_TYPE.FXA);
@@ -1517,7 +1552,7 @@ this.MozLoopService = {
     });
   },
 
-  openFxASettings: Task.async(function() {
+  openFxASettings: Task.async(function* () {
     try {
       let fxAOAuthClient = yield MozLoopServiceInternal.promiseFxAOAuthClient();
       if (!fxAOAuthClient) {

@@ -163,6 +163,8 @@ var interfaceNamesInGlobalScope =
     "AudioProcessingEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "AudioStreamTrack",
+    // IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "AVInputPort", b2g: true, pref: "dom.inputport.enabled", permission: ["inputport"]},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "BarProp",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -196,6 +198,10 @@ var interfaceNamesInGlobalScope =
     {name: "BoxObject", xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "BroadcastChannel", pref: "dom.broadcastChannel.enabled"},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "Cache", pref: "dom.caches.enabled"},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "CacheStorage", pref: "dom.caches.enabled"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "CallEvent", b2g: true, pref: "dom.telephony.enabled"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -261,7 +267,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Crypto",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "CryptoKey", pref: "dom.webcrypto.enabled"},
+    "CryptoKey",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "CSS",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -340,10 +346,14 @@ var interfaceNamesInGlobalScope =
     { name: "DeviceStorage", pref: "device.storage.enabled" },
 // IMPORTANT: Do not change this list without review from a DOM peer!
     { name: "DeviceStorageChangeEvent", pref: "device.storage.enabled" },
+    // IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "DisplayPortInputPort", b2g: true, pref: "dom.inputport.enabled", permission: ["inputport"]},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Document",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "DocumentFragment",
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "DocumentTimeline", pref: "dom.animations-api.core.enabled"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "DocumentType",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -433,9 +443,11 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "HashChangeEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "Headers", pref: "dom.fetch.enabled"},
+    "Headers",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "History",
+    // IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "HDMIInputPort", b2g: true, pref: "dom.inputport.enabled", permission: ["inputport"]},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "HMDVRDevice", pref: "dom.vr.enabled"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -631,6 +643,10 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "InputEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "InputPort", b2g: true, pref: "dom.inputport.enabled", permission: ["inputport"]},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "InputPortManager", b2g: true, pref: "dom.inputport.enabled", permission: ["inputport"]},
+// IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "InstallTrigger", b2g: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "KeyEvent",
@@ -640,6 +656,8 @@ var interfaceNamesInGlobalScope =
     "LocalMediaStream",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Location",
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    "MediaDeviceInfo",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "MediaDevices",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -859,6 +877,8 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "PropertyNodeList",
 // IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "PushManager", pref: "dom.push.enabled"},
+// IMPORTANT: Do not change this list without review from a DOM peer!
     "RadioNodeList",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Range",
@@ -867,9 +887,9 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Rect",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "Request", pref: "dom.fetch.enabled"},
+    "Request",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "Response", pref: "dom.fetch.enabled"},
+    "Response",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "RGBColor",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -894,6 +914,8 @@ var interfaceNamesInGlobalScope =
     {name: "ServiceWorker", pref: "dom.serviceWorkers.enabled"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "ServiceWorkerContainer", pref: "dom.serviceWorkers.enabled"},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "ServiceWorkerRegistration", pref: "dom.serviceWorkers.enabled"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "SettingsLock",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -931,7 +953,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "StyleSheetList",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SubtleCrypto", pref: "dom.webcrypto.enabled"},
+    "SubtleCrypto",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "SVGAElement",
 // IMPORTANT: Do not change this list without review from a DOM peer!

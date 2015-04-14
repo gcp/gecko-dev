@@ -15,14 +15,14 @@ namespace mozilla {
 namespace dom {
 
 class Promise;
-struct RegistrationOptionList;
+struct RegistrationOptions;
 
 namespace workers {
 class ServiceWorker;
 }
 
 // Lightweight serviceWorker APIs collection.
-class ServiceWorkerContainer MOZ_FINAL : public DOMEventTargetHelper
+class ServiceWorkerContainer final : public DOMEventTargetHelper
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -36,11 +36,11 @@ public:
   explicit ServiceWorkerContainer(nsPIDOMWindow* aWindow);
 
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   already_AddRefed<Promise>
   Register(const nsAString& aScriptURL,
-           const RegistrationOptionList& aOptions,
+           const RegistrationOptions& aOptions,
            ErrorResult& aRv);
 
   already_AddRefed<workers::ServiceWorker>
@@ -57,21 +57,11 @@ public:
   GetReady(ErrorResult& aRv);
 
   // Testing only.
-  already_AddRefed<Promise>
-  ClearAllServiceWorkerData(ErrorResult& aRv);
-
-  // Testing only.
   void
   GetScopeForUrl(const nsAString& aUrl, nsString& aScope, ErrorResult& aRv);
 
-  // Testing only.
-  void
-  GetControllingWorkerScriptURLForPath(const nsAString& aPath,
-                                       nsString& aScriptURL,
-                                       ErrorResult& aRv);
-
   // DOMEventTargetHelper
-  void DisconnectFromOwner() MOZ_OVERRIDE;
+  void DisconnectFromOwner() override;
 
 private:
   ~ServiceWorkerContainer();

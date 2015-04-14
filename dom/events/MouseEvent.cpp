@@ -152,20 +152,11 @@ MouseEvent::Constructor(const GlobalObject& aGlobal,
                     aParam.mCtrlKey, aParam.mAltKey, aParam.mShiftKey,
                     aParam.mMetaKey, aParam.mButton, aParam.mRelatedTarget,
                     aRv);
+  e->InitModifiers(aParam);
   e->SetTrusted(trusted);
-
-  switch (e->mEvent->mClass) {
-    case eMouseEventClass:
-    case eMouseScrollEventClass:
-    case eWheelEventClass:
-    case eDragEventClass:
-    case ePointerEventClass:
-    case eSimpleGestureEventClass:
-      e->mEvent->AsMouseEventBase()->buttons = aParam.mButtons;
-      break;
-    default:
-      break;
-  }
+  MOZ_RELEASE_ASSERT(e->mEvent->AsMouseEventBase(),
+                     "mEvent of MouseEvent must inherit WidgetMouseEventBase");
+  e->mEvent->AsMouseEventBase()->buttons = aParam.mButtons;
 
   return e.forget();
 }
@@ -383,6 +374,20 @@ int32_t
 MouseEvent::ClientY()
 {
   return Event::GetClientCoords(mPresContext, mEvent, mEvent->refPoint,
+                                mClientPoint).y;
+}
+
+int32_t
+MouseEvent::OffsetX()
+{
+  return Event::GetOffsetCoords(mPresContext, mEvent, mEvent->refPoint,
+                                mClientPoint).x;
+}
+
+int32_t
+MouseEvent::OffsetY()
+{
+  return Event::GetOffsetCoords(mPresContext, mEvent, mEvent->refPoint,
                                 mClientPoint).y;
 }
 

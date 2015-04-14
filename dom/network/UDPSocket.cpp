@@ -20,6 +20,10 @@
 namespace mozilla {
 namespace dom {
 
+NS_IMPL_ISUPPORTS(UDPSocket::ListenerProxy,
+                  nsIUDPSocketListener,
+                  nsIUDPSocketInternal)
+
 NS_IMPL_CYCLE_COLLECTION_CLASS(UDPSocket)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(UDPSocket, DOMEventTargetHelper)
@@ -131,9 +135,9 @@ UDPSocket::~UDPSocket()
 }
 
 JSObject*
-UDPSocket::WrapObject(JSContext* aCx)
+UDPSocket::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return UDPSocketBinding::Wrap(aCx, this);
+  return UDPSocketBinding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -174,6 +178,11 @@ UDPSocket::CloseWithReason(nsresult aReason)
   }
 
   mReadyState = SocketReadyState::Closed;
+
+  if (mListenerProxy) {
+    mListenerProxy->Disconnect();
+    mListenerProxy = nullptr;
+  }
 
   if (mSocket) {
     mSocket->Close();
@@ -387,8 +396,19 @@ UDPSocket::InitLocal(const nsAString& aLocalAddress,
     return rv;
   }
 
+  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetOwner(), &rv);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  nsCOMPtr<nsIPrincipal> principal = global->PrincipalOrNull();
+  if (!principal) {
+    return NS_ERROR_FAILURE;
+  }
+
   if (aLocalAddress.IsEmpty()) {
-    rv = sock->Init(aLocalPort, /* loopback = */ false, mAddressReuse, /* optionalArgc = */ 1);
+    rv = sock->Init(aLocalPort, /* loopback = */ false, principal,
+                    mAddressReuse, /* optionalArgc = */ 1);
   } else {
     PRNetAddr prAddr;
     PR_InitializeNetAddr(PR_IpAddrAny, aLocalPort, &prAddr);
@@ -396,7 +416,8 @@ UDPSocket::InitLocal(const nsAString& aLocalAddress,
 
     mozilla::net::NetAddr addr;
     PRNetAddrToNetAddr(&prAddr, &addr);
-    rv = sock->InitWithAddress(&addr, mAddressReuse, /* optionalArgc = */ 1);
+    rv = sock->InitWithAddress(&addr, principal, mAddressReuse,
+                               /* optionalArgc = */ 1);
   }
   if (NS_FAILED(rv)) {
     return rv;
@@ -430,7 +451,9 @@ UDPSocket::InitLocal(const nsAString& aLocalAddress,
   }
   mLocalPort.SetValue(localPort);
 
-  rv = mSocket->AsyncListen(this);
+  mListenerProxy = new ListenerProxy(this);
+
+  rv = mSocket->AsyncListen(mListenerProxy);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -458,7 +481,25 @@ UDPSocket::InitRemote(const nsAString& aLocalAddress,
     return rv;
   }
 
-  rv = sock->Bind(this, NS_ConvertUTF16toUTF8(aLocalAddress), aLocalPort, mAddressReuse, mLoopback);
+  mListenerProxy = new ListenerProxy(this);
+
+  nsCOMPtr<nsIGlobalObject> obj = do_QueryInterface(GetOwner(), &rv);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  nsCOMPtr<nsIPrincipal> principal = obj->PrincipalOrNull();
+  if (!principal) {
+    return NS_ERROR_FAILURE;
+  }
+
+  rv = sock->Bind(mListenerProxy,
+                  principal,
+                  NS_ConvertUTF16toUTF8(aLocalAddress),
+                  aLocalPort,
+                  mAddressReuse,
+                  mLoopback);
+
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -494,13 +535,13 @@ UDPSocket::Init(const nsString& aLocalAddress,
     return rv.ErrorCode();
   }
 
-  class OpenSocketRunnable MOZ_FINAL : public nsRunnable
+  class OpenSocketRunnable final : public nsRunnable
   {
   public:
     explicit OpenSocketRunnable(UDPSocket* aSocket) : mSocket(aSocket)
     { }
 
-    NS_IMETHOD Run() MOZ_OVERRIDE
+    NS_IMETHOD Run() override
     {
       MOZ_ASSERT(mSocket);
 

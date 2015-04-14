@@ -52,10 +52,10 @@ struct AnimationEventInfo {
 
 typedef InfallibleTArray<AnimationEventInfo> EventArray;
 
-class CSSAnimationPlayer MOZ_FINAL : public dom::AnimationPlayer
+class CSSAnimationPlayer final : public dom::AnimationPlayer
 {
 public:
- explicit CSSAnimationPlayer(dom::AnimationTimeline* aTimeline)
+ explicit CSSAnimationPlayer(dom::DocumentTimeline* aTimeline)
     : dom::AnimationPlayer(aTimeline)
     , mIsStylePaused(false)
     , mPauseShouldStick(false)
@@ -64,14 +64,14 @@ public:
   }
 
   virtual CSSAnimationPlayer*
-  AsCSSAnimationPlayer() MOZ_OVERRIDE { return this; }
+  AsCSSAnimationPlayer() override { return this; }
 
-  virtual dom::Promise* GetReady(ErrorResult& aRv) MOZ_OVERRIDE;
-  virtual void Play() MOZ_OVERRIDE;
-  virtual void Pause() MOZ_OVERRIDE;
+  virtual dom::Promise* GetReady(ErrorResult& aRv) override;
+  virtual void Play(LimitBehavior aLimitBehavior) override;
+  virtual void Pause() override;
 
-  virtual dom::AnimationPlayState PlayStateFromJS() const MOZ_OVERRIDE;
-  virtual void PlayFromJS() MOZ_OVERRIDE;
+  virtual dom::AnimationPlayState PlayStateFromJS() const override;
+  virtual void PlayFromJS() override;
 
   void PlayFromStyle();
   void PauseFromStyle();
@@ -80,9 +80,16 @@ public:
 
   void QueueEvents(EventArray& aEventsToDispatch);
 
+  // Is this animation currently in effect for the purposes of computing
+  // mWinsInCascade.  (In general, this can be computed from the timing
+  // function.  This boolean remembers the state as of the last time we
+  // called UpdateCascadeResults so we know if it changes and we need to
+  // call UpdateCascadeResults again.)
+  bool mInEffectForCascadeResults;
+
 protected:
   virtual ~CSSAnimationPlayer() { }
-  virtual css::CommonAnimationManager* GetAnimationManager() const MOZ_OVERRIDE;
+  virtual css::CommonAnimationManager* GetAnimationManager() const override;
 
   static nsString PseudoTypeAsString(nsCSSPseudoElements::Type aPseudoType);
 
@@ -149,7 +156,7 @@ protected:
 
 } /* namespace mozilla */
 
-class nsAnimationManager MOZ_FINAL
+class nsAnimationManager final
   : public mozilla::css::CommonAnimationManager
 {
 public:
@@ -171,14 +178,17 @@ public:
   void QueueEvents(mozilla::AnimationPlayerCollection* aEA,
                    mozilla::EventArray &aEventsToDispatch);
 
+  void MaybeUpdateCascadeResults(mozilla::AnimationPlayerCollection*
+                                   aCollection);
+
   // nsIStyleRuleProcessor (parts)
   virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
-    const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
+    const MOZ_MUST_OVERRIDE override;
   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
-    const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
+    const MOZ_MUST_OVERRIDE override;
 
   // nsARefreshObserver
-  virtual void WillRefresh(mozilla::TimeStamp aTime) MOZ_OVERRIDE;
+  virtual void WillRefresh(mozilla::TimeStamp aTime) override;
 
   void FlushAnimations(FlushFlags aFlags);
 
@@ -211,23 +221,23 @@ public:
   }
 
 protected:
-  virtual nsIAtom* GetAnimationsAtom() MOZ_OVERRIDE {
+  virtual nsIAtom* GetAnimationsAtom() override {
     return nsGkAtoms::animationsProperty;
   }
-  virtual nsIAtom* GetAnimationsBeforeAtom() MOZ_OVERRIDE {
+  virtual nsIAtom* GetAnimationsBeforeAtom() override {
     return nsGkAtoms::animationsOfBeforeProperty;
   }
-  virtual nsIAtom* GetAnimationsAfterAtom() MOZ_OVERRIDE {
+  virtual nsIAtom* GetAnimationsAfterAtom() override {
     return nsGkAtoms::animationsOfAfterProperty;
   }
-  virtual bool IsAnimationManager() MOZ_OVERRIDE {
+  virtual bool IsAnimationManager() override {
     return true;
   }
 
 private:
   void BuildAnimations(nsStyleContext* aStyleContext,
                        mozilla::dom::Element* aTarget,
-                       mozilla::dom::AnimationTimeline* aTimeline,
+                       mozilla::dom::DocumentTimeline* aTimeline,
                        mozilla::AnimationPlayerPtrArray& aAnimations);
   bool BuildSegment(InfallibleTArray<mozilla::AnimationPropertySegment>&
                       aSegments,
@@ -236,6 +246,10 @@ private:
                     float aFromKey, nsStyleContext* aFromContext,
                     mozilla::css::Declaration* aFromDeclaration,
                     float aToKey, nsStyleContext* aToContext);
+
+  static void UpdateCascadeResults(nsStyleContext* aStyleContext,
+                                   mozilla::AnimationPlayerCollection*
+                                     aElementAnimations);
 
   // The guts of DispatchEvents
   void DoDispatchEvents();

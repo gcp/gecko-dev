@@ -95,6 +95,16 @@ class ProcessHandlerMixin(object):
                     os.setpgid(0, 0)
                 preexec_fn = setpgidfn
 
+            if isinstance(env, dict):
+                tmp_env = {}
+                for k, v in env.iteritems():
+                    if isinstance(k, bytes):
+                        k = k.decode(sys.getfilesystemencoding() or 'utf-8', 'replace')
+                    if isinstance(v, bytes):
+                        v = v.decode(sys.getfilesystemencoding() or 'utf-8', 'replace')
+                    tmp_env[k] = v
+                env = tmp_env
+
             try:
                 subprocess.Popen.__init__(self, args, bufsize, executable,
                                           stdin, stdout, stderr,
@@ -211,11 +221,12 @@ class ProcessHandlerMixin(object):
                     comspec = os.environ.get("COMSPEC", "cmd.exe")
                     args = comspec + " /c " + args
 
-                # determine if we can create create a job
-                canCreateJob = winprocess.CanCreateJobObject()
+                # Determine if we can create a job or create nested jobs.
+                can_create_job = winprocess.CanCreateJobObject()
+                can_nest_jobs = self._can_nest_jobs()
 
                 # Ensure we write a warning message if we are falling back
-                if not canCreateJob and not self._ignore_children:
+                if not (can_create_job or can_nest_jobs) and not self._ignore_children:
                     # We can't create job objects AND the user wanted us to
                     # Warn the user about this.
                     print >> sys.stderr, "ProcessManager UNABLE to use job objects to manage child processes"
@@ -223,9 +234,9 @@ class ProcessHandlerMixin(object):
                 # set process creation flags
                 creationflags |= winprocess.CREATE_SUSPENDED
                 creationflags |= winprocess.CREATE_UNICODE_ENVIRONMENT
-                if canCreateJob:
+                if can_create_job:
                     creationflags |= winprocess.CREATE_BREAKAWAY_FROM_JOB
-                else:
+                if not (can_create_job or can_nest_jobs):
                     # Since we've warned, we just log info here to inform you
                     # of the consequence of setting ignore_children = True
                     print "ProcessManager NOT managing child processes"
@@ -244,7 +255,7 @@ class ProcessHandlerMixin(object):
                 self.pid = pid
                 self.tid = tid
 
-                if not self._ignore_children and canCreateJob:
+                if not self._ignore_children and (can_create_job or can_nest_jobs):
                     try:
                         # We create a new job for this process, so that we can kill
                         # the process and any sub-processes
@@ -317,6 +328,17 @@ falling back to not using job objects for managing child processes"""
                 for i in (p2cread, c2pwrite, errwrite):
                     if i is not None:
                         i.Close()
+
+            def _can_nest_jobs(self):
+                # Per:
+                # https://msdn.microsoft.com/en-us/library/windows/desktop/hh448388%28v=vs.85%29.aspx
+                # Nesting jobs came in with windows versions starting with 6.2 according to the table
+                # on this page:
+                # https://msdn.microsoft.com/en-us/library/ms724834%28v=vs.85%29.aspx
+                winver = sys.getwindowsversion()
+                return (winver.major > 6 or
+                        winver.major == 6 and winver.minor >= 2)
+
 
             # Windows Process Manager - watches the IO Completion Port and
             # keeps track of child processes
@@ -704,19 +726,15 @@ falling back to not using job objects for managing child processes"""
         :param sig: Signal used to kill the process, defaults to SIGKILL
                     (has no effect on Windows)
         """
-        try:
-            self.proc.kill(sig=sig)
+        if not hasattr(self, 'proc'):
+            raise RuntimeError("Calling kill() on a non started process is not"
+                               " allowed.")
+        self.proc.kill(sig=sig)
 
-            # When we kill the the managed process we also have to wait for the
-            # reader thread to be finished. Otherwise consumers would have to assume
-            # that it still has not completely shutdown.
-            return self.wait()
-        except AttributeError:
-            # Try to print a relevant error message.
-            if not hasattr(self, 'proc'):
-                print >> sys.stderr, "Unable to kill Process because call to ProcessHandler constructor failed."
-            else:
-                raise
+        # When we kill the the managed process we also have to wait for the
+        # reader thread to be finished. Otherwise consumers would have to assume
+        # that it still has not completely shutdown.
+        return self.wait()
 
     def poll(self):
         """Check if child process has terminated
@@ -730,7 +748,10 @@ falling back to not using job objects for managing child processes"""
         # Ensure that we first check for the reader status. Otherwise
         # we might mark the process as finished while output is still getting
         # processed.
-        if self.reader.is_alive():
+        if not hasattr(self, 'proc'):
+            raise RuntimeError("Calling poll() on a non started process is not"
+                               " allowed.")
+        elif self.reader.is_alive():
             return None
         elif hasattr(self.proc, "returncode"):
             return self.proc.returncode
@@ -825,7 +846,10 @@ class ProcessReader(object):
         return thread
 
     def _read_stream(self, stream, queue, callback):
-        for line in stream:
+        while True:
+            line = stream.readline()
+            if not line:
+                break
             queue.put((line, callback))
         stream.close()
 
@@ -943,10 +967,13 @@ class ProcessHandler(ProcessHandlerMixin):
     """
     Convenience class for handling processes with default output handlers.
 
-    If no processOutputLine keyword argument is specified, write all
-    output to stdout.  Otherwise, the function or the list of functions
-    specified by this argument will be called for each line of output;
-    the output will not be written to stdout automatically.
+    By default, all output is sent to stdout. This can be disabled by setting
+    the *stream* argument to None.
+
+    If processOutputLine keyword argument is specified the function or the
+    list of functions specified by this argument will be called for each line
+    of output; the output will not be written to stdout automatically then
+    if stream is True (the default).
 
     If storeOutput==True, the output produced by the process will be saved
     as self.output.
@@ -955,7 +982,8 @@ class ProcessHandler(ProcessHandlerMixin):
     appended to the given file.
     """
 
-    def __init__(self, cmd, logfile=None, stream=None, storeOutput=True, **kwargs):
+    def __init__(self, cmd, logfile=None, stream=True, storeOutput=True,
+                 **kwargs):
         kwargs.setdefault('processOutputLine', [])
         if callable(kwargs['processOutputLine']):
             kwargs['processOutputLine'] = [kwargs['processOutputLine']]
@@ -964,13 +992,13 @@ class ProcessHandler(ProcessHandlerMixin):
             logoutput = LogOutput(logfile)
             kwargs['processOutputLine'].append(logoutput)
 
-        if stream:
+        if stream is True:
+            # Print to standard output only if no outputline provided
+            if not kwargs['processOutputLine']:
+                kwargs['processOutputLine'].append(StreamOutput(sys.stdout))
+        elif stream:
             streamoutput = StreamOutput(stream)
             kwargs['processOutputLine'].append(streamoutput)
-
-        # Print to standard output only if no outputline provided
-        if not kwargs['processOutputLine']:
-            kwargs['processOutputLine'].append(StreamOutput(sys.stdout))
 
         self.output = None
         if storeOutput:

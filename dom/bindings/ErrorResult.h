@@ -17,6 +17,12 @@
 #include "nscore.h"
 #include "nsStringGlue.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/Move.h"
+
+namespace IPC {
+class Message;
+template <typename> struct ParamTraits;
+}
 
 namespace mozilla {
 
@@ -55,6 +61,12 @@ public:
     MOZ_ASSERT(!mMightHaveUnreportedJSException);
   }
 #endif
+
+  ErrorResult(ErrorResult&& aRHS)
+  {
+    *this = Move(aRHS);
+  }
+  ErrorResult& operator=(ErrorResult&& aRHS);
 
   void Throw(nsresult rv) {
     MOZ_ASSERT(NS_FAILED(rv), "Please don't try throwing success");
@@ -107,8 +119,7 @@ public:
 
   // StealJSException steals the JS Exception from the object. This method must
   // be called only if IsJSException() returns true. This method also resets the
-  // ErrorCode() to NS_OK.  The value will be ensured to be sanitized wrt to the
-  // current compartment of cx if it happens to be a DOMException.
+  // ErrorCode() to NS_OK.
   void StealJSException(JSContext* cx, JS::MutableHandle<JS::Value> value);
 
   void MOZ_ALWAYS_INLINE MightThrowJSException()
@@ -162,6 +173,10 @@ private:
     JS::Value mJSException; // valid when IsJSException()
   };
 
+  friend struct IPC::ParamTraits<ErrorResult>;
+  void SerializeMessage(IPC::Message* aMsg) const;
+  bool DeserializeMessage(const IPC::Message* aMsg, void** aIter);
+
 #ifdef DEBUG
   // Used to keep track of codepaths that might throw JS exceptions,
   // for assertion purposes.
@@ -171,6 +186,7 @@ private:
   // Not to be implemented, to make sure people always pass this by
   // reference, not by value.
   ErrorResult(const ErrorResult&) = delete;
+  void operator=(const ErrorResult&) = delete;
   void ThrowErrorWithMessage(va_list ap, const dom::ErrNum errorNumber,
                              nsresult errorType);
 };

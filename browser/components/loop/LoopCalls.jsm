@@ -221,8 +221,6 @@ let LoopCallsInternal = {
 
     if (channelID == MozLoopService.channelIDs.callsFxA && MozLoopService.userProfile) {
       this._getCalls(LOOP_SESSION_TYPE.FXA, version);
-    } else {
-      this._getCalls(LOOP_SESSION_TYPE.GUEST, version);
     }
   },
 
@@ -284,7 +282,10 @@ let LoopCallsInternal = {
    */
   _startCall: function(callData) {
     const openChat = () => {
-      this.conversationInProgress.id = MozLoopService.openChatWindow(callData);
+      let windowId = MozLoopService.openChatWindow(callData);
+      if (windowId) {
+        this.conversationInProgress.id = windowId;
+      }
     };
 
     if (callData.type == "incoming" && ("callerId" in callData) &&

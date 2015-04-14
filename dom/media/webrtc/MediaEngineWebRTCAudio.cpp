@@ -67,7 +67,7 @@ AudioOutputObserver::AudioOutputObserver()
 AudioOutputObserver::~AudioOutputObserver()
 {
   Clear();
-  moz_free(mSaved);
+  free(mSaved);
   mSaved = nullptr;
 }
 
@@ -75,7 +75,7 @@ void
 AudioOutputObserver::Clear()
 {
   while (mPlayoutFifo->size() > 0) {
-    moz_free(mPlayoutFifo->Pop());
+    free(mPlayoutFifo->Pop());
   }
   // we'd like to touch mSaved here, but we can't if we might still be getting callbacks
 }
@@ -544,7 +544,7 @@ MediaEngineWebRTCAudioSource::Process(int channel,
   if (!mStarted) {
     mStarted  = true;
     while (gFarendObserver->Size() > 1) {
-      moz_free(gFarendObserver->Pop()); // only call if size() > 0
+      free(gFarendObserver->Pop()); // only call if size() > 0
     }
   }
 
@@ -557,7 +557,7 @@ MediaEngineWebRTCAudioSource::Process(int channel,
                                                 gFarendObserver->PlayoutChannels(),
                                                 mPlayoutDelay,
                                                 length);
-      moz_free(buffer);
+      free(buffer);
       if (res == -1) {
         return;
       }
@@ -585,7 +585,7 @@ MediaEngineWebRTCAudioSource::Process(int channel,
     if (mSources[i]) {
       // Make sure we include the stream and the track.
       // The 0:1 is a flag to note when we've done the final insert for a given input block.
-      LogTime(AsyncLatencyLogger::AudioTrackInsertion, LATENCY_STREAM_ID(mSources[i], mTrackID),
+      LogTime(AsyncLatencyLogger::AudioTrackInsertion, LATENCY_STREAM_ID(mSources[i].get(), mTrackID),
               (i+1 < len) ? 0 : 1, insertTime);
 
       // This is safe from any thread, and is safe if the track is Finished

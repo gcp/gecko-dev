@@ -13,7 +13,6 @@
 #include <string>
 
 #if defined(XP_WIN) && defined(MOZ_SANDBOX)
-#include "mozilla/sandboxTarget.h"
 #include "mozilla/Scoped.h"
 #include "windows.h"
 #include <intrin.h>
@@ -73,18 +72,16 @@ public:
                     uint32_t aLibPathLen,
                     char* aOriginSalt,
                     uint32_t aOriginSaltLen,
-                    const GMPPlatformAPI* aPlatformAPI) MOZ_OVERRIDE;
+                    const GMPPlatformAPI* aPlatformAPI) override;
 
   virtual GMPErr GetAPI(const char* aAPIName,
                         void* aHostAPI,
-                        void** aPluginAPI) MOZ_OVERRIDE;
+                        void** aPluginAPI) override;
 
-  virtual void Shutdown() MOZ_OVERRIDE;
+  virtual void Shutdown() override;
 
-#ifdef SANDBOX_NOT_STATICALLY_LINKED_INTO_PLUGIN_CONTAINER
-  virtual void SetStartSandboxStarter(SandboxStarter* aStarter) MOZ_OVERRIDE {
-    mSandboxStarter = aStarter;
-  }
+#if defined(XP_MACOSX)
+  virtual void SetSandboxInfo(MacSandboxInfo* aSandboxInfo) override;
 #endif
 
 private:
@@ -221,8 +218,8 @@ GMPLoaderImpl::Load(const char* aLibPath,
   // Start the sandbox now that we've generated the device bound node id.
   // This must happen after the node id is bound to the device id, as
   // generating the device id requires privileges.
-  if (mSandboxStarter) {
-    mSandboxStarter->Start(aLibPath);
+  if (mSandboxStarter && !mSandboxStarter->Start(aLibPath)) {
+    return false;
   }
 
   // Load the GMP.
@@ -278,6 +275,15 @@ GMPLoaderImpl::Shutdown()
   }
 }
 
+#if defined(XP_MACOSX)
+void
+GMPLoaderImpl::SetSandboxInfo(MacSandboxInfo* aSandboxInfo)
+{
+  if (mSandboxStarter) {
+    mSandboxStarter->SetSandboxInfo(aSandboxInfo);
+  }
+}
+#endif
 } // namespace gmp
 } // namespace mozilla
 

@@ -10,7 +10,7 @@
 #include <stdio.h>                      // for FILE
 #include "gfxRect.h"                    // for gfxRect
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
-#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/Attributes.h"         // for override
 #include "mozilla/RefPtr.h"             // for RefPtr, RefCounted, etc
 #include "mozilla/gfx/Point.h"          // for Point
 #include "mozilla/gfx/Rect.h"           // for Rect
@@ -156,6 +156,12 @@ public:
     SetLayer(aLayer);
     mAttached = true;
     mKeepAttached = aFlags & KEEP_ATTACHED;
+
+    // If we already have a textureHost before, use that in this moment.
+    RefPtr<TextureHost> frontBuffer = GetAsTextureHost();
+    if (frontBuffer) {
+      UseTextureHost(frontBuffer);
+    }
   }
   // Detach this compositable host from its layer.
   // If we are used for async video, then it is not safe to blindly detach since
@@ -235,7 +241,7 @@ protected:
   bool mKeepAttached;
 };
 
-class AutoLockCompositableHost MOZ_FINAL
+class AutoLockCompositableHost final
 {
 public:
   explicit AutoLockCompositableHost(CompositableHost* aHost)

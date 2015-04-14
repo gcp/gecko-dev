@@ -27,7 +27,7 @@ using namespace mozilla::ipc;
 
 using mozilla::DeprecatedAbs;
 
-class nsMultiplexInputStream MOZ_FINAL
+class nsMultiplexInputStream final
   : public nsIMultiplexInputStream
   , public nsISeekableStream
   , public nsIIPCSerializableInputStream
@@ -685,9 +685,6 @@ nsMultiplexInputStreamConstructor(nsISupports* aOuter,
   }
 
   nsMultiplexInputStream* inst = new nsMultiplexInputStream();
-  if (!inst) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
 
   NS_ADDREF(inst);
   nsresult rv = inst->QueryInterface(aIID, aResult);

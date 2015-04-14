@@ -113,8 +113,7 @@ BrowserElementChild.prototype = {
             .addProgressListener(this._progressListener,
                                  Ci.nsIWebProgress.NOTIFY_LOCATION |
                                  Ci.nsIWebProgress.NOTIFY_SECURITY |
-                                 Ci.nsIWebProgress.NOTIFY_STATE_WINDOW |
-                                 Ci.nsIWebProgress.NOTIFY_PROGRESS);
+                                 Ci.nsIWebProgress.NOTIFY_STATE_WINDOW);
 
     docShell.QueryInterface(Ci.nsIWebNavigation)
             .sessionHistory = Cc["@mozilla.org/browser/shistory;1"]
@@ -171,6 +170,11 @@ BrowserElementChild.prototype = {
     addEventListener('scrollviewchange',
                      this._ScrollViewChangeHandler.bind(this),
                      /* useCapture = */ true,
+                     /* wantsUntrusted = */ false);
+
+    addEventListener('click',
+                     this._ClickHandler.bind(this),
+                     /* useCapture = */ false,
                      /* wantsUntrusted = */ false);
 
     // This listens to unload events from our message manager, but /not/ from
@@ -576,10 +580,20 @@ BrowserElementChild.prototype = {
     e.stopPropagation();
     let detail = {
       state: e.state,
-      scrollX: e.scrollX,
-      scrollY: e.scrollY,
     };
     sendAsyncMsg('scrollviewchange', detail);
+  },
+
+  _ClickHandler: function(e) {
+    let elem = e.target;
+    if (elem instanceof Ci.nsIDOMHTMLAnchorElement && elem.href) {
+      // Open in a new tab if middle click or ctrl/cmd-click.
+      if ((Services.appinfo.OS == 'Darwin' && e.metaKey) ||
+          (Services.appinfo.OS != 'Darwin' && e.ctrlKey) ||
+           e.button == 1) {
+        sendAsyncMsg('opentab', {url: elem.href});
+      }
+    }
   },
 
   _selectionStateChangedHandler: function(e) {
@@ -1088,7 +1102,7 @@ BrowserElementChild.prototype = {
 
   _updateVisibility: function() {
     var visible = this._forcedVisible && this._ownerVisible;
-    if (docShell.isActive !== visible) {
+    if (docShell && docShell.isActive !== visible) {
       docShell.isActive = visible;
       sendAsyncMsg('visibilitychange', {visible: visible});
     }
@@ -1378,12 +1392,8 @@ BrowserElementChild.prototype = {
     },
 
     onStatusChange: function(webProgress, request, status, message) {},
-
     onProgressChange: function(webProgress, request, curSelfProgress,
-                               maxSelfProgress, curTotalProgress, maxTotalProgress) {
-      sendAsyncMsg('loadprogresschanged', { curTotalProgress: curTotalProgress,
-                                            maxTotalProgress: maxTotalProgress });
-    },
+                               maxSelfProgress, curTotalProgress, maxTotalProgress) {},
   },
 
   // Expose the message manager for WebApps and others.

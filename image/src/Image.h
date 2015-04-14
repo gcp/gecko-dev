@@ -3,8 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef MOZILLA_IMAGELIB_IMAGE_H_
-#define MOZILLA_IMAGELIB_IMAGE_H_
+#ifndef mozilla_image_src_Image_h
+#define mozilla_image_src_Image_h
 
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/TimeStamp.h"
@@ -44,14 +44,17 @@ public:
    *
    * INIT_FLAG_DISCARDABLE: The container should be discardable
    *
-   * INIT_FLAG_DECODE_ON_DRAW: The container should decode on draw rather than
-   * decoding on load.
+   * INIT_FLAG_DECODE_ONLY_ON_DRAW: The container should decode on draw rather
+   * than possibly being speculatively decoded earlier.
+   *
+   * INIT_FLAG_DECODE_IMMEDIATELY: The container should decode as soon as
+   * possible, regardless of what our heuristics say.
    *
    * INIT_FLAG_TRANSIENT: The container is likely to exist for only a short time
    * before being destroyed. (For example, containers for
    * multipart/x-mixed-replace image parts fall into this category.) If this
-   * flag is set, INIT_FLAG_DISCARDABLE and INIT_FLAG_DECODE_ON_DRAW must not be
-   * set.
+   * flag is set, INIT_FLAG_DISCARDABLE and INIT_FLAG_DECODE_ONLY_ON_DRAW must
+   * not be set.
    *
    * INIT_FLAG_DOWNSCALE_DURING_DECODE: The container should attempt to
    * downscale images during decoding instead of decoding them to their
@@ -59,9 +62,10 @@ public:
    */
   static const uint32_t INIT_FLAG_NONE                     = 0x0;
   static const uint32_t INIT_FLAG_DISCARDABLE              = 0x1;
-  static const uint32_t INIT_FLAG_DECODE_ON_DRAW           = 0x2;
-  static const uint32_t INIT_FLAG_TRANSIENT                = 0x4;
-  static const uint32_t INIT_FLAG_DOWNSCALE_DURING_DECODE  = 0x8;
+  static const uint32_t INIT_FLAG_DECODE_ONLY_ON_DRAW      = 0x2;
+  static const uint32_t INIT_FLAG_DECODE_IMMEDIATELY       = 0x4;
+  static const uint32_t INIT_FLAG_TRANSIENT                = 0x8;
+  static const uint32_t INIT_FLAG_DOWNSCALE_DURING_DECODE  = 0x10;
 
   /**
    * Creates a new image container.
@@ -81,7 +85,7 @@ public:
    * ensure that something reasonable is always returned.
    */
   virtual size_t SizeOfSourceWithComputedFallback(
-                                          MallocSizeOf aMallocSizeOf) const = 0;
+    MallocSizeOf aMallocSizeOf) const = 0;
 
   /**
    * The size, in bytes, occupied by the image's decoded data.
@@ -143,7 +147,7 @@ public:
 class ImageResource : public Image
 {
 public:
-  already_AddRefed<ProgressTracker> GetProgressTracker() MOZ_OVERRIDE
+  already_AddRefed<ProgressTracker> GetProgressTracker() override
   {
     nsRefPtr<ProgressTracker> progressTracker = mProgressTracker;
     MOZ_ASSERT(progressTracker);
@@ -151,38 +155,38 @@ public:
   }
 
   void SetProgressTracker(
-                       ProgressTracker* aProgressTracker) MOZ_OVERRIDE MOZ_FINAL
+                       ProgressTracker* aProgressTracker) override final
   {
     MOZ_ASSERT(aProgressTracker);
     MOZ_ASSERT(!mProgressTracker);
     mProgressTracker = aProgressTracker;
   }
 
-  virtual void IncrementAnimationConsumers() MOZ_OVERRIDE;
-  virtual void DecrementAnimationConsumers() MOZ_OVERRIDE;
+  virtual void IncrementAnimationConsumers() override;
+  virtual void DecrementAnimationConsumers() override;
 #ifdef DEBUG
-  virtual uint32_t GetAnimationConsumers() MOZ_OVERRIDE
+  virtual uint32_t GetAnimationConsumers() override
   {
     return mAnimationConsumers;
   }
 #endif
 
-  virtual void OnSurfaceDiscarded() MOZ_OVERRIDE { }
+  virtual void OnSurfaceDiscarded() override { }
 
-  virtual void SetInnerWindowID(uint64_t aInnerWindowId) MOZ_OVERRIDE
+  virtual void SetInnerWindowID(uint64_t aInnerWindowId) override
   {
     mInnerWindowId = aInnerWindowId;
   }
-  virtual uint64_t InnerWindowID() const MOZ_OVERRIDE { return mInnerWindowId; }
+  virtual uint64_t InnerWindowID() const override { return mInnerWindowId; }
 
-  virtual bool HasError() MOZ_OVERRIDE    { return mError; }
-  virtual void SetHasError() MOZ_OVERRIDE { mError = true; }
+  virtual bool HasError() override    { return mError; }
+  virtual void SetHasError() override { mError = true; }
 
   /*
    * Returns a non-AddRefed pointer to the URI associated with this image.
    * Illegal to use off-main-thread.
    */
-  virtual ImageURL* GetURI() MOZ_OVERRIDE { return mURI.get(); }
+  virtual ImageURL* GetURI() override { return mURI.get(); }
 
 protected:
   explicit ImageResource(ImageURL* aURI);
@@ -235,4 +239,4 @@ protected:
 } // namespace image
 } // namespace mozilla
 
-#endif // MOZILLA_IMAGELIB_IMAGE_H_
+#endif // mozilla_image_src_Image_h

@@ -16,6 +16,7 @@
 #include "VideoFrameContainer.h"
 #include "VideoSegment.h"
 #include "MainThreadUtils.h"
+#include "MediaTaskQueue.h"
 #include "nsAutoRef.h"
 #include "GraphDriver.h"
 #include <speex/speex_resampler.h>
@@ -177,6 +178,13 @@ public:
                                         StreamTime aTrackOffset,
                                         uint32_t aTrackEvents,
                                         const MediaSegment& aQueuedMedia) {}
+
+  /**
+   * Notify that all new tracks this iteration have been created.
+   * This is to ensure that tracks added atomically to MediaStreamGraph
+   * are also notified of atomically to MediaStreamListeners.
+   */
+  virtual void NotifyFinishedTrackCreation(MediaStreamGraph* aGraph) {}
 };
 
 /**
@@ -389,7 +397,7 @@ public:
    *
    * Main thread only.
    */
-  void RunAfterPendingUpdates(nsRefPtr<nsIRunnable> aRunnable);
+  void RunAfterPendingUpdates(already_AddRefed<nsIRunnable> aRunnable);
 
   // Signal that the client is done with this MediaStream. It will be deleted later.
   virtual void Destroy();
@@ -695,10 +703,10 @@ public:
     mNeedsMixing(false)
   {}
 
-  virtual SourceMediaStream* AsSourceStream() MOZ_OVERRIDE { return this; }
+  virtual SourceMediaStream* AsSourceStream() override { return this; }
 
   // Media graph thread only
-  virtual void DestroyImpl() MOZ_OVERRIDE;
+  virtual void DestroyImpl() override;
 
   // Call these on any thread.
   /**
@@ -776,7 +784,7 @@ public:
    * does not exist. No op if a runnable is already present for this track.
    */
   void DispatchWhenNotEnoughBuffered(TrackID aID,
-      nsIEventTarget* aSignalThread, nsIRunnable* aSignalRunnable);
+      MediaTaskQueue* aSignalQueue, nsIRunnable* aSignalRunnable);
   /**
    * Indicate that a track has ended. Do not do any more API calls
    * affecting this track.
@@ -802,7 +810,7 @@ public:
 
   // Overriding allows us to hold the mMutex lock while changing the track enable status
   virtual void
-  SetTrackEnabledImpl(TrackID aTrackID, bool aEnabled) MOZ_OVERRIDE {
+  SetTrackEnabledImpl(TrackID aTrackID, bool aEnabled) override {
     MutexAutoLock lock(mMutex);
     MediaStream::SetTrackEnabledImpl(aTrackID, aEnabled);
   }
@@ -810,7 +818,7 @@ public:
   // Overriding allows us to ensure mMutex is locked while changing the track enable status
   virtual void
   ApplyTrackDisabling(TrackID aTrackID, MediaSegment* aSegment,
-                      MediaSegment* aRawSegment = nullptr) MOZ_OVERRIDE {
+                      MediaSegment* aRawSegment = nullptr) override {
     mMutex.AssertCurrentThreadOwns();
     MediaStream::ApplyTrackDisabling(aTrackID, aSegment, aRawSegment);
   }
@@ -840,13 +848,13 @@ public:
 
 protected:
   struct ThreadAndRunnable {
-    void Init(nsIEventTarget* aTarget, nsIRunnable* aRunnable)
+    void Init(MediaTaskQueue* aTarget, nsIRunnable* aRunnable)
     {
       mTarget = aTarget;
       mRunnable = aRunnable;
     }
 
-    nsCOMPtr<nsIEventTarget> mTarget;
+    nsRefPtr<MediaTaskQueue> mTarget;
     nsCOMPtr<nsIRunnable> mRunnable;
   };
   enum TrackCommands {
@@ -940,7 +948,7 @@ protected:
  * the Destroy message is processed on the graph manager thread we disconnect
  * the port and drop the graph's reference, destroying the object.
  */
-class MediaInputPort MOZ_FINAL {
+class MediaInputPort final {
 private:
   // Do not call this constructor directly. Instead call aDest->AllocateInputPort.
   MediaInputPort(MediaStream* aSource, ProcessedMediaStream* aDest,
@@ -1083,7 +1091,7 @@ public:
    */
   void SetAutofinish(bool aAutofinish);
 
-  virtual ProcessedMediaStream* AsProcessedStream() MOZ_OVERRIDE { return this; }
+  virtual ProcessedMediaStream* AsProcessedStream() override { return this; }
 
   friend class MediaStreamGraphImpl;
 
@@ -1101,7 +1109,7 @@ public:
   {
     return mInputs.Length();
   }
-  virtual void DestroyImpl() MOZ_OVERRIDE;
+  virtual void DestroyImpl() override;
   /**
    * This gets called after we've computed the blocking states for all
    * streams (mBlocked is up to date up to mStateComputedTime).
@@ -1134,7 +1142,7 @@ public:
   // true for echo loops, only for muted cycles.
   bool InMutedCycle() const { return mCycleMarker; }
 
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     size_t amount = MediaStream::SizeOfExcludingThis(aMallocSizeOf);
     // Not owned:
@@ -1143,7 +1151,7 @@ public:
     return amount;
   }
 
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
@@ -1174,7 +1182,7 @@ public:
   //
 
   // Main thread only
-  static MediaStreamGraph* GetInstance(DOMMediaStream::TrackTypeHints aHint = DOMMediaStream::HINT_CONTENTS_UNKNOWN,
+  static MediaStreamGraph* GetInstance(bool aStartWithAudioDriver = false,
                                        dom::AudioChannel aChannel = dom::AudioChannel::Normal);
   static MediaStreamGraph* CreateNonRealtimeInstance(TrackRate aSampleRate);
   // Idempotent

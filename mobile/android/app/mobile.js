@@ -344,6 +344,7 @@ pref("privacy.item.cache", true);
 pref("privacy.item.cookies", true);
 pref("privacy.item.offlineApps", true);
 pref("privacy.item.history", true);
+pref("privacy.item.searchHistory", true);
 pref("privacy.item.formdata", true);
 pref("privacy.item.downloads", true);
 pref("privacy.item.passwords", true);
@@ -391,7 +392,7 @@ pref("devtools.errorconsole.enabled", false);
 // to communicate with a usb cable via adb forward.
 pref("devtools.debugger.unix-domain-socket", "/data/data/@ANDROID_PACKAGE_NAME@/firefox-debugger-socket");
 
-pref("font.size.inflation.minTwips", 120);
+pref("font.size.inflation.minTwips", 0);
 
 // When true, zooming will be enabled on all sites, even ones that declare user-scalable=no.
 pref("browser.ui.zoom.force-user-scalable", false);
@@ -566,7 +567,7 @@ pref("media.fragmented-mp4.android-media-codec.enabled", true);
 pref("media.fragmented-mp4.android-media-codec.preferred", true);
 
 // optimize images memory usage
-pref("image.mem.decodeondraw", true);
+pref("image.decode-only-on-draw.enabled", true);
 
 #ifdef NIGHTLY_BUILD
 // Shumway component (SWF player) is disabled by default. Also see bug 904346.
@@ -854,7 +855,15 @@ pref("media.gmp-provider.enabled", true);
 pref("reader.color_scheme", "auto");
 
 // Color scheme values available in reader mode UI.
-pref("reader.color_scheme.values", "[\"light\",\"dark\",\"auto\"]");
+pref("reader.color_scheme.values", "[\"dark\",\"auto\",\"light\"]");
 
 // Whether to use a vertical or horizontal toolbar.
 pref("reader.toolbar.vertical", false);
+
+// Whether or not to display buttons related to reading list in reader view.
+pref("browser.readinglist.enabled", true);
+
+// Use software vsync to schedule rendering
+pref("gfx.vsync.hw-vsync.enabled", true);
+pref("gfx.vsync.compositor", true);
+pref("gfx.vsync.refreshdriver", true);

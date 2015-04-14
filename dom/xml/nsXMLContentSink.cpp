@@ -86,13 +86,13 @@ NS_NewXMLContentSink(nsIXMLContentSink** aResult,
   if (nullptr == aResult) {
     return NS_ERROR_NULL_POINTER;
   }
-  nsXMLContentSink* it = new nsXMLContentSink();
+  nsRefPtr<nsXMLContentSink> it = new nsXMLContentSink();
   
-  nsCOMPtr<nsIXMLContentSink> kungFuDeathGrip = it;
   nsresult rv = it->Init(aDoc, aURI, aContainer, aChannel);
   NS_ENSURE_SUCCESS(rv, rv);
-  
-  return CallQueryInterface(it, aResult);
+
+  it.forget(aResult);
+  return NS_OK;
 }
 
 nsXMLContentSink::nsXMLContentSink()
@@ -849,7 +849,7 @@ nsXMLContentSink::PushContent(nsIContent *aContent)
 
   // When an XML parser would append a node to a template element, it
   // must instead append it to the template element's template contents.
-  if (contentToPush->IsHTML(nsGkAtoms::_template)) {
+  if (contentToPush->IsHTMLElement(nsGkAtoms::_template)) {
     HTMLTemplateElement* templateElement =
       static_cast<HTMLTemplateElement*>(contentToPush);
     contentToPush = templateElement->Content();
@@ -1116,7 +1116,7 @@ nsXMLContentSink::HandleEndElement(const char16_t *aName,
   }
   DidAddContent();
 
-  if (content->IsSVG(nsGkAtoms::svg)) {
+  if (content->IsSVGElement(nsGkAtoms::svg)) {
     FlushTags();
     nsCOMPtr<nsIRunnable> event = new nsHtml5SVGLoadDispatcher(content);
     if (NS_FAILED(NS_DispatchToMainThread(event))) {

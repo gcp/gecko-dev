@@ -348,8 +348,10 @@ SearchNames(/*optional*/ const Input* subjectAltName,
       return rv;
     }
 
-    // do { ... } while(...) because subjectAltName isn't allowed to be empty.
-    do {
+    // According to RFC 5280, "If the subjectAltName extension is present, the
+    // sequence MUST contain at least one entry." For compatibility reasons, we
+    // do not enforce this. See bug 1143085.
+    while (!altNames.AtEnd()) {
       GeneralNameType presentedIDType;
       Input presentedID;
       rv = ReadGeneralName(altNames, presentedIDType, presentedID);
@@ -371,7 +373,7 @@ SearchNames(/*optional*/ const Input* subjectAltName,
           presentedIDType == GeneralNameType::iPAddress) {
         fallBackToCommonName = FallBackToSearchWithinSubject::No;
       }
-    } while (!altNames.AtEnd());
+    }
   }
 
   if (referenceIDType == GeneralNameType::nameConstraints) {
@@ -1814,6 +1816,10 @@ IsValidPresentedDNSID(Input hostname)
 
 namespace {
 
+// RFC 5280 Section 4.2.1.6 says that a dNSName "MUST be in the 'preferred name
+// syntax', as specified by Section 3.5 of [RFC1034] and as modified by Section
+// 2.1 of [RFC1123]" except "a dNSName of ' ' MUST NOT be used." Additionally,
+// we allow underscores for compatibility with existing practice.
 bool
 IsValidDNSID(Input hostname, IDRole idRole, AllowWildcards allowWildcards)
 {
@@ -1908,6 +1914,9 @@ IsValidDNSID(Input hostname, IDRole idRole, AllowWildcards allowWildcards)
       case 'k': case 'K': case 'x': case 'X':
       case 'l': case 'L': case 'y': case 'Y':
       case 'm': case 'M': case 'z': case 'Z':
+      // We allow underscores for compatibility with existing practices.
+      // See bug 1136616.
+      case '_':
         labelIsAllNumeric = false;
         labelEndsWithHyphen = false;
         ++labelLength;

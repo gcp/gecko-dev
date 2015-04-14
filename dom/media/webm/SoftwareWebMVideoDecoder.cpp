@@ -74,14 +74,11 @@ bool
 SoftwareWebMVideoDecoder::DecodeVideoFrame(bool &aKeyframeSkip,
                                            int64_t aTimeThreshold)
 {
-  NS_ASSERTION(mReader->GetDecoder()->OnDecodeThread(),
-               "Should be on decode thread.");
+  MOZ_ASSERT(mReader->OnTaskQueue());
 
   // Record number of frames decoded and parsed. Automatically update the
   // stats counters using the AutoNotifyDecoded stack-based class.
-  uint32_t parsed = 0, decoded = 0;
-  AbstractMediaDecoder::AutoNotifyDecoded autoNotify(mReader->GetDecoder(),
-                                                     parsed, decoded);
+  AbstractMediaDecoder::AutoNotifyDecoded a(mReader->GetDecoder());
 
   nsAutoRef<NesteggPacketHolder> holder(mReader->NextPacket(WebMReader::VIDEO));
   if (!holder) {
@@ -144,7 +141,8 @@ SoftwareWebMVideoDecoder::DecodeVideoFrame(bool &aKeyframeSkip,
     }
     if (aKeyframeSkip && (!si.is_kf || tstamp_usecs < aTimeThreshold)) {
       // Skipping to next keyframe...
-      parsed++; // Assume 1 frame per chunk.
+      a.mParsed++; // Assume 1 frame per chunk.
+      a.mDropped++;
       continue;
     }
 
@@ -160,7 +158,8 @@ SoftwareWebMVideoDecoder::DecodeVideoFrame(bool &aKeyframeSkip,
     // the time threshold required then it is not added
     // to the video queue and won't be displayed.
     if (tstamp_usecs < aTimeThreshold) {
-      parsed++; // Assume 1 frame per chunk.
+      a.mParsed++; // Assume 1 frame per chunk.
+      a.mDropped++;
       continue;
     }
 
@@ -218,9 +217,9 @@ SoftwareWebMVideoDecoder::DecodeVideoFrame(bool &aKeyframeSkip,
       if (!v) {
         return false;
       }
-      parsed++;
-      decoded++;
-      NS_ASSERTION(decoded <= parsed,
+      a.mParsed++;
+      a.mDecoded++;
+      NS_ASSERTION(a.mDecoded <= a.mParsed,
         "Expect only 1 frame per chunk per packet in WebM...");
       mReader->VideoQueue().Push(v);
     }

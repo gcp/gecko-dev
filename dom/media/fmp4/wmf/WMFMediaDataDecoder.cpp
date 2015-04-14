@@ -66,27 +66,20 @@ WMFMediaDataDecoder::ProcessShutdown()
   mDecoder = nullptr;
 }
 
-void
-WMFMediaDataDecoder::ProcessReleaseDecoder()
-{
-  mMFTManager->Shutdown();
-  mDecoder = nullptr;
-}
-
 // Inserts data into the decoder's pipeline.
 nsresult
-WMFMediaDataDecoder::Input(mp4_demuxer::MP4Sample* aSample)
+WMFMediaDataDecoder::Input(MediaRawData* aSample)
 {
   mTaskQueue->Dispatch(
-    NS_NewRunnableMethodWithArg<nsAutoPtr<mp4_demuxer::MP4Sample>>(
+    NS_NewRunnableMethodWithArg<nsRefPtr<MediaRawData>>(
       this,
       &WMFMediaDataDecoder::ProcessDecode,
-      nsAutoPtr<mp4_demuxer::MP4Sample>(aSample)));
+      nsRefPtr<MediaRawData>(aSample)));
   return NS_OK;
 }
 
 void
-WMFMediaDataDecoder::ProcessDecode(mp4_demuxer::MP4Sample* aSample)
+WMFMediaDataDecoder::ProcessDecode(MediaRawData* aSample)
 {
   HRESULT hr = mMFTManager->Input(aSample);
   if (FAILED(hr)) {
@@ -95,7 +88,7 @@ WMFMediaDataDecoder::ProcessDecode(mp4_demuxer::MP4Sample* aSample)
     return;
   }
 
-  mLastStreamOffset = aSample->byte_offset;
+  mLastStreamOffset = aSample->mOffset;
 
   ProcessOutput();
 }
@@ -139,12 +132,14 @@ WMFMediaDataDecoder::Flush()
 void
 WMFMediaDataDecoder::ProcessDrain()
 {
-  // Order the decoder to drain...
-  if (FAILED(mDecoder->SendMFTMessage(MFT_MESSAGE_COMMAND_DRAIN, 0))) {
-    NS_WARNING("Failed to send DRAIN command to MFT");
+  if (mDecoder) {
+    // Order the decoder to drain...
+    if (FAILED(mDecoder->SendMFTMessage(MFT_MESSAGE_COMMAND_DRAIN, 0))) {
+      NS_WARNING("Failed to send DRAIN command to MFT");
+    }
+    // Then extract all available output.
+    ProcessOutput();
   }
-  // Then extract all available output.
-  ProcessOutput();
   mCallback->DrainComplete();
 }
 
@@ -153,30 +148,6 @@ WMFMediaDataDecoder::Drain()
 {
   mTaskQueue->Dispatch(NS_NewRunnableMethod(this, &WMFMediaDataDecoder::ProcessDrain));
   return NS_OK;
-}
-
-void
-WMFMediaDataDecoder::AllocateMediaResources()
-{
-  mDecoder = mMFTManager->Init();
-}
-
-void
-WMFMediaDataDecoder::ReleaseMediaResources()
-{
-  DebugOnly<nsresult> rv = mTaskQueue->FlushAndDispatch(
-    NS_NewRunnableMethod(this, &WMFMediaDataDecoder::ProcessReleaseDecoder));
-#ifdef DEBUG
-  if (NS_FAILED(rv)) {
-    NS_WARNING("WMFMediaDataDecoder::ReleaseMediaResources() dispatch of task failed!");
-  }
-#endif
-}
-
-void
-WMFMediaDataDecoder::ReleaseDecoder()
-{
-  ReleaseMediaResources();
 }
 
 bool

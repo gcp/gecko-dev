@@ -7,11 +7,13 @@
 #include "BroadcastChannelParent.h"
 #include "FileDescriptorSetParent.h"
 #include "CamerasParent.h"
+#include "mozilla/media/MediaParent.h"
 #include "mozilla/AppProcessChecker.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/PBlobParent.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
+#include "mozilla/dom/cache/ActorUtils.h"
 #include "mozilla/dom/indexedDB/ActorsParent.h"
 #include "mozilla/dom/ipc/BlobParent.h"
 #include "mozilla/ipc/BackgroundParent.h"
@@ -19,6 +21,7 @@
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "mozilla/ipc/PBackgroundTestParent.h"
 #include "mozilla/layout/VsyncParent.h"
+#include "nsIAppsService.h"
 #include "nsNetUtil.h"
 #include "nsRefPtr.h"
 #include "nsThreadUtils.h"
@@ -32,6 +35,9 @@
 #endif
 
 using mozilla::ipc::AssertIsOnBackgroundThread;
+using mozilla::dom::cache::PCacheParent;
+using mozilla::dom::cache::PCacheStorageParent;
+using mozilla::dom::cache::PCacheStreamControlParent;
 
 namespace {
 
@@ -47,7 +53,7 @@ AssertIsOnMainThread()
   MOZ_ASSERT(NS_IsMainThread());
 }
 
-class TestParent MOZ_FINAL : public mozilla::ipc::PBackgroundTestParent
+class TestParent final : public mozilla::ipc::PBackgroundTestParent
 {
   friend class mozilla::ipc::BackgroundParentImpl;
 
@@ -64,7 +70,7 @@ protected:
 
 public:
   virtual void
-  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+  ActorDestroy(ActorDestroyReason aWhy) override;
 };
 
 } // anonymous namespace
@@ -265,17 +271,18 @@ mozilla::dom::PBroadcastChannelParent*
 BackgroundParentImpl::AllocPBroadcastChannelParent(
                                             const PrincipalInfo& aPrincipalInfo,
                                             const nsString& aOrigin,
-                                            const nsString& aChannel)
+                                            const nsString& aChannel,
+                                            const bool& aPrivateBrowsing)
 {
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
 
-  return new BroadcastChannelParent(aOrigin, aChannel);
+  return new BroadcastChannelParent(aOrigin, aChannel, aPrivateBrowsing);
 }
 
 namespace {
 
-class CheckPrincipalRunnable MOZ_FINAL : public nsRunnable
+class CheckPrincipalRunnable final : public nsRunnable
 {
 public:
   CheckPrincipalRunnable(already_AddRefed<ContentParent> aParent,
@@ -297,30 +304,86 @@ public:
   {
     MOZ_ASSERT(NS_IsMainThread());
 
+    struct MOZ_STACK_CLASS RunRAII
+    {
+      explicit RunRAII(nsRefPtr<ContentParent>& aContentParent)
+        : mContentParent(aContentParent)
+      {}
+
+      ~RunRAII()
+      {
+        mContentParent = nullptr;
+      }
+
+      nsRefPtr<ContentParent>& mContentParent;
+    };
+
+    RunRAII raii(mContentParent);
+
     nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo);
     AssertAppPrincipal(mContentParent, principal);
 
     bool isNullPrincipal;
     nsresult rv = principal->GetIsNullPrincipal(&isNullPrincipal);
     if (NS_WARN_IF(NS_FAILED(rv)) || isNullPrincipal) {
-      mContentParent->KillHard("PBackground CheckPrincipal 1");
+      mContentParent->KillHard("BroadcastChannel killed: no null principal.");
       return NS_OK;
+    }
+
+    bool unknownAppId;
+    rv = principal->GetUnknownAppId(&unknownAppId);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      mContentParent->KillHard("BroadcastChannel killed: failed to get the app status.");
+      return NS_OK;
+    }
+
+    if (!unknownAppId) {
+      uint32_t appId;
+      rv = principal->GetAppId(&appId);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        mContentParent->KillHard("BroadcastChannel killed: failed to get the app id.");
+        return NS_OK;
+      }
+
+      // If the broadcastChannel is used by an app, the origin is the manifest URL.
+      if (appId != nsIScriptSecurityManager::NO_APP_ID) {
+        nsresult rv;
+        nsCOMPtr<nsIAppsService> appsService =
+          do_GetService("@mozilla.org/AppsService;1", &rv);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          mContentParent->KillHard("BroadcastChannel killed: appService getter failed.");
+          return NS_OK;
+        }
+
+        nsAutoString origin;
+        rv = appsService->GetManifestURLByLocalId(appId, origin);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          mContentParent->KillHard("BroadcastChannel killed: failed to retrieve the manifestURL.");
+          return NS_OK;
+        }
+
+        if (!origin.Equals(mOrigin)) {
+          mContentParent->KillHard("BroadcastChannel killed: origins do not match.");
+          return NS_OK;
+        }
+
+        return NS_OK;
+      }
     }
 
     nsCOMPtr<nsIURI> uri;
     rv = NS_NewURI(getter_AddRefs(uri), mOrigin);
     if (NS_FAILED(rv) || !uri) {
-      mContentParent->KillHard("PBackground CheckPrincipal 2");
+      mContentParent->KillHard("BroadcastChannel killed: invalid origin URI.");
       return NS_OK;
     }
 
     rv = principal->CheckMayLoad(uri, false, false);
     if (NS_FAILED(rv)) {
-      mContentParent->KillHard("PBackground CheckPrincipal 3");
+      mContentParent->KillHard("BroadcastChannel killed: the url cannot be loaded by the principal.");
       return NS_OK;
     }
 
-    mContentParent = nullptr;
     return NS_OK;
   }
 
@@ -338,7 +401,8 @@ BackgroundParentImpl::RecvPBroadcastChannelConstructor(
                                             PBroadcastChannelParent* actor,
                                             const PrincipalInfo& aPrincipalInfo,
                                             const nsString& aOrigin,
-                                            const nsString& aChannel)
+                                            const nsString& aChannel,
+                                            const bool& aPrivateBrowsing)
 {
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
@@ -371,9 +435,21 @@ BackgroundParentImpl::DeallocPBroadcastChannelParent(
   return true;
 }
 
+media::PMediaParent*
+BackgroundParentImpl::AllocPMediaParent()
+{
+  return media::AllocPMediaParent();
+}
+
+bool
+BackgroundParentImpl::DeallocPMediaParent(media::PMediaParent *aActor)
+{
+  return media::DeallocPMediaParent(aActor);
+}
+
 namespace {
 
-class RegisterServiceWorkerCallback MOZ_FINAL : public nsRunnable
+class RegisterServiceWorkerCallback final : public nsRunnable
 {
 public:
   explicit RegisterServiceWorkerCallback(
@@ -402,7 +478,7 @@ private:
   ServiceWorkerRegistrationData mData;
 };
 
-class UnregisterServiceWorkerCallback MOZ_FINAL : public nsRunnable
+class UnregisterServiceWorkerCallback final : public nsRunnable
 {
 public:
   explicit UnregisterServiceWorkerCallback(const nsString& aScope)
@@ -430,7 +506,7 @@ private:
   nsString mScope;
 };
 
-class CheckPrincipalWithCallbackRunnable MOZ_FINAL : public nsRunnable
+class CheckPrincipalWithCallbackRunnable final : public nsRunnable
 {
 public:
   CheckPrincipalWithCallbackRunnable(already_AddRefed<ContentParent> aParent,
@@ -559,6 +635,48 @@ BackgroundParentImpl::RecvShutdownServiceWorkerRegistrar()
   MOZ_ASSERT(service);
 
   service->Shutdown();
+  return true;
+}
+
+PCacheStorageParent*
+BackgroundParentImpl::AllocPCacheStorageParent(const Namespace& aNamespace,
+                                               const PrincipalInfo& aPrincipalInfo)
+{
+  return dom::cache::AllocPCacheStorageParent(this, aNamespace, aPrincipalInfo);
+}
+
+bool
+BackgroundParentImpl::DeallocPCacheStorageParent(PCacheStorageParent* aActor)
+{
+  dom::cache::DeallocPCacheStorageParent(aActor);
+  return true;
+}
+
+PCacheParent*
+BackgroundParentImpl::AllocPCacheParent()
+{
+  MOZ_CRASH("CacheParent actor must be provided to PBackground manager");
+  return nullptr;
+}
+
+bool
+BackgroundParentImpl::DeallocPCacheParent(PCacheParent* aActor)
+{
+  dom::cache::DeallocPCacheParent(aActor);
+  return true;
+}
+
+PCacheStreamControlParent*
+BackgroundParentImpl::AllocPCacheStreamControlParent()
+{
+  MOZ_CRASH("CacheStreamControlParent actor must be provided to PBackground manager");
+  return nullptr;
+}
+
+bool
+BackgroundParentImpl::DeallocPCacheStreamControlParent(PCacheStreamControlParent* aActor)
+{
+  dom::cache::DeallocPCacheStreamControlParent(aActor);
   return true;
 }
 

@@ -27,7 +27,7 @@ PRLogModuleInfo *gCameraBrokerLog = nullptr;
 namespace mozilla {
 namespace camera {
 
-class WorkerBackgroundChildCallback MOZ_FINAL :
+class WorkerBackgroundChildCallback final :
   public nsIIPCBackgroundChildCreateCallback
 {
   bool* mDone;
@@ -47,13 +47,13 @@ private:
   { }
 
   virtual void
-  ActorCreated(PBackgroundChild* aActor) MOZ_OVERRIDE
+  ActorCreated(PBackgroundChild* aActor) override
   {
     *mDone = true;
   }
 
   virtual void
-  ActorFailed() MOZ_OVERRIDE
+  ActorFailed() override
   {
     *mDone = true;
   }

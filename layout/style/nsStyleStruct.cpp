@@ -32,6 +32,8 @@
 #include "nsIDocument.h"
 #include <algorithm>
 
+using namespace mozilla;
+
 static_assert((((1 << nsStyleStructID_Length) - 1) &
                ~(NS_STYLE_INHERIT_MASK)) == 0,
               "Not enough bits in NS_STYLE_INHERIT_MASK");
@@ -1066,8 +1068,6 @@ nsStyleClipPath::operator=(const nsStyleClipPath& aOther)
     return *this;
   }
 
-  ReleaseRef();
-
   if (aOther.mType == NS_STYLE_CLIP_PATH_URL) {
     SetURL(aOther.mURL);
   } else if (aOther.mType == NS_STYLE_CLIP_PATH_SHAPE) {
@@ -1075,6 +1075,7 @@ nsStyleClipPath::operator=(const nsStyleClipPath& aOther)
   } else if (aOther.mType == NS_STYLE_CLIP_PATH_BOX) {
     SetSizingBox(aOther.mSizingBox);
   } else {
+    ReleaseRef();
     mSizingBox = NS_STYLE_CLIP_SHAPE_SIZING_NOBOX;
     mType = NS_STYLE_CLIP_PATH_NONE;
   }
@@ -1185,7 +1186,11 @@ nsStyleFilter::operator=(const nsStyleFilter& aOther)
     SetDropShadow(aOther.mDropShadow);
   } else if (aOther.mType != NS_STYLE_FILTER_NONE) {
     SetFilterParameter(aOther.mFilterParameter, aOther.mType);
+  } else {
+    ReleaseRef();
+    mType = NS_STYLE_FILTER_NONE;
   }
+
   return *this;
 }
 
@@ -1218,6 +1223,7 @@ nsStyleFilter::ReleaseRef()
     NS_ASSERTION(mURL, "expected pointer");
     mURL->Release();
   }
+  mURL = nullptr;
 }
 
 void
@@ -1677,8 +1683,8 @@ nsStyleTableBorder::nsStyleTableBorder()
 
   mEmptyCells = NS_STYLE_TABLE_EMPTY_CELLS_SHOW;
   mCaptionSide = NS_STYLE_CAPTION_SIDE_TOP;
-  mBorderSpacingX = 0;
-  mBorderSpacingY = 0;
+  mBorderSpacingCol = 0;
+  mBorderSpacingRow = 0;
 }
 
 nsStyleTableBorder::~nsStyleTableBorder(void) 
@@ -1687,8 +1693,8 @@ nsStyleTableBorder::~nsStyleTableBorder(void)
 }
 
 nsStyleTableBorder::nsStyleTableBorder(const nsStyleTableBorder& aSource)
-  : mBorderSpacingX(aSource.mBorderSpacingX)
-  , mBorderSpacingY(aSource.mBorderSpacingY)
+  : mBorderSpacingCol(aSource.mBorderSpacingCol)
+  , mBorderSpacingRow(aSource.mBorderSpacingRow)
   , mBorderCollapse(aSource.mBorderCollapse)
   , mCaptionSide(aSource.mCaptionSide)
   , mEmptyCells(aSource.mEmptyCells)
@@ -1707,8 +1713,8 @@ nsChangeHint nsStyleTableBorder::CalcDifference(const nsStyleTableBorder& aOther
   }
   
   if ((mCaptionSide == aOther.mCaptionSide) &&
-      (mBorderSpacingX == aOther.mBorderSpacingX) &&
-      (mBorderSpacingY == aOther.mBorderSpacingY)) {
+      (mBorderSpacingCol == aOther.mBorderSpacingCol) &&
+      (mBorderSpacingRow == aOther.mBorderSpacingRow)) {
     if (mEmptyCells == aOther.mEmptyCells)
       return NS_STYLE_HINT_NONE;
     return NS_STYLE_HINT_VISUAL;
@@ -2279,6 +2285,17 @@ nsStyleBackground::Position::SetInitialPercentValues(float aPercentVal)
   mYPosition.mHasPercent = true;
 }
 
+void
+nsStyleBackground::Position::SetInitialZeroValues()
+{
+  mXPosition.mPercent = 0;
+  mXPosition.mLength = 0;
+  mXPosition.mHasPercent = false;
+  mYPosition.mPercent = 0;
+  mYPosition.mLength = 0;
+  mYPosition.mHasPercent = false;
+}
+
 bool
 nsStyleBackground::Size::DependsOnPositioningAreaSize(const nsStyleImage& aImage) const
 {
@@ -2327,7 +2344,7 @@ nsStyleBackground::Size::DependsOnPositioningAreaSize(const nsStyleImage& aImage
     nsCOMPtr<imgIContainer> imgContainer;
     aImage.GetImageData()->GetImage(getter_AddRefs(imgContainer));
     if (imgContainer) {
-      nsIntSize imageSize;
+      CSSIntSize imageSize;
       nsSize imageRatio;
       bool hasWidth, hasHeight;
       nsLayoutUtils::ComputeSizeForDrawing(imgContainer, imageSize, imageRatio,
@@ -2590,6 +2607,12 @@ nsStyleDisplay::nsStyleDisplay()
   mIsolation = NS_STYLE_ISOLATION_AUTO;
   mTouchAction = NS_STYLE_TOUCH_ACTION_AUTO;
   mScrollBehavior = NS_STYLE_SCROLL_BEHAVIOR_AUTO;
+  mScrollSnapTypeX = NS_STYLE_SCROLL_SNAP_TYPE_NONE;
+  mScrollSnapTypeY = NS_STYLE_SCROLL_SNAP_TYPE_NONE;
+  mScrollSnapPointsX.SetNoneValue();
+  mScrollSnapPointsY.SetNoneValue();
+  // Initial value for mScrollSnapDestination is "0px 0px"
+  mScrollSnapDestination.SetInitialZeroValues();
 
   mTransitions.AppendElement();
   MOZ_ASSERT(mTransitions.Length() == 1,
@@ -2640,6 +2663,12 @@ nsStyleDisplay::nsStyleDisplay(const nsStyleDisplay& aSource)
   , mWillChange(aSource.mWillChange)
   , mTouchAction(aSource.mTouchAction)
   , mScrollBehavior(aSource.mScrollBehavior)
+  , mScrollSnapTypeX(aSource.mScrollSnapTypeX)
+  , mScrollSnapTypeY(aSource.mScrollSnapTypeY)
+  , mScrollSnapPointsX(aSource.mScrollSnapPointsX)
+  , mScrollSnapPointsY(aSource.mScrollSnapPointsY)
+  , mScrollSnapDestination(aSource.mScrollSnapDestination)
+  , mScrollSnapCoordinate(aSource.mScrollSnapCoordinate)
   , mBackfaceVisibility(aSource.mBackfaceVisibility)
   , mTransformStyle(aSource.mTransformStyle)
   , mSpecifiedTransform(aSource.mSpecifiedTransform)
@@ -2680,12 +2709,19 @@ nsChangeHint nsStyleDisplay::CalcDifference(const nsStyleDisplay& aOther) const
       || mOverflowX != aOther.mOverflowX
       || mOverflowY != aOther.mOverflowY
       || mScrollBehavior != aOther.mScrollBehavior
+      || mScrollSnapTypeX != aOther.mScrollSnapTypeX
+      || mScrollSnapTypeY != aOther.mScrollSnapTypeY
+      || mScrollSnapPointsX != aOther.mScrollSnapPointsX
+      || mScrollSnapPointsY != aOther.mScrollSnapPointsY
+      || mScrollSnapDestination != aOther.mScrollSnapDestination
       || mResize != aOther.mResize)
     NS_UpdateHint(hint, nsChangeHint_ReconstructFrame);
 
-  /* Note: When mScrollBehavior is changed, the nsChangeHint_NeutralChange is
-   * not sufficient to enter nsCSSFrameConstructor::PropagateScrollToViewport.
-   * By using the same hint as used when the overflow css property changes,
+  /* Note: When mScrollBehavior, mScrollSnapTypeX, mScrollSnapTypeY,
+   * mScrollSnapPointsX, mScrollSnapPointsY, or mScrollSnapDestination are
+   * changed, nsChangeHint_NeutralChange is not sufficient to enter
+   * nsCSSFrameConstructor::PropagateScrollToViewport. By using the same hint
+   * as used when the overflow css property changes,
    * nsChangeHint_ReconstructFrame, PropagateScrollToViewport will be called.
    *
    * The scroll-behavior css property is not expected to change often (the
@@ -2864,7 +2900,8 @@ nsChangeHint nsStyleDisplay::CalcDifference(const nsStyleDisplay& aOther) const
        mAnimationDirectionCount != aOther.mAnimationDirectionCount ||
        mAnimationFillModeCount != aOther.mAnimationFillModeCount ||
        mAnimationPlayStateCount != aOther.mAnimationPlayStateCount ||
-       mAnimationIterationCountCount != aOther.mAnimationIterationCountCount)) {
+       mAnimationIterationCountCount != aOther.mAnimationIterationCountCount ||
+       mScrollSnapCoordinate != aOther.mScrollSnapCoordinate)) {
     NS_UpdateHint(hint, nsChangeHint_NeutralChange);
   }
 

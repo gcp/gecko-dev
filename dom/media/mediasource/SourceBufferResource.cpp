@@ -47,7 +47,7 @@ nsresult
 SourceBufferResource::Read(char* aBuffer, uint32_t aCount, uint32_t* aBytes)
 {
   SBR_DEBUGV("Read(aBuffer=%p, aCount=%u, aBytes=%p)",
-             aBytes, aCount, aBytes);
+             aBuffer, aCount, aBytes);
   ReentrantMonitorAutoEnter mon(mMonitor);
 
   return ReadInternal(aBuffer, aCount, aBytes, /* aMayBlock = */ true);
@@ -69,12 +69,17 @@ SourceBufferResource::ReadInternal(char* aBuffer, uint32_t aCount, uint32_t* aBy
          readOffset + aCount > static_cast<uint64_t>(GetLength())) {
     SBR_DEBUGV("waiting for data");
     mMonitor.Wait();
+    // The callers of this function should have checked this, but it's
+    // possible that we had an eviction while waiting on the monitor.
+    if (readOffset < mInputBuffer.GetOffset()) {
+      return NS_ERROR_FAILURE;
+    }
   }
 
   uint32_t available = GetLength() - readOffset;
   uint32_t count = std::min(aCount, available);
   SBR_DEBUGV("readOffset=%llu GetLength()=%u available=%u count=%u mEnded=%d",
-             this, readOffset, GetLength(), available, count, mEnded);
+             readOffset, GetLength(), available, count, mEnded);
   if (available == 0) {
     SBR_DEBUGV("reached EOF");
     *aBytes = 0;
@@ -179,7 +184,13 @@ SourceBufferResource::EvictData(uint64_t aPlaybackOffset, uint32_t aThreshold)
   SBR_DEBUG("EvictData(aPlaybackOffset=%llu,"
             "aThreshold=%u)", aPlaybackOffset, aThreshold);
   ReentrantMonitorAutoEnter mon(mMonitor);
-  return mInputBuffer.Evict(aPlaybackOffset, aThreshold);
+  uint32_t result = mInputBuffer.Evict(aPlaybackOffset, aThreshold);
+  if (result > 0) {
+    // Wake up any waiting threads in case a ReadInternal call
+    // is now invalid.
+    mon.NotifyAll();
+  }
+  return result;
 }
 
 void
@@ -191,6 +202,9 @@ SourceBufferResource::EvictBefore(uint64_t aOffset)
   if (aOffset < mOffset) {
     mInputBuffer.EvictBefore(aOffset);
   }
+  // Wake up any waiting threads in case a ReadInternal call
+  // is now invalid.
+  mon.NotifyAll();
 }
 
 uint32_t

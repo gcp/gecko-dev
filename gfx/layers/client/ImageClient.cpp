@@ -147,13 +147,18 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer, uint32_t aContentFlag
     return false;
   }
 
+  // Don't try to update to an invalid image. We return true because the caller
+  // would attempt to recreate the ImageClient otherwise, and that isn't going
+  // to help.
+  if (!image->IsValid()) {
+    return true;
+  }
+
   if (mLastPaintedImageSerial == image->GetSerial()) {
     return true;
   }
 
-  RefPtr<TextureClient> texture = image->AsSharedImage()
-                                ? image->AsSharedImage()->GetTextureClient(this)
-                                : nullptr;
+  RefPtr<TextureClient> texture = image->GetTextureClient(this);
 
   AutoRemoveTexture autoRemoveTexture(this);
   if (texture != mFrontBuffer) {
@@ -225,6 +230,10 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer, uint32_t aContentFlag
       {
         // We must not keep a reference to the DrawTarget after it has been unlocked.
         DrawTarget* dt = texture->BorrowDrawTarget();
+        if (!dt) {
+          gfxWarning() << "ImageClientSingle::UpdateImage failed in BorrowDrawTarget";
+          return false;
+        }
         MOZ_ASSERT(surface.get());
         dt->CopySurface(surface, IntRect(IntPoint(), surface->GetSize()), IntPoint());
       }
@@ -237,7 +246,6 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer, uint32_t aContentFlag
   }
 
   mFrontBuffer = texture;
-  GetForwarder()->UpdatedTexture(this, texture, nullptr);
   GetForwarder()->UseTexture(this, texture);
 
   UpdatePictureRect(image->GetPictureRect());

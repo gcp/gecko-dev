@@ -366,7 +366,7 @@ IMEContentObserver::NotifySelectionChanged(nsIDOMDocument* aDOMDocument,
 }
 
 // Helper class, used for position change notification
-class PositionChangeEvent MOZ_FINAL : public nsRunnable
+class PositionChangeEvent final : public nsRunnable
 {
 public:
   explicit PositionChangeEvent(IMEContentObserver* aDispatcher)
@@ -917,7 +917,7 @@ GetContentBR(dom::Element* aElement)
     return nullptr;
   }
   nsIContent* content = static_cast<nsIContent*>(aElement);
-  return content->IsHTML(nsGkAtoms::br) ? content : nullptr;
+  return content->IsHTMLElement(nsGkAtoms::br) ? content : nullptr;
 }
 
 void

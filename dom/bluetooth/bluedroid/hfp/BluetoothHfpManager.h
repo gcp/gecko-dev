@@ -88,7 +88,6 @@ public:
   }
 
   static BluetoothHfpManager* Get();
-  virtual ~BluetoothHfpManager();
   static void InitHfpInterface(BluetoothProfileResultHandler* aRes);
   static void DeinitHfpInterface(BluetoothProfileResultHandler* aRes);
 
@@ -116,34 +115,54 @@ public:
   //
 
   void ConnectionStateNotification(BluetoothHandsfreeConnectionState aState,
-                                   const nsAString& aBdAddress) MOZ_OVERRIDE;
+                                   const nsAString& aBdAddress) override;
   void AudioStateNotification(BluetoothHandsfreeAudioState aState,
-                              const nsAString& aBdAddress) MOZ_OVERRIDE;
-  void AnswerCallNotification(const nsAString& aBdAddress) MOZ_OVERRIDE;
-  void HangupCallNotification(const nsAString& aBdAddress) MOZ_OVERRIDE;
+                              const nsAString& aBdAddress) override;
+  void AnswerCallNotification(const nsAString& aBdAddress) override;
+  void HangupCallNotification(const nsAString& aBdAddress) override;
   void VolumeNotification(BluetoothHandsfreeVolumeType aType,
                           int aVolume,
-                          const nsAString& aBdAddress) MOZ_OVERRIDE;
+                          const nsAString& aBdAddress) override;
   void DtmfNotification(char aDtmf,
-                        const nsAString& aBdAddress) MOZ_OVERRIDE;
+                        const nsAString& aBdAddress) override;
   void CallHoldNotification(BluetoothHandsfreeCallHoldType aChld,
-                            const nsAString& aBdAddress) MOZ_OVERRIDE;
+                            const nsAString& aBdAddress) override;
   void DialCallNotification(const nsAString& aNumber,
-                            const nsAString& aBdAddress) MOZ_OVERRIDE;
-  void CnumNotification(const nsAString& aBdAddress) MOZ_OVERRIDE;
-  void CindNotification(const nsAString& aBdAddress) MOZ_OVERRIDE;
-  void CopsNotification(const nsAString& aBdAddress) MOZ_OVERRIDE;
-  void ClccNotification(const nsAString& aBdAddress) MOZ_OVERRIDE;
+                            const nsAString& aBdAddress) override;
+  void CnumNotification(const nsAString& aBdAddress) override;
+  void CindNotification(const nsAString& aBdAddress) override;
+  void CopsNotification(const nsAString& aBdAddress) override;
+  void ClccNotification(const nsAString& aBdAddress) override;
   void UnknownAtNotification(const nsACString& aAtString,
-                             const nsAString& aBdAddress) MOZ_OVERRIDE;
-  void KeyPressedNotification(const nsAString& aBdAddress) MOZ_OVERRIDE;
+                             const nsAString& aBdAddress) override;
+  void KeyPressedNotification(const nsAString& aBdAddress) override;
+
+protected:
+  virtual ~BluetoothHfpManager();
 
 private:
-  class GetVolumeTask;
-  class CloseScoTask;
+  class AtResponseResultHandler;
+  class CindResponseResultHandler;
+  class ConnectAudioResultHandler;
+  class ConnectResultHandler;
+  class CopsResponseResultHandler;
+  class ClccResponseResultHandler;
+  class CleanupInitResultHandler;
+  class CleanupResultHandler;
   class CloseScoRunnable;
-  class RespondToBLDNTask;
+  class CloseScoTask;
+  class DeinitResultHandlerRunnable;
+  class DeviceStatusNotificationResultHandler;
+  class DisconnectAudioResultHandler;
+  class DisconnectResultHandler;
+  class FormattedAtResponseResultHandler;
+  class GetVolumeTask;
+  class InitResultHandlerRunnable;
   class MainThreadTask;
+  class OnErrorProfileResultHandlerRunnable;
+  class PhoneStateChangeResultHandler;
+  class RespondToBLDNTask;
+  class VolumeControlResultHandler;
 
   friend class BluetoothHfpManagerObserver;
   friend class GetVolumeTask;
@@ -153,7 +172,12 @@ private:
 
   BluetoothHfpManager();
   bool Init();
+
+#ifdef MOZ_B2G_BT_API_V2
+  // Removed in bluetooth2
+#else
   void Cleanup();
+#endif
 
   void HandleShutdown();
   void HandleVolumeChanged(nsISupports* aSubject);
@@ -190,6 +214,7 @@ private:
   int mCurrentVgm;
   bool mReceiveVgsFlag;
   bool mDialingRequestProcessed;
+  bool mFirstCKPD;
   PhoneType mPhoneType;
   nsString mDeviceAddress;
   nsString mMsisdn;

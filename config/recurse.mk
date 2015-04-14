@@ -6,10 +6,6 @@ ifndef INCLUDED_RULES_MK
 include $(topsrcdir)/config/rules.mk
 endif
 
-# Make sure that anything that needs to be defined in moz.build wasn't
-# overwritten after including rules.mk.
-_eval_for_side_effects := $(CHECK_MOZBUILD_VARIABLES)
-
 # The traditional model of directory traversal with make is as follows:
 #   make -C foo
 #     Entering foo
@@ -96,8 +92,10 @@ $(addsuffix /$(CURRENT_TIER),$(filter-out config,$(CURRENT_DIRS))): config/$(CUR
 # is done with the config/host target. Note the config/host target only exists if
 # nsinstall is actually built, which it is not on Windows, because we use
 # nsinstall.py there.
+ifdef COMPILE_ENVIRONMENT
 ifneq (,$(filter config/host, $(compile_targets)))
 $(addsuffix /$(CURRENT_TIER),$(CURRENT_DIRS)): config/host
+endif
 endif
 endif
 

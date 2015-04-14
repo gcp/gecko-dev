@@ -36,7 +36,9 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/VisualEventTracer.h"
 #include "mozilla/net/NeckoCommon.h"
+#if !defined(MOZILLA_XPCOMRT_API)
 #include "mozilla/net/ChildDNSService.h"
+#endif // !defined(MOZILLA_XPCOMRT_API)
 #include "mozilla/net/DNSListenerProxy.h"
 #include "mozilla/Services.h"
 
@@ -293,8 +295,8 @@ nsDNSRecord::ReportUnusable(uint16_t aPort)
 
 //-----------------------------------------------------------------------------
 
-class nsDNSAsyncRequest MOZ_FINAL : public nsResolveHostCallback
-                                  , public nsICancelable
+class nsDNSAsyncRequest final : public nsResolveHostCallback
+                              , public nsICancelable
 {
     ~nsDNSAsyncRequest() {}
 
@@ -315,13 +317,13 @@ public:
         , mAF(af)
         , mNetworkInterface(netInterface) {}
 
-    void OnLookupComplete(nsHostResolver *, nsHostRecord *, nsresult) MOZ_OVERRIDE;
+    void OnLookupComplete(nsHostResolver *, nsHostRecord *, nsresult) override;
     // Returns TRUE if the DNS listener arg is the same as the member listener
     // Used in Cancellations to remove DNS requests associated with a
     // particular hostname and nsIDNSListener
-    bool EqualsAsyncListener(nsIDNSListener *aListener) MOZ_OVERRIDE;
+    bool EqualsAsyncListener(nsIDNSListener *aListener) override;
 
-    size_t SizeOfIncludingThis(mozilla::MallocSizeOf) const MOZ_OVERRIDE;
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf) const override;
 
     nsRefPtr<nsHostResolver> mResolver;
     nsCString                mHost; // hostname we're resolving
@@ -502,9 +504,11 @@ static nsDNSService *gDNSService;
 nsIDNSService*
 nsDNSService::GetXPCOMSingleton()
 {
+#if !defined(MOZILLA_XPCOMRT_API)
     if (IsNeckoChild()) {
         return ChildDNSService::GetSingleton();
     }
+#endif // !defined(MOZILLA_XPCOMRT_API)
 
     return GetSingleton();
 }
@@ -603,15 +607,9 @@ nsDNSService::Init()
 
     nsDNSPrefetch::Initialize(this);
 
-    // Don't initialize the resolver if we're in offline mode.
-    // Later on, the IO service will reinitialize us when going online.
-    if (gIOService->IsOffline() && !gIOService->IsComingOnline())
-        return NS_OK;
-
     nsCOMPtr<nsIIDNService> idn = do_GetService(NS_IDNSERVICE_CONTRACTID);
 
-    nsCOMPtr<nsIObserverService> obs =
-        do_GetService(NS_OBSERVERSERVICE_CONTRACTID);
+    nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
 
     nsRefPtr<nsHostResolver> res;
     nsresult rv = nsHostResolver::Create(maxCacheEntries,
@@ -646,7 +644,9 @@ nsDNSService::Init()
         }
     }
 
+#if !defined(MOZILLA_XPCOMRT_API)
     RegisterWeakMemoryReporter(this);
+#endif // !defined(MOZILLA_XPCOMRT_API)
 
     return rv;
 }
@@ -654,7 +654,9 @@ nsDNSService::Init()
 NS_IMETHODIMP
 nsDNSService::Shutdown()
 {
+#if !defined(MOZILLA_XPCOMRT_API)
     UnregisterWeakMemoryReporter(this);
+#endif // !defined(MOZILLA_XPCOMRT_API)
 
     nsRefPtr<nsHostResolver> res;
     {
@@ -684,6 +686,7 @@ nsDNSService::SetOffline(bool offline)
 NS_IMETHODIMP
 nsDNSService::GetPrefetchEnabled(bool *outVal)
 {
+    MutexAutoLock lock(mLock);
     *outVal = !mDisablePrefetch;
     return NS_OK;
 }
@@ -691,6 +694,7 @@ nsDNSService::GetPrefetchEnabled(bool *outVal)
 NS_IMETHODIMP
 nsDNSService::SetPrefetchEnabled(bool inVal)
 {
+    MutexAutoLock lock(mLock);
     mDisablePrefetch = !inVal;
     return NS_OK;
 }

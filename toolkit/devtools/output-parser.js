@@ -20,7 +20,7 @@ const REGEX_CUBIC_BEZIER = /^linear|^ease-in-out|^ease-in|^ease-out|^ease|^cubic
 //   In CSS, identifiers (including element names, classes, and IDs in
 //   selectors) can contain only the characters [a-zA-Z0-9] and ISO 10646
 //   characters U+00A0 and higher, plus the hyphen (-) and the underscore (_).
-const REGEX_CSS_VAR = /\bvar\(\s*--[-_a-zA-Z0-9\u00A0-\u10FFFF]+\s*\)/;
+const REGEX_CSS_VAR = /^\bvar\(\s*--[-_a-zA-Z0-9\u00A0-\u10FFFF]+\s*\)/;
 
 /**
  * This regex matches:
@@ -103,6 +103,8 @@ OutputParser.prototype = {
     options.expectCubicBezier = ["transition", "transition-timing-function",
       "animation", "animation-timing-function"].indexOf(name) !== -1;
 
+    options.expectFilter = name === "filter";
+
     if (this._cssPropertySupportsValue(name, value)) {
       return this._parse(value, options);
     }
@@ -181,6 +183,11 @@ OutputParser.prototype = {
       if (i > MAX_ITERATIONS) {
         this._appendTextNode(text);
         text = "";
+        break;
+      }
+
+      if (options.expectFilter) {
+        this._appendFilter(text, options);
         break;
       }
 
@@ -406,6 +413,26 @@ OutputParser.prototype = {
       return true;
     }
     return false;
+  },
+
+  _appendFilter: function(filters, options={}) {
+    let container = this._createNode("span", {
+      "data-filters": filters
+    });
+
+    if (options.filterSwatchClass) {
+      let swatch = this._createNode("span", {
+        class: options.filterSwatchClass
+      });
+      container.appendChild(swatch);
+    }
+
+    let value = this._createNode("span", {
+      class: options.filterClass
+    }, filters);
+
+    container.appendChild(value);
+    this.parsed.push(container);
   },
 
    /**

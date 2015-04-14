@@ -58,10 +58,10 @@ MediaOmxCommonDecoder::CheckDecoderCanOffloadAudio()
 
 void
 MediaOmxCommonDecoder::FirstFrameLoaded(nsAutoPtr<MediaInfo> aInfo,
-                                        bool aRestoredFromDormant)
+                                        MediaDecoderEventVisibility aEventVisibility)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MediaDecoder::FirstFrameLoaded(aInfo, aRestoredFromDormant);
+  MediaDecoder::FirstFrameLoaded(aInfo, aEventVisibility);
 
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   if (!CheckDecoderCanOffloadAudio()) {
@@ -101,7 +101,13 @@ MediaOmxCommonDecoder::PauseStateMachine()
   if (!mDecoderStateMachine) {
     return;
   }
-  mDecoderStateMachine->SetDormant(true);
+  // enter dormant state
+  RefPtr<nsRunnable> event =
+    NS_NewRunnableMethodWithArg<bool>(
+      mDecoderStateMachine,
+      &MediaDecoderStateMachine::SetDormant,
+      true);
+  mDecoderStateMachine->TaskQueue()->Dispatch(event);
 }
 
 void
@@ -124,7 +130,13 @@ MediaOmxCommonDecoder::ResumeStateMachine()
 
   mNextState = mPlayState;
   ChangeState(PLAY_STATE_LOADING);
-  mDecoderStateMachine->SetDormant(false);
+  // exit dormant state
+  RefPtr<nsRunnable> event =
+    NS_NewRunnableMethodWithArg<bool>(
+      mDecoderStateMachine,
+      &MediaDecoderStateMachine::SetDormant,
+      false);
+  mDecoderStateMachine->TaskQueue()->Dispatch(event);
 }
 
 void
@@ -203,7 +215,7 @@ MediaOmxCommonDecoder::ApplyStateToStateMachine(PlayState aState)
 }
 
 void
-MediaOmxCommonDecoder::PlaybackPositionChanged()
+MediaOmxCommonDecoder::PlaybackPositionChanged(MediaDecoderEventVisibility aEventVisibility)
 {
   MOZ_ASSERT(NS_IsMainThread());
   if (!mAudioOffloadPlayer) {
@@ -220,7 +232,9 @@ MediaOmxCommonDecoder::PlaybackPositionChanged()
     ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
     mCurrentTime = mAudioOffloadPlayer->GetMediaTimeSecs();
   }
-  if (mOwner && lastTime != mCurrentTime) {
+  if (mOwner &&
+      (aEventVisibility != MediaDecoderEventVisibility::Suppressed) &&
+      lastTime != mCurrentTime) {
     FireTimeUpdate();
   }
 }

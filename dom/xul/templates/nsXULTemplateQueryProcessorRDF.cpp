@@ -1220,7 +1220,7 @@ nsXULTemplateQueryProcessorRDF::CompileExtendedQuery(nsRDFQuery* aQuery,
          condition = condition->GetNextSibling()) {
 
         // the <content> condition should always be the first child
-        if (condition->Tag() == nsGkAtoms::content) {
+        if (condition->IsXULElement(nsGkAtoms::content)) {
             if (condition != aConditions->GetFirstChild()) {
                 nsXULContentUtils::LogTemplateError(ERROR_TEMPLATE_CONTENT_NOT_FIRST);
                 continue;
@@ -1245,8 +1245,8 @@ nsXULTemplateQueryProcessorRDF::CompileExtendedQuery(nsRDFQuery* aQuery,
         }
 
         TestNode* testnode = nullptr;
-        nsresult rv = CompileQueryChild(condition->Tag(), aQuery, condition,
-                                        prevnode, &testnode);
+        nsresult rv = CompileQueryChild(condition->NodeInfo()->NameAtom(),
+                                        aQuery, condition, prevnode, &testnode);
         if (NS_FAILED(rv))
             return rv;
 
@@ -1314,14 +1314,14 @@ nsXULTemplateQueryProcessorRDF::ParseLiteral(const nsString& aParseType,
         rv = gRDFService->GetIntLiteral(intValue, getter_AddRefs(intLiteral));
         if (NS_FAILED(rv)) 
             return rv;
-        rv = CallQueryInterface(intLiteral, aResult);
+        intLiteral.forget(aResult);
     }
     else {
         nsCOMPtr<nsIRDFLiteral> literal;
         rv = gRDFService->GetLiteral(aValue.get(), getter_AddRefs(literal));
         if (NS_FAILED(rv)) 
             return rv;
-        rv = CallQueryInterface(literal, aResult);
+        literal.forget(aResult);
     }
     return rv;
 }

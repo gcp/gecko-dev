@@ -9,6 +9,7 @@ var gSmallTests = [
   { name:"small-shot.m4a", type:"audio/mp4", duration:0.29 },
   { name:"small-shot.mp3", type:"audio/mpeg", duration:0.27 },
   { name:"small-shot-mp3.mp4", type:"audio/mp4; codecs=mp3", duration:0.34 },
+  { name:"small-shot.flac", type:"audio/flac", duration:0.197 },
   { name:"r11025_s16_c1.wav", type:"audio/x-wav", duration:1.0 },
   { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.266 },
   { name:"seek.webm", type:"video/webm", width:320, height:240, duration:3.966 },
@@ -646,29 +647,116 @@ var gMetadataTests = [
 // Test files for Encrypted Media Extensions
 var gEMETests = [
   {
-    name:"gizmo-frag-cencinit.mp4",
-    fragments: [ "gizmo-frag-cencinit.mp4", "gizmo-frag-cenc1.m4s", "gizmo-frag-cenc2.m4s" ],
-    type:"video/mp4; codecs=\"avc1.64000d,mp4a.40.2\"",
+    name:"bipbop-cenc-videoinit.mp4",
+    tracks: [
+      {
+        name:"video",
+        type:"video/mp4; codecs=\"avc1.64000d\"",
+        fragments:[ "bipbop-cenc-videoinit.mp4",
+                    "bipbop-cenc-video1.m4s",
+                    "bipbop-cenc-video2.m4s",
+                  ]
+      }
+    ],
     keys: {
       // "keyid" : "key"
       "7e571d037e571d037e571d037e571d03" : "7e5733337e5733337e5733337e573333",
       "7e571d047e571d047e571d047e571d04" : "7e5744447e5744447e5744447e574444",
     },
     sessionType:"temporary",
-    duration:2.00,
+    sessionCount:1,
+    duration:1.60,
   },
   {
-    name:"gizmo-frag-cencinit.mp4",
-    fragments: [ "gizmo-frag-cencinit.mp4", "gizmo-frag-cenc1.m4s", "gizmo-frag-cenc2.m4s" ],
-    type:"video/mp4; codecs=\"avc1.64000d,mp4a.40.2\"",
+    name:"bipbop-cenc-videoinit.mp4",
+    tracks: [
+      {
+        name:"video",
+        type:"video/mp4; codecs=\"avc1.64000d\"",
+        fragments:[ "bipbop-cenc-videoinit.mp4",
+                    "bipbop-cenc-video1.m4s",
+                    "bipbop-cenc-video2.m4s",
+                  ]
+      }
+    ],
     keys: {
       // "keyid" : "key"
       "7e571d037e571d037e571d037e571d03" : "7e5733337e5733337e5733337e573333",
       "7e571d047e571d047e571d047e571d04" : "7e5744447e5744447e5744447e574444",
     },
     sessionType:"temporary",
-    duration:2.00,
+    sessionCount:1,
     crossOrigin:true,
+    duration:1.60,
+  },
+  {
+    name:"bipbop-cenc-videoinit.mp4",
+    tracks: [
+      {
+        name:"audio",
+        type:"audio/mp4; codecs=\"mp4a.40.2\"",
+        fragments:[ "bipbop-cenc-audioinit.mp4",
+                    "bipbop-cenc-audio1.m4s",
+                    "bipbop-cenc-audio2.m4s",
+                    "bipbop-cenc-audio3.m4s",
+                  ],
+      },
+      {
+        name:"video",
+        type:"video/mp4; codecs=\"avc1.64000d\"",
+        fragments:[ "bipbop-cenc-videoinit.mp4",
+                    "bipbop-cenc-video1.m4s",
+                    "bipbop-cenc-video2.m4s",
+                  ],
+      },
+    ],
+    keys: {
+      // "keyid" : "key"
+      "7e571d037e571d037e571d037e571d03" : "7e5733337e5733337e5733337e573333",
+      "7e571d047e571d047e571d047e571d04" : "7e5744447e5744447e5744447e574444",
+    },
+    sessionType:"temporary",
+    sessionCount:2,
+    duration:1.60,
+  },
+  {
+    name:"bipbop-cenc-videoinit.mp4",
+    tracks: [
+      {
+        name:"audio",
+        type:"audio/mp4; codecs=\"mp4a.40.2\"",
+        fragments:[ "bipbop-cenc-audioinit.mp4",
+                    "bipbop-cenc-audio1.m4s",
+                    "bipbop-cenc-audio2.m4s",
+                    "bipbop-cenc-audio3.m4s",
+                  ],
+      },
+      {
+        name:"video",
+        type:"video/mp4; codecs=\"avc1.64000d\"",
+        fragments:[ "bipbop-cenc-videoinit.mp4",
+                    "bipbop-cenc-video1.m4s",
+                    "bipbop-cenc-video2.m4s",
+                  ],
+      },
+    ],
+    keys: {
+      // "keyid" : "key"
+      "7e571d037e571d037e571d037e571d03" : "7e5733337e5733337e5733337e573333",
+      "7e571d047e571d047e571d047e571d04" : "7e5744447e5744447e5744447e574444",
+    },
+    sessionType:"temporary",
+    sessionCount:2,
+    crossOrigin:true,
+    duration:1.60,
+  },
+];
+
+var gEMENonMSEFailTests = [
+  {
+    name:"short-cenc.mp4",
+    type:"video/mp4; codecs=\"avc1.64000d,mp4a.40.2\"",
+    duration:0.47,
   },
 ];
 
@@ -721,6 +809,10 @@ function getMajorMimeType(mimetype) {
 // Force releasing decoder to avoid timeout in waiting for decoding resource.
 function removeNodeAndSource(n) {
   n.remove();
+  // Clearing mozSrcObject and/or src will actually set them to some default
+  // URI that will fail to load, so make sure we don't produce a spurious
+  // bailing error.
+  n.onerror = null;
   // reset |mozSrcObject| first since it takes precedence over |src|.
   n.mozSrcObject = null;
   n.src = "";
@@ -729,8 +821,29 @@ function removeNodeAndSource(n) {
   }
 }
 
+function once(target, name, cb) {
+  var p = new Promise(function(resolve, reject) {
+    target.addEventListener(name, function() {
+      target.removeEventListener(name, cb);
+      resolve();
+    });
+  });
+  if (cb) {
+    p.then(cb);
+  }
+  return p;
+}
+
 // Number of tests to run in parallel.
 var PARALLEL_TESTS = 2;
+
+// Prefs to set before running tests.  Use this to improve coverage of
+// conditions that might not otherwise be encountered on the test data.
+var gTestPrefs = [
+  ['media.recorder.max_memory', 1024],
+  ["media.preload.default", 2], // default preload = metadata
+  ["media.preload.auto", 3] // auto preload = enough
+];
 
 // When true, we'll loop forever on whatever test we run. Use this to debug
 // intermittent test failures.
@@ -772,7 +885,9 @@ function MediaTestManager() {
     this.numTestsRunning = 0;
     // Always wait for explicit finish.
     SimpleTest.waitForExplicitFinish();
-    this.nextTest();
+    SpecialPowers.pushPrefEnv({'set': gTestPrefs}, (function() {
+      this.nextTest();
+    }).bind(this));
   }
 
   // Registers that the test corresponding to 'token' has been started.
@@ -871,52 +986,15 @@ function mediaTestCleanup(callback) {
       removeNodeAndSource(A[i]);
       A[i] = null;
     }
-    var cb = function() {
-      if (callback) {
-        callback();
-      }
-    }
-    SpecialPowers.exactGC(window, cb);
+    SpecialPowers.exactGC(window, callback);
 }
 
-(function() {
-  SimpleTest.requestFlakyTimeout("untriaged");
+function setMediaTestsPrefs(callback, extraPrefs) {
+  var prefs = gTestPrefs;
+  if (extraPrefs) {
+    prefs = prefs.concat(extraPrefs);
+  }
+  SpecialPowers.pushPrefEnv({"set": prefs}, callback);
+}
 
-  // Ensure that preload preferences are comsistent
-  var prefService = SpecialPowers.wrap(SpecialPowers.Components)
-                                 .classes["@mozilla.org/preferences-service;1"]
-                                 .getService(SpecialPowers.Ci.nsIPrefService);
-  var branch = prefService.getBranch("media.");
-  var oldDefault = 2;
-  var oldAuto = 3;
-  var oldAppleMedia = undefined;
-  var oldGStreamer = undefined;
-  var oldOpus = undefined;
-
-  try { oldAppleMedia = SpecialPowers.getBoolPref("media.apple.mp3.enabled"); } catch(ex) { }
-  try { oldGStreamer = SpecialPowers.getBoolPref("media.gstreamer.enabled"); } catch(ex) { }
-  try { oldDefault   = SpecialPowers.getIntPref("media.preload.default"); } catch(ex) { }
-  try { oldAuto      = SpecialPowers.getIntPref("media.preload.auto"); } catch(ex) { }
-  try { oldOpus      = SpecialPowers.getBoolPref("media.opus.enabled"); } catch(ex) { }
-
-  SpecialPowers.setIntPref("media.preload.default", 2); // preload_metadata
-  SpecialPowers.setIntPref("media.preload.auto", 3); // preload_enough
-  // test opus playback iff the pref exists
-  if (oldOpus !== undefined)
-    SpecialPowers.setBoolPref("media.opus.enabled", true);
-  if (oldGStreamer !== undefined)
-    SpecialPowers.setBoolPref("media.gstreamer.enabled", true);
-  if (oldAppleMedia !== undefined)
-    SpecialPowers.setBoolPref("media.apple.mp3.enabled", true);
-
-  window.addEventListener("unload", function() {
-    if (oldGStreamer !== undefined)
-      SpecialPowers.setBoolPref("media.gstreamer.enabled", oldGStreamer);
-    if (oldAppleMedia !== undefined)
-      SpecialPowers.setBoolPref("media.apple.mp3.enabled", oldAppleMedia);
-    SpecialPowers.setIntPref("media.preload.default", oldDefault);
-    SpecialPowers.setIntPref("media.preload.auto", oldAuto);
-    if (oldOpus !== undefined)
-      SpecialPowers.setBoolPref("media.opus.enabled", oldOpus);
-  }, false);
- })();
+SimpleTest.requestFlakyTimeout("untriaged");

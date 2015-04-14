@@ -16,11 +16,17 @@ Cu.import("resource://gre/modules/Services.jsm");
 // nsITreeView implementation that feeds the autocomplete popup
 // with the search data.
 let AutoCompleteE10SView = {
+  // nsISupports
   QueryInterface: XPCOMUtils.generateQI([Ci.nsITreeView,
                                          Ci.nsIAutoCompleteController]),
+
+  // Private variables
   treeBox: null,
-  selection: null,
   treeData: [],
+  properties: [],
+
+  // nsITreeView
+  selection: null,
 
   get rowCount()                     { return this.treeData.length; },
   setTree: function(treeBox)         { this.treeBox = treeBox; },
@@ -37,7 +43,7 @@ let AutoCompleteE10SView = {
   getParentIndex: function(idx)      { return -1; },
   hasNextSibling: function(idx, after) { return idx < this.treeData.length - 1 },
   toggleOpenState: function(idx)     { },
-  getCellProperties: function(idx, column) { return ""; },
+  getCellProperties: function(idx, column) { return this.properties[idx] || ""; },
   getRowProperties: function(idx)    { return ""; },
   getImageSrc: function(idx, column) { return null; },
   getProgressMode : function(idx, column) { },
@@ -48,22 +54,25 @@ let AutoCompleteE10SView = {
   performActionOnCell: function(action, index, column) { },
   getColumnProperties: function(column) { return ""; },
 
+  // nsIAutoCompleteController
   get matchCount() this.rowCount,
-
-
-  clearResults: function() {
-    this.treeData = [];
-  },
-
-  addResult: function(result) {
-    this.treeData.push(result);
-  },
 
   handleEnter: function(aIsPopupSelection) {
     AutoCompleteE10S.handleEnter(aIsPopupSelection);
   },
 
-  stopSearch: function(){}
+  stopSearch: function(){},
+
+  // Internal JS-only API
+  clearResults: function() {
+    this.treeData = [];
+    this.properties = [];
+  },
+
+  addResult: function(text, properties) {
+    this.treeData.push(text);
+    this.properties.push(properties);
+  },
 };
 
 this.AutoCompleteE10S = {
@@ -81,9 +90,8 @@ this.AutoCompleteE10S = {
     this.popup.hidden = false;
     this.popup.setAttribute("width", rect.width);
 
-    let {x, y} = this.browser.mapScreenCoordinatesFromContent(rect.left, rect.top + rect.height);
-    this.x = x;
-    this.y = y;
+    this.x = rect.left;
+    this.y = rect.top + rect.height;
   },
 
   _showPopup: function(results) {
@@ -94,7 +102,7 @@ this.AutoCompleteE10S = {
     for (let i = 0; i < count; i++) {
       let result = results.getValueAt(i);
       resultsArray.push(result);
-      AutoCompleteE10SView.addResult(result);
+      AutoCompleteE10SView.addResult(result, results.getStyleAt(i));
     }
 
     this.popup.view = AutoCompleteE10SView;

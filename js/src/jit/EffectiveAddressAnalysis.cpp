@@ -12,15 +12,18 @@ using namespace js;
 using namespace jit;
 
 static void
-AnalyzeLsh(TempAllocator &alloc, MLsh *lsh)
+AnalyzeLsh(TempAllocator& alloc, MLsh* lsh)
 {
     if (lsh->specialization() != MIRType_Int32)
         return;
 
-    MDefinition *index = lsh->lhs();
+    if (lsh->isRecoveredOnBailout())
+        return;
+
+    MDefinition* index = lsh->lhs();
     MOZ_ASSERT(index->type() == MIRType_Int32);
 
-    MDefinition *shift = lsh->rhs();
+    MDefinition* shift = lsh->rhs();
     if (!shift->isConstantValue())
         return;
 
@@ -31,8 +34,8 @@ AnalyzeLsh(TempAllocator &alloc, MLsh *lsh)
     Scale scale = ShiftToScale(shiftValue.toInt32());
 
     int32_t displacement = 0;
-    MInstruction *last = lsh;
-    MDefinition *base = nullptr;
+    MInstruction* last = lsh;
+    MDefinition* base = nullptr;
     while (true) {
         if (!last->hasOneUse())
             break;
@@ -41,11 +44,11 @@ AnalyzeLsh(TempAllocator &alloc, MLsh *lsh)
         if (!use->consumer()->isDefinition() || !use->consumer()->toDefinition()->isAdd())
             break;
 
-        MAdd *add = use->consumer()->toDefinition()->toAdd();
+        MAdd* add = use->consumer()->toDefinition()->toAdd();
         if (add->specialization() != MIRType_Int32 || !add->isTruncated())
             break;
 
-        MDefinition *other = add->getOperand(1 - add->indexOf(*use));
+        MDefinition* other = add->getOperand(1 - add->indexOf(*use));
 
         if (other->isConstantValue()) {
             displacement += other->constantValue().toInt32();
@@ -56,6 +59,8 @@ AnalyzeLsh(TempAllocator &alloc, MLsh *lsh)
         }
 
         last = add;
+        if (last->isRecoveredOnBailout())
+            return;
     }
 
     if (!base) {
@@ -70,8 +75,11 @@ AnalyzeLsh(TempAllocator &alloc, MLsh *lsh)
         if (!use->consumer()->isDefinition() || !use->consumer()->toDefinition()->isBitAnd())
             return;
 
-        MBitAnd *bitAnd = use->consumer()->toDefinition()->toBitAnd();
-        MDefinition *other = bitAnd->getOperand(1 - bitAnd->indexOf(*use));
+        MBitAnd* bitAnd = use->consumer()->toDefinition()->toBitAnd();
+        if (bitAnd->isRecoveredOnBailout())
+            return;
+
+        MDefinition* other = bitAnd->getOperand(1 - bitAnd->indexOf(*use));
         if (!other->isConstantValue() || !other->constantValue().isInt32())
             return;
 
@@ -84,23 +92,19 @@ AnalyzeLsh(TempAllocator &alloc, MLsh *lsh)
         return;
     }
 
-    MEffectiveAddress *eaddr = MEffectiveAddress::New(alloc, base, index, scale, displacement);
+    if (base->isRecoveredOnBailout())
+        return;
+
+    MEffectiveAddress* eaddr = MEffectiveAddress::New(alloc, base, index, scale, displacement);
     last->replaceAllUsesWith(eaddr);
     last->block()->insertAfter(last, eaddr);
 }
 
-static bool
-IsAlignmentMask(uint32_t m)
-{
-    // Test whether m is just leading ones and trailing zeros.
-    return (-m & ~m) == 0;
-}
-
 template<typename MAsmJSHeapAccessType>
 static void
-AnalyzeAsmHeapAccess(MAsmJSHeapAccessType *ins, MIRGraph &graph)
+AnalyzeAsmHeapAccess(MAsmJSHeapAccessType* ins, MIRGraph& graph)
 {
-    MDefinition *ptr = ins->ptr();
+    MDefinition* ptr = ins->ptr();
 
     if (ptr->isConstantValue()) {
         // Look for heap[i] where i is a constant offset, and fold the offset.
@@ -110,43 +114,22 @@ AnalyzeAsmHeapAccess(MAsmJSHeapAccessType *ins, MIRGraph &graph)
         // offset doesn't actually fit into the address mode immediate.
         int32_t imm = ptr->constantValue().toInt32();
         if (imm != 0 && ins->tryAddDisplacement(imm)) {
-            MInstruction *zero = MConstant::New(graph.alloc(), Int32Value(0));
+            MInstruction* zero = MConstant::New(graph.alloc(), Int32Value(0));
             ins->block()->insertBefore(ins, zero);
             ins->replacePtr(zero);
         }
     } else if (ptr->isAdd()) {
         // Look for heap[a+i] where i is a constant offset, and fold the offset.
-        MDefinition *op0 = ptr->toAdd()->getOperand(0);
-        MDefinition *op1 = ptr->toAdd()->getOperand(1);
+        // Alignment masks have already been moved out of the way by the
+        // Alignment Mask Analysis pass.
+        MDefinition* op0 = ptr->toAdd()->getOperand(0);
+        MDefinition* op1 = ptr->toAdd()->getOperand(1);
         if (op0->isConstantValue())
             mozilla::Swap(op0, op1);
         if (op1->isConstantValue()) {
             int32_t imm = op1->constantValue().toInt32();
             if (ins->tryAddDisplacement(imm))
                 ins->replacePtr(op0);
-        }
-    } else if (ptr->isBitAnd() && ptr->hasOneUse()) {
-        // Transform heap[(a+i)&m] to heap[(a&m)+i] so that we can fold i into
-        // the access. Since we currently just mutate the BitAnd in place, this
-        // requires that we are its only user.
-        MDefinition *lhs = ptr->toBitAnd()->getOperand(0);
-        MDefinition *rhs = ptr->toBitAnd()->getOperand(1);
-        int lhsIndex = 0;
-        if (lhs->isConstantValue()) {
-            mozilla::Swap(lhs, rhs);
-            lhsIndex = 1;
-        }
-        if (lhs->isAdd() && rhs->isConstantValue()) {
-            MDefinition *op0 = lhs->toAdd()->getOperand(0);
-            MDefinition *op1 = lhs->toAdd()->getOperand(1);
-            if (op0->isConstantValue())
-                mozilla::Swap(op0, op1);
-            if (op1->isConstantValue()) {
-                uint32_t i = op1->constantValue().toInt32();
-                uint32_t m = rhs->constantValue().toInt32();
-                if (IsAlignmentMask(m) && ((i & m) == i) && ins->tryAddDisplacement(i))
-                    ptr->toBitAnd()->replaceOperand(lhsIndex, op0);
-            }
         }
     }
 }

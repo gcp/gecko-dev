@@ -20,6 +20,7 @@
 #endif
 
 #if defined(MOZILLA_INTERNAL_API) && \
+    !defined(MOZILLA_XPCOMRT_API) && \
     (defined(DEBUG) || defined(FORCE_BUILD_REFCNT_LOGGING))
 #define MOZ_REFCOUNTED_LEAK_CHECKING
 #endif
@@ -161,7 +162,7 @@ private:
 };
 
 #ifdef MOZ_REFCOUNTED_LEAK_CHECKING
-// Passing MOZ_OVERRIDE for the optional argument marks the typeName and
+// Passing override for the optional argument marks the typeName and
 // typeSize functions defined by this macro as overrides.
 #define MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(T, ...) \
   virtual const char* typeName() const __VA_ARGS__ { return #T; } \

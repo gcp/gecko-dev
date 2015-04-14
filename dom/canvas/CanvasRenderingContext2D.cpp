@@ -96,6 +96,7 @@
 #include "nsCCUncollectableMarker.h"
 #include "nsWrapperCacheInlines.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
+#include "mozilla/dom/CanvasPath.h"
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/dom/SVGMatrix.h"
@@ -112,6 +113,7 @@
 #include "nsSVGLength2.h"
 #include "nsDeviceContext.h"
 #include "nsFontMetrics.h"
+#include "Units.h"
 
 #undef free // apparently defined by some windows header, clashing with a free()
             // method in SkTypes.h
@@ -158,14 +160,14 @@ static int64_t gCanvasAzureMemoryUsed = 0;
 // This is KIND_OTHER because it's not always clear where in memory the pixels
 // of a canvas are stored.  Furthermore, this memory will be tracked by the
 // underlying surface implementations.  See bug 655638 for details.
-class Canvas2dPixelsReporter MOZ_FINAL : public nsIMemoryReporter
+class Canvas2dPixelsReporter final : public nsIMemoryReporter
 {
   ~Canvas2dPixelsReporter() {}
 public:
   NS_DECL_ISUPPORTS
 
   NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
-                            nsISupports* aData, bool aAnonymize) MOZ_OVERRIDE
+                            nsISupports* aData, bool aAnonymize) override
   {
     return MOZ_COLLECT_REPORT(
       "canvas-2d-pixels", KIND_OTHER, UNITS_BYTES,
@@ -978,9 +980,9 @@ CanvasRenderingContext2D::~CanvasRenderingContext2D()
 }
 
 JSObject*
-CanvasRenderingContext2D::WrapObject(JSContext *cx)
+CanvasRenderingContext2D::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return CanvasRenderingContext2DBinding::Wrap(cx, this);
+  return CanvasRenderingContext2DBinding::Wrap(cx, this, aGivenProto);
 }
 
 bool
@@ -1348,12 +1350,14 @@ CanvasRenderingContext2D::EnsureTarget(RenderingMode aRenderingMode)
     }
 
      if (layerManager) {
-      if (mode == RenderingMode::OpenGLBackendMode && CheckSizeForSkiaGL(size)) {
+      if (mode == RenderingMode::OpenGLBackendMode &&
+          gfxPlatform::GetPlatform()->UseAcceleratedSkiaCanvas() &&
+          CheckSizeForSkiaGL(size)) {
         DemoteOldestContextIfNecessary();
 
+#if USE_SKIA_GPU
         SkiaGLGlue* glue = gfxPlatform::GetPlatform()->GetSkiaGLGlue();
 
-#if USE_SKIA_GPU
         if (glue && glue->GetGrContext() && glue->GetGLContext()) {
           mTarget = Factory::CreateDrawTargetSkiaWithGrContext(glue->GetGrContext(), size, format);
           if (mTarget) {
@@ -2055,19 +2059,13 @@ CreateStyleRule(nsINode* aNode,
   }
 
   if (aProp1 != eCSSProperty_UNKNOWN) {
-    error = parser.ParseProperty(aProp1, aValue1, docURL, baseURL, principal,
-                                 rule->GetDeclaration(), aChanged1, false);
-    if (error.Failed()) {
-      return nullptr;
-    }
+    parser.ParseProperty(aProp1, aValue1, docURL, baseURL, principal,
+                         rule->GetDeclaration(), aChanged1, false);
   }
 
   if (aProp2 != eCSSProperty_UNKNOWN) {
-    error = parser.ParseProperty(aProp2, aValue2, docURL, baseURL, principal,
-                                 rule->GetDeclaration(), aChanged2, false);
-    if (error.Failed()) {
-      return nullptr;
-    }
+    parser.ParseProperty(aProp2, aValue2, docURL, baseURL, principal,
+                         rule->GetDeclaration(), aChanged2, false);
   }
 
   rule->RuleMatched();
@@ -2278,7 +2276,7 @@ public:
   {
   }
 
-  virtual void DoUpdate() MOZ_OVERRIDE
+  virtual void DoUpdate() override
   {
     // Refresh the cached FilterDescription in mContext->CurrentState().filter.
     // If this filter is not at the top of the state stack, we'll refresh the
@@ -2321,13 +2319,13 @@ public:
   {
   }
 
-  virtual float GetEmLength() const MOZ_OVERRIDE
+  virtual float GetEmLength() const override
   {
     return NSAppUnitsToFloatPixels(mFont.size,
                                    nsPresContext::AppUnitsPerCSSPixel());
   }
 
-  virtual float GetExLength() const MOZ_OVERRIDE
+  virtual float GetExLength() const override
   {
     gfxTextPerfMetrics* tp = mPresContext->GetTextPerfMetrics();
     nsRefPtr<nsFontMetrics> fontMetrics;
@@ -2339,7 +2337,7 @@ public:
                                    nsPresContext::AppUnitsPerCSSPixel());
   }
 
-  virtual gfx::Size GetSize() const MOZ_OVERRIDE
+  virtual gfx::Size GetSize() const override
   { return Size(mSize); }
 
 private:
@@ -3162,15 +3160,24 @@ CanvasRenderingContext2D::MeasureText(const nsAString& rawText,
 void
 CanvasRenderingContext2D::AddHitRegion(const HitRegionOptions& options, ErrorResult& error)
 {
-  // check if the path is valid
-  EnsureUserSpacePath(CanvasWindingRule::Nonzero);
-  if(!mPath) {
+  RefPtr<gfx::Path> path;
+  if (options.mPath) {
+    path = options.mPath->GetPath(CanvasWindingRule::Nonzero, mTarget);
+  }
+
+  if (!path) {
+    // check if the path is valid
+    EnsureUserSpacePath(CanvasWindingRule::Nonzero);
+    path = mPath;
+  }
+
+  if(!path) {
     error.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return;
   }
 
   // get the bounds of the current path. They are relative to the canvas
-  mgfx::Rect bounds(mPath->GetBounds(mTarget->GetTransform()));
+  mgfx::Rect bounds(path->GetBounds(mTarget->GetTransform()));
   if ((bounds.width == 0) || (bounds.height == 0) || !bounds.IsFinite()) {
     // The specified region has no pixels.
     error.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
@@ -3199,7 +3206,7 @@ CanvasRenderingContext2D::AddHitRegion(const HitRegionOptions& options, ErrorRes
   RegionInfo info;
   info.mId = options.mId;
   info.mElement = options.mControl;
-  RefPtr<PathBuilder> pathBuilder = mPath->TransformedCopyToBuilder(mTarget->GetTransform());
+  RefPtr<PathBuilder> pathBuilder = path->TransformedCopyToBuilder(mTarget->GetTransform());
   info.mPath = pathBuilder->Finish();
 
   mHitRegionsOptions.InsertElementAt(0, info);
@@ -4129,7 +4136,7 @@ CanvasRenderingContext2D::CachedSurfaceFromElement(Element* aElement)
     res.mCORSUsed = corsmode != imgIRequest::CORS_NONE;
   }
 
-  res.mSize = ThebesIntSize(res.mSourceSurface->GetSize());
+  res.mSize = res.mSourceSurface->GetSize();
   res.mPrincipal = principal.forget();
   res.mIsWriteOnly = false;
   res.mImageRequest = imgRequest.forget();
@@ -4207,6 +4214,13 @@ CanvasRenderingContext2D::DrawImage(const HTMLImageOrCanvasOrVideoElement& image
     if (!video) {
       return;
     }
+
+#ifdef MOZ_EME
+    if (video->ContainsRestrictedContent()) {
+      error.Throw(NS_ERROR_NOT_AVAILABLE);
+      return;
+    }
+#endif
 
     uint16_t readyState;
     if (NS_SUCCEEDED(video->GetReadyState(&readyState)) &&
@@ -4306,7 +4320,7 @@ CanvasRenderingContext2D::DrawImage(const HTMLImageOrCanvasOrVideoElement& image
       return;
     }
 
-    imgSize = gfx::ToIntSize(res.mSize);
+    imgSize = res.mSize;
 
     // Scale sw/sh based on aspect ratio
     if (image.IsHTMLVideoElement()) {
@@ -4326,7 +4340,7 @@ CanvasRenderingContext2D::DrawImage(const HTMLImageOrCanvasOrVideoElement& image
     if (res.mSourceSurface) {
       if (res.mImageRequest) {
         CanvasImageCache::NotifyDrawImage(element, mCanvasElement, res.mImageRequest,
-                                          res.mSourceSurface, ThebesIntSize(imgSize));
+                                          res.mSourceSurface, imgSize);
       }
 
       srcSurf = res.mSourceSurface;
@@ -4450,7 +4464,8 @@ CanvasRenderingContext2D::DrawDirectlyToCanvas(
   // FLAG_CLAMP is added for increased performance, since we never tile here.
   uint32_t modifiedFlags = image.mDrawingFlags | imgIContainer::FLAG_CLAMP;
 
-  SVGImageContext svgContext(scaledImageSize, Nothing(), CurrentState().globalAlpha);
+  CSSIntSize sz(scaledImageSize.width, scaledImageSize.height); // XXX hmm is scaledImageSize really in CSS pixels?
+  SVGImageContext svgContext(sz, Nothing(), CurrentState().globalAlpha);
 
   auto result = image.mImgContainer->
     Draw(context, scaledImageSize,
@@ -5383,9 +5398,9 @@ CanvasPath::CanvasPath(nsISupports* aParent, TemporaryRef<PathBuilder> aPathBuil
 }
 
 JSObject*
-CanvasPath::WrapObject(JSContext* aCx)
+CanvasPath::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return Path2DBinding::Wrap(aCx, this);
+  return Path2DBinding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<CanvasPath>

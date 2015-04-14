@@ -50,6 +50,7 @@ MSG_DEF(JSMSG_BAD_SORT_ARG,            0, JSEXN_TYPEERR, "invalid Array.prototyp
 MSG_DEF(JSMSG_CANT_WATCH,              1, JSEXN_TYPEERR, "can't watch non-native objects of class {0}")
 MSG_DEF(JSMSG_READ_ONLY,               1, JSEXN_TYPEERR, "{0} is read-only")
 MSG_DEF(JSMSG_CANT_DELETE,             1, JSEXN_TYPEERR, "property {0} is non-configurable and can't be deleted")
+MSG_DEF(JSMSG_CANT_TRUNCATE_ARRAY,     0, JSEXN_TYPEERR, "can't delete non-configurable array element")
 MSG_DEF(JSMSG_NOT_FUNCTION,            1, JSEXN_TYPEERR, "{0} is not a function")
 MSG_DEF(JSMSG_NOT_CONSTRUCTOR,         1, JSEXN_TYPEERR, "{0} is not a constructor")
 MSG_DEF(JSMSG_CANT_CONVERT,            1, JSEXN_ERR, "can't convert {0} to an integer")
@@ -81,9 +82,10 @@ MSG_DEF(JSMSG_EMPTY_ARRAY_REDUCE,      0, JSEXN_TYPEERR, "reduce of empty array 
 MSG_DEF(JSMSG_UNEXPECTED_TYPE,         2, JSEXN_TYPEERR, "{0} is {1}")
 MSG_DEF(JSMSG_MISSING_FUN_ARG,         2, JSEXN_TYPEERR, "missing argument {0} when calling function {1}")
 MSG_DEF(JSMSG_NOT_NONNULL_OBJECT,      1, JSEXN_TYPEERR, "{0} is not a non-null object")
+MSG_DEF(JSMSG_SET_NON_OBJECT_RECEIVER, 1, JSEXN_TYPEERR, "can't assign to properties of {0}: not an object")
 MSG_DEF(JSMSG_INVALID_DESCRIPTOR,      0, JSEXN_TYPEERR, "property descriptors must not specify a value or be writable when a getter or setter has been specified")
 MSG_DEF(JSMSG_OBJECT_NOT_EXTENSIBLE,   1, JSEXN_TYPEERR, "{0} is not extensible")
-MSG_DEF(JSMSG_CANT_REDEFINE_PROP,      1, JSEXN_TYPEERR, "can't redefine non-configurable property '{0}'")
+MSG_DEF(JSMSG_CANT_REDEFINE_PROP,      1, JSEXN_TYPEERR, "can't redefine non-configurable property {0}")
 MSG_DEF(JSMSG_CANT_APPEND_TO_ARRAY,    0, JSEXN_TYPEERR, "can't add elements past the end of an array if its length property is unwritable")
 MSG_DEF(JSMSG_CANT_REDEFINE_ARRAY_LENGTH, 0, JSEXN_TYPEERR, "can't redefine array length")
 MSG_DEF(JSMSG_CANT_DEFINE_PAST_ARRAY_LENGTH, 0, JSEXN_TYPEERR, "can't define array index property past the end of an array with non-writable length")
@@ -94,9 +96,12 @@ MSG_DEF(JSMSG_NOT_ITERABLE,            1, JSEXN_TYPEERR, "{0} is not iterable")
 MSG_DEF(JSMSG_ALREADY_HAS_PRAGMA,      2, JSEXN_NONE, "{0} is being assigned a {1}, but already has one")
 MSG_DEF(JSMSG_NEXT_RETURNED_PRIMITIVE, 0, JSEXN_TYPEERR, "iterator.next() returned a non-object value")
 MSG_DEF(JSMSG_WRONG_VALUE,             2, JSEXN_ERR, "expected {0} but found {1}")
-MSG_DEF(JSMSG_SETPROTOTYPEOF_FAIL,     1, JSEXN_TYPEERR, "[[SetPrototypeOf]] failed on {0}")
+MSG_DEF(JSMSG_CANT_SET_PROTO,          0, JSEXN_TYPEERR, "can't set prototype of this object")
+MSG_DEF(JSMSG_CANT_SET_PROTO_OF,       1, JSEXN_TYPEERR, "can't set prototype of {0}")
+MSG_DEF(JSMSG_CANT_SET_PROTO_CYCLE,    0, JSEXN_TYPEERR, "can't set prototype: it would cause a prototype chain cycle")
 MSG_DEF(JSMSG_INVALID_ARG_TYPE,        3, JSEXN_TYPEERR, "Invalid type: {0} can't be a{1} {2}")
 MSG_DEF(JSMSG_TERMINATED,              1, JSEXN_ERR, "Script terminated by timeout at:\n{0}")
+MSG_DEF(JSMSG_PROTO_NOT_OBJORNULL,     1, JSEXN_TYPEERR, "{0}.prototype is not an object or null")
 
 // JSON
 MSG_DEF(JSMSG_JSON_BAD_PARSE,          3, JSEXN_SYNTAXERR, "JSON.parse: {0} at line {1} column {2} of the JSON data")
@@ -200,6 +205,8 @@ MSG_DEF(JSMSG_BAD_PROP_ID,             0, JSEXN_SYNTAXERR, "invalid property id"
 MSG_DEF(JSMSG_BAD_RETURN_OR_YIELD,     1, JSEXN_SYNTAXERR, "{0} not in function")
 MSG_DEF(JSMSG_BAD_STRICT_ASSIGN,       1, JSEXN_SYNTAXERR, "can't assign to {0} in strict mode")
 MSG_DEF(JSMSG_BAD_SWITCH,              0, JSEXN_SYNTAXERR, "invalid switch statement")
+MSG_DEF(JSMSG_BAD_SUPER,               0, JSEXN_SYNTAXERR, "invalid use of keyword 'super'")
+MSG_DEF(JSMSG_BAD_SUPERPROP,           1, JSEXN_SYNTAXERR, "use of super {0} accesses only valid within methods or eval code within methods")
 MSG_DEF(JSMSG_BRACKET_AFTER_ARRAY_COMPREHENSION, 0, JSEXN_SYNTAXERR, "missing ] after array comprehension")
 MSG_DEF(JSMSG_BRACKET_AFTER_LIST,      0, JSEXN_SYNTAXERR, "missing ] after element list")
 MSG_DEF(JSMSG_BRACKET_IN_INDEX,        0, JSEXN_SYNTAXERR, "missing ] in index expression")
@@ -228,6 +235,7 @@ MSG_DEF(JSMSG_CURLY_IN_COMPOUND,       0, JSEXN_SYNTAXERR, "missing } in compoun
 MSG_DEF(JSMSG_DECLARATION_AFTER_EXPORT,0, JSEXN_SYNTAXERR, "missing declaration after 'export' keyword")
 MSG_DEF(JSMSG_DECLARATION_AFTER_IMPORT,0, JSEXN_SYNTAXERR, "missing declaration after 'import' keyword")
 MSG_DEF(JSMSG_DEPRECATED_DELETE_OPERAND, 0, JSEXN_SYNTAXERR, "applying the 'delete' operator to an unqualified name is deprecated")
+MSG_DEF(JSMSG_DEPRECATED_FLAGS_ARG,    0, JSEXN_NONE, "flags argument of String.prototype.{search,match,replace} is deprecated")
 MSG_DEF(JSMSG_DEPRECATED_LET_BLOCK,      0, JSEXN_NONE, "JavaScript 1.7's let blocks are deprecated")
 MSG_DEF(JSMSG_DEPRECATED_FOR_EACH,     0, JSEXN_NONE, "JavaScript 1.6's for-each-in loops are deprecated; consider using ES6 for-of instead")
 MSG_DEF(JSMSG_DEPRECATED_LET_EXPRESSION, 0, JSEXN_NONE, "JavaScript 1.7's let expressions are deprecated")
@@ -299,6 +307,7 @@ MSG_DEF(JSMSG_SEMI_AFTER_FOR_COND,     0, JSEXN_SYNTAXERR, "missing ; after for-
 MSG_DEF(JSMSG_SEMI_AFTER_FOR_INIT,     0, JSEXN_SYNTAXERR, "missing ; after for-loop initializer")
 MSG_DEF(JSMSG_SEMI_BEFORE_STMNT,       0, JSEXN_SYNTAXERR, "missing ; before statement")
 MSG_DEF(JSMSG_SOURCE_TOO_LONG,         0, JSEXN_RANGEERR, "source is too long")
+MSG_DEF(JSMSG_STMT_AFTER_SEMI_LESS,    0, JSEXN_SYNTAXERR, "unreachable expression after semicolon-less return statement")
 MSG_DEF(JSMSG_STRICT_CODE_LET_EXPR_STMT, 0, JSEXN_ERR, "strict mode code may not contain unparenthesized let expression statements")
 MSG_DEF(JSMSG_STRICT_CODE_WITH,        0, JSEXN_SYNTAXERR, "strict mode code may not contain 'with' statements")
 MSG_DEF(JSMSG_STRICT_FUNCTION_STATEMENT, 0, JSEXN_SYNTAXERR, "in strict mode code, functions may be declared only at top level or immediately within another function")
@@ -325,6 +334,8 @@ MSG_DEF(JSMSG_WHILE_AFTER_DO,          0, JSEXN_SYNTAXERR, "missing while after 
 MSG_DEF(JSMSG_YIELD_IN_ARROW,          0, JSEXN_SYNTAXERR, "arrow function may not contain yield")
 MSG_DEF(JSMSG_YIELD_IN_DEFAULT,        0, JSEXN_SYNTAXERR, "yield in default expression")
 MSG_DEF(JSMSG_BAD_COLUMN_NUMBER,       0, JSEXN_RANGEERR, "column number out of range")
+MSG_DEF(JSMSG_COMPUTED_NAME_IN_PATTERN,0, JSEXN_SYNTAXERR, "computed property names aren't supported in this destructuring declaration")
+MSG_DEF(JSMSG_DEFAULT_IN_PATTERN,      0, JSEXN_SYNTAXERR, "destructuring defaults aren't supported in this destructuring declaration")
 
 // asm.js
 MSG_DEF(JSMSG_USE_ASM_TYPE_FAIL,       1, JSEXN_TYPEERR, "asm.js type error: {0}")
@@ -337,6 +348,10 @@ MSG_DEF(JSMSG_CANT_CHANGE_EXTENSIBILITY, 0, JSEXN_TYPEERR, "can't change object'
 MSG_DEF(JSMSG_CANT_DEFINE_INVALID,     0, JSEXN_TYPEERR, "proxy can't define an incompatible property descriptor")
 MSG_DEF(JSMSG_CANT_DEFINE_NEW,         0, JSEXN_TYPEERR, "proxy can't define a new property on a non-extensible object")
 MSG_DEF(JSMSG_CANT_DEFINE_NE_AS_NC,    0, JSEXN_TYPEERR, "proxy can't define a non-existent property as non-configurable")
+MSG_DEF(JSMSG_PROXY_DEFINE_RETURNED_FALSE, 1, JSEXN_TYPEERR, "proxy defineProperty handler returned false for property '{0}'")
+MSG_DEF(JSMSG_PROXY_DELETE_RETURNED_FALSE, 1, JSEXN_TYPEERR, "can't delete property '{0}': proxy deleteProperty handler returned false")
+MSG_DEF(JSMSG_PROXY_PREVENTEXTENSIONS_RETURNED_FALSE, 0, JSEXN_TYPEERR, "proxy preventExtensions handler returned false")
+MSG_DEF(JSMSG_PROXY_SET_RETURNED_FALSE, 1, JSEXN_TYPEERR, "proxy set handler returned false for property '{0}'")
 MSG_DEF(JSMSG_CANT_REPORT_AS_NON_EXTENSIBLE, 0, JSEXN_TYPEERR, "proxy can't report an extensible object as non-extensible")
 MSG_DEF(JSMSG_CANT_REPORT_C_AS_NC,     0, JSEXN_TYPEERR, "proxy can't report existing configurable property as non-configurable")
 MSG_DEF(JSMSG_CANT_REPORT_E_AS_NE,     0, JSEXN_TYPEERR, "proxy can't report an existing own property as non-existent on a non-extensible object")
@@ -356,6 +371,7 @@ MSG_DEF(JSMSG_PROXY_CONSTRUCT_OBJECT,  0, JSEXN_TYPEERR, "proxy [[Construct]] mu
 MSG_DEF(JSMSG_PROXY_EXTENSIBILITY,     0, JSEXN_TYPEERR, "proxy must report same extensiblitity as target")
 MSG_DEF(JSMSG_PROXY_GETOWN_OBJORUNDEF, 0, JSEXN_TYPEERR, "proxy [[GetOwnProperty]] must return an object or undefined")
 MSG_DEF(JSMSG_PROXY_REVOKED,           0, JSEXN_TYPEERR, "illegal operation attempted on a revoked proxy")
+MSG_DEF(JSMSG_PROXY_ARG_REVOKED,       1, JSEXN_TYPEERR, "argument {0} cannot be a revoked proxy")
 
 // Structured cloning
 MSG_DEF(JSMSG_SC_BAD_CLONE_VERSION,    0, JSEXN_ERR, "unsupported structured clone version")
@@ -393,6 +409,9 @@ MSG_DEF(JSMSG_QUERY_INNERMOST_WITHOUT_LINE_URL, 0, JSEXN_TYPEERR, "findScripts q
 MSG_DEF(JSMSG_QUERY_LINE_WITHOUT_URL, 0, JSEXN_TYPEERR, "findScripts query object has 'line' property, but no 'displayURL', 'url', or 'source' property")
 MSG_DEF(JSMSG_DEBUG_CANT_SET_OPT_ENV, 1, JSEXN_REFERENCEERR, "can't set `{0}' in an optimized-out environment")
 MSG_DEF(JSMSG_DEBUG_INVISIBLE_COMPARTMENT, 0, JSEXN_TYPEERR, "object in compartment marked as invisible to Debugger")
+
+// Tracelogger
+MSG_DEF(JSMSG_TRACELOGGER_ENABLE_FAIL, 1, JSEXN_ERR, "enabling tracelogger failed: {0}")
 
 // Intl
 MSG_DEF(JSMSG_DATE_NOT_FINITE,         0, JSEXN_RANGEERR, "date value is not finite in DateTimeFormat.format()")
@@ -463,3 +482,13 @@ MSG_DEF(JSMSG_SYMBOL_TO_NUMBER,        0, JSEXN_TYPEERR, "can't convert symbol t
 MSG_DEF(JSMSG_ATOMICS_BAD_ARRAY,         0, JSEXN_TYPEERR, "invalid array type for the operation")
 MSG_DEF(JSMSG_ATOMICS_TOO_LONG,          0, JSEXN_RANGEERR, "timeout value too large")
 MSG_DEF(JSMSG_ATOMICS_WAIT_NOT_ALLOWED,  0, JSEXN_ERR, "waiting is not allowed on this thread")
+
+// XPConnect wrappers and DOM bindings
+MSG_DEF(JSMSG_CANT_SET_INTERPOSED,      1, JSEXN_TYPEERR, "unable to set interposed data property '{0}'")
+MSG_DEF(JSMSG_CANT_DEFINE_WINDOW_ELEMENT, 0, JSEXN_TYPEERR, "can't define elements on a Window object")
+MSG_DEF(JSMSG_CANT_DELETE_WINDOW_ELEMENT, 0, JSEXN_TYPEERR, "can't delete elements from a Window object")
+MSG_DEF(JSMSG_CANT_DELETE_WINDOW_NAMED_PROPERTY, 1, JSEXN_TYPEERR, "can't delete property {0} from window's named properties object")
+MSG_DEF(JSMSG_CANT_PREVENT_EXTENSIONS,  0, JSEXN_TYPEERR, "can't prevent extensions on this proxy object")
+
+// Super
+MSG_DEF(JSMSG_CANT_DELETE_SUPER, 0, JSEXN_REFERENCEERR, "invalid delete involving 'super'")

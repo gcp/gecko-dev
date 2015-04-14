@@ -115,7 +115,7 @@ private:
     mozilla::TimeStamp mRunTime;
 };
 
-class AndroidBridge MOZ_FINAL
+class AndroidBridge final
 {
 public:
     enum {
@@ -364,7 +364,7 @@ protected:
     ~AndroidBridge();
 
     void InitStubs(JNIEnv *jEnv);
-    bool Init(JNIEnv *jEnv, jni::Object::Param clsLoader);
+    void Init(JNIEnv *jEnv, jni::Object::Param clsLoader);
 
     bool mOpenedGraphicsLibraries;
     void OpenGraphicsLibraries();
@@ -593,7 +593,7 @@ private:
 { 0x0FE2321D, 0xEBD9, 0x467D, \
     { 0xA7, 0x43, 0x03, 0xA6, 0x8D, 0x40, 0x59, 0x9E } }
 
-class nsAndroidBridge MOZ_FINAL : public nsIAndroidBridge
+class nsAndroidBridge final : public nsIAndroidBridge
 {
 public:
   NS_DECL_ISUPPORTS

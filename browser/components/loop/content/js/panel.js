@@ -40,6 +40,18 @@ loop.panel = (function(_, mozL10n) {
       if (tabChange) {
         this.props.mozLoop.notifyUITour("Loop:PanelTabChanged", nextState.selectedTab);
       }
+
+      if (!tabChange && nextProps.buttonsHidden) {
+        if (nextProps.buttonsHidden.length !== this.props.buttonsHidden.length) {
+          tabChange = true;
+        } else {
+          for (var i = 0, l = nextProps.buttonsHidden.length; i < l && !tabChange; ++i) {
+            if (this.props.buttonsHidden.indexOf(nextProps.buttonsHidden[i]) === -1) {
+              tabChange = true;
+            }
+          }
+        }
+      }
       return tabChange;
     },
 
@@ -155,8 +167,7 @@ loop.panel = (function(_, mozL10n) {
             React.createElement("span", null, availabilityText), 
             React.createElement("i", {className: availabilityStatus})
           ), 
-          React.createElement("ul", {className: availabilityDropdown, 
-              onMouseLeave: this.hideDropdownMenu}, 
+          React.createElement("ul", {className: availabilityDropdown}, 
             React.createElement("li", {onClick: this.changeAvailability("available"), 
                 className: "dropdown-menu-item dnd-make-available"}, 
               React.createElement("i", {className: "status status-available"}), 
@@ -247,11 +258,13 @@ loop.panel = (function(_, mozL10n) {
             )
           ),
         });
-        return React.createElement("div", {id: "powered-by-wrapper"}, 
-          this.renderPartnerLogo(), 
-          React.createElement("p", {className: "terms-service", 
-             dangerouslySetInnerHTML: {__html: tosHTML}})
-         );
+        return (
+          React.createElement("div", {id: "powered-by-wrapper"}, 
+            this.renderPartnerLogo(), 
+            React.createElement("p", {className: "terms-service", 
+               dangerouslySetInnerHTML: {__html: tosHTML}})
+           )
+        );
       } else {
         return React.createElement("div", null);
       }
@@ -333,8 +346,7 @@ loop.panel = (function(_, mozL10n) {
         React.createElement("div", {className: "settings-menu dropdown"}, 
           React.createElement("a", {className: "button-settings", onClick: this.showDropdownMenu, 
              title: mozL10n.get("settings_menu_button_tooltip")}), 
-          React.createElement("ul", {className: cx({"dropdown-menu": true, hide: !this.state.showMenu}), 
-              onMouseLeave: this.hideDropdownMenu}, 
+          React.createElement("ul", {className: cx({"dropdown-menu": true, hide: !this.state.showMenu})}, 
             React.createElement(SettingsDropdownEntry, {label: mozL10n.get("settings_menu_item_settings"), 
                                    onClick: this.handleClickSettingsEntry, 
                                    displayed: false, 
@@ -546,7 +558,6 @@ loop.panel = (function(_, mozL10n) {
     },
 
     render: function() {
-      var room = this.props.room;
       var roomClasses = React.addons.classSet({
         "room-entry": true,
         "room-active": this._isActive()
@@ -561,15 +572,15 @@ loop.panel = (function(_, mozL10n) {
              onClick: this.handleClickEntry}, 
           React.createElement("h2", null, 
             React.createElement("span", {className: "room-notification"}), 
-            React.createElement(EditInPlace, {text: room.roomName, onChange: this.renameRoom}), 
+            React.createElement(EditInPlace, {text: this.props.room.decryptedContext.roomName, 
+                         onChange: this.renameRoom}), 
             React.createElement("button", {className: copyButtonClasses, 
               title: mozL10n.get("rooms_list_copy_url_tooltip"), 
               onClick: this.handleCopyButtonClick}), 
             React.createElement("button", {className: "delete-link", 
               title: mozL10n.get("rooms_list_delete_tooltip"), 
               onClick: this.handleDeleteButtonClick})
-          ), 
-          React.createElement("p", null, React.createElement("a", {className: "room-url-link", href: "#"}, room.roomUrl))
+          )
         )
       );
     }
@@ -582,6 +593,7 @@ loop.panel = (function(_, mozL10n) {
     mixins: [Backbone.Events, sharedMixins.WindowCloseMixin],
 
     propTypes: {
+      mozLoop: React.PropTypes.object.isRequired,
       store: React.PropTypes.instanceOf(loop.store.RoomStore).isRequired,
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
       userDisplayName: React.PropTypes.string.isRequired  // for room creation
@@ -625,17 +637,6 @@ loop.panel = (function(_, mozL10n) {
       return mozL10n.get("rooms_list_current_conversations", {num: numRooms});
     },
 
-    _hasPendingOperation: function() {
-      return this.state.pendingCreation || this.state.pendingInitialRetrieval;
-    },
-
-    handleCreateButtonClick: function() {
-      this.props.dispatcher.dispatch(new sharedActions.CreateRoom({
-        nameTemplate: mozL10n.get("rooms_default_room_name_template"),
-        roomOwner: this.props.userDisplayName
-      }));
-    },
-
     render: function() {
       if (this.state.error) {
         // XXX Better end user reporting of errors.
@@ -647,19 +648,107 @@ loop.panel = (function(_, mozL10n) {
           React.createElement("h1", null, this._getListHeading()), 
           React.createElement("div", {className: "room-list"}, 
             this.state.rooms.map(function(room, i) {
-              return React.createElement(RoomEntry, {
-                key: room.roomToken, 
-                dispatcher: this.props.dispatcher, 
-                room: room}
+              return (
+                React.createElement(RoomEntry, {
+                  key: room.roomToken, 
+                  dispatcher: this.props.dispatcher, 
+                  room: room}
+                )
               );
             }, this)
           ), 
-          React.createElement("p", null, 
-            React.createElement("button", {className: "btn btn-info new-room-button", 
-                    onClick: this.handleCreateButtonClick, 
-                    disabled: this._hasPendingOperation()}, 
-              mozL10n.get("rooms_new_room_button_label")
-            )
+          React.createElement(NewRoomView, {dispatcher: this.props.dispatcher, 
+            mozLoop: this.props.mozLoop, 
+            pendingOperation: this.state.pendingCreation ||
+              this.state.pendingInitialRetrieval, 
+            userDisplayName: this.props.userDisplayName})
+        )
+      );
+    }
+  });
+
+  /**
+   * Used for creating a new room with or without context.
+   */
+  var NewRoomView = React.createClass({displayName: "NewRoomView",
+    propTypes: {
+      dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
+      mozLoop: React.PropTypes.object.isRequired,
+      pendingOperation: React.PropTypes.bool.isRequired,
+      userDisplayName: React.PropTypes.string.isRequired
+    },
+
+    mixins: [sharedMixins.DocumentVisibilityMixin],
+
+    getInitialState: function() {
+      return {
+        checked: false,
+        previewImage: "",
+        description: "",
+        url: ""
+      };
+    },
+
+    onDocumentVisible: function() {
+      this.props.mozLoop.getSelectedTabMetadata(function callback(metadata) {
+        var previewImage = metadata.previews.length ? metadata.previews[0] : "";
+        var description = metadata.description || metadata.title;
+        var url = metadata.url;
+        this.setState({previewImage: previewImage,
+                       description: description,
+                       url: url});
+      }.bind(this));
+    },
+
+    onDocumentHidden: function() {
+      this.setState({previewImage: "",
+                     description: "",
+                     url: ""});
+    },
+
+    onCheckboxChange: function(event) {
+      this.setState({checked: event.target.checked});
+    },
+
+    handleCreateButtonClick: function() {
+      var createRoomAction = new sharedActions.CreateRoom({
+        nameTemplate: mozL10n.get("rooms_default_room_name_template"),
+        roomOwner: this.props.userDisplayName
+      });
+
+      if (this.state.checked) {
+        createRoomAction.urls = [{
+          location: this.state.url,
+          description: this.state.description,
+          thumbnail: this.state.previewImage
+        }];
+      }
+      this.props.dispatcher.dispatch(createRoomAction);
+    },
+
+    render: function() {
+      var contextClasses = React.addons.classSet({
+        context: true,
+        hide: !this.state.url ||
+          !this.props.mozLoop.getLoopPref("contextInConverations.enabled")
+      });
+
+      return (
+        React.createElement("div", {className: "new-room-view"}, 
+          React.createElement("div", {className: contextClasses}, 
+            React.createElement("label", {className: "context-enabled"}, 
+              React.createElement("input", {className: "context-checkbox", 
+                     type: "checkbox", onChange: this.onCheckboxChange}), 
+              mozL10n.get("context_offer_label")
+            ), 
+            React.createElement("img", {className: "context-preview", src: this.state.previewImage}), 
+            React.createElement("span", {className: "context-description"}, this.state.description), 
+            React.createElement("span", {className: "context-url"}, this.state.url)
+          ), 
+          React.createElement("button", {className: "btn btn-info new-room-button", 
+                  onClick: this.handleCreateButtonClick, 
+                  disabled: this.props.pendingOperation}, 
+            mozL10n.get("rooms_new_room_button_label")
           )
         )
       );
@@ -807,7 +896,8 @@ loop.panel = (function(_, mozL10n) {
             React.createElement(Tab, {name: "rooms"}, 
               React.createElement(RoomList, {dispatcher: this.props.dispatcher, 
                         store: this.props.roomStore, 
-                        userDisplayName: this._getUserDisplayName()}), 
+                        userDisplayName: this._getUserDisplayName(), 
+                        mozLoop: this.props.mozLoop}), 
               React.createElement(ToSView, null)
             ), 
             React.createElement(Tab, {name: "contacts"}, 
@@ -879,6 +969,7 @@ loop.panel = (function(_, mozL10n) {
     AuthLink: AuthLink,
     AvailabilityDropdown: AvailabilityDropdown,
     GettingStartedView: GettingStartedView,
+    NewRoomView: NewRoomView,
     PanelView: PanelView,
     RoomEntry: RoomEntry,
     RoomList: RoomList,

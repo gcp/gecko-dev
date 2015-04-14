@@ -88,7 +88,7 @@ class MessageChannel : HasResultCodes
 
     void SetAbortOnError(bool abort)
     {
-        mAbortOnError = true;
+        mAbortOnError = abort;
     }
 
     // Misc. behavioral traits consumers can request for this channel
@@ -134,6 +134,14 @@ class MessageChannel : HasResultCodes
     bool IsOnCxxStack() const {
         return !mCxxStackFrames.empty();
     }
+
+    /**
+     * This function is used by hang annotation code to determine which IPDL
+     * actor is highest in the call stack at the time of the hang. It should
+     * be called from the main thread when a sync or intr message is about to
+     * be sent.
+     */
+    int32_t GetTopmostMessageRoutingId() const;
 
     void FlushPendingInterruptQueue();
 
@@ -219,6 +227,7 @@ class MessageChannel : HasResultCodes
     bool InterruptEventOccurred();
     bool HasPendingEvents();
 
+    void ProcessPendingRequests();
     bool ProcessPendingRequest(const Message &aUrgent);
 
     void MaybeUndeferIncall();
@@ -405,8 +414,8 @@ class MessageChannel : HasResultCodes
     // Can be run on either thread
     void AssertWorkerThread() const
     {
-        MOZ_ASSERT(mWorkerLoopID == MessageLoop::current()->id(),
-                   "not on worker thread!");
+        MOZ_RELEASE_ASSERT(mWorkerLoopID == MessageLoop::current()->id(),
+                           "not on worker thread!");
     }
 
     // The "link" thread is either the I/O thread (ProcessLink) or the
@@ -414,8 +423,8 @@ class MessageChannel : HasResultCodes
     // NOT our worker thread.
     void AssertLinkThread() const
     {
-        MOZ_ASSERT(mWorkerLoopID != MessageLoop::current()->id(),
-                   "on worker thread but should not be!");
+        MOZ_RELEASE_ASSERT(mWorkerLoopID != MessageLoop::current()->id(),
+                           "on worker thread but should not be!");
     }
 
   private:
@@ -451,7 +460,7 @@ class MessageChannel : HasResultCodes
         explicit DequeueTask(RefCountedTask* aTask)
           : mTask(aTask)
         { }
-        void Run() MOZ_OVERRIDE { mTask->Run(); }
+        void Run() override { mTask->Run(); }
 
       private:
         nsRefPtr<RefCountedTask> mTask;

@@ -721,8 +721,9 @@ html, .fx-embedded, #main,
 
   .standalone .remote_wrapper {
     position: relative;
-    width: 100%;
+    width: calc(100% - 10px);
     height: 100%;
+    margin-left: 10px;
   }
 
   .standalone {
@@ -901,6 +902,63 @@ html, .fx-embedded, #main,
   bottom: 10px;
 }
 
+.share-service-dropdown {
+  color: #000;
+  text-align: start;
+  bottom: auto;
+  top: 0;
+}
+
+.share-service-dropdown.share-button-unavailable {
+  width: 230px;
+  padding: 8px;
+}
+
+.share-service-dropdown > .dropdown-menu-item > .icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+}
+
+.share-service-dropdown .share-panel-header {
+  background-image: url("../img/icons-16x16.svg#share-darkgrey");
+  background-size: 3em 3em;
+  background-repeat: no-repeat;
+  min-height: 3em;
+  font-weight: bold;
+  margin-bottom: 1em;
+  padding-left: 4.5em;
+}
+
+body[dir=rtl] .share-service-dropdown .share-panel-header {
+  background-position: top right;
+  padding-left: 0;
+  padding-right: 4.5em;
+}
+
+.share-service-dropdown .btn-toolbar-add {
+  padding: 4px 2px;
+  border-radius: 2px;
+  margin-top: 1em;
+  width: 100%;
+}
+
+.dropdown-menu-item > .icon-add-share-service {
+  background-image: url("../img/icons-16x16.svg#add");
+  background-repeat: no-repeat;
+  background-size: 12px 12px;
+  width: 12px;
+  height: 12px;
+}
+
+.dropdown-menu-item:hover > .icon-add-share-service {
+  background-image: url("../img/icons-16x16.svg#add-hover");
+}
+
+.dropdown-menu-item:hover:active > .icon-add-share-service {
+  background-image: url("../img/icons-16x16.svg#add-active");
+}
+
 /* Standalone rooms */
 
 .standalone .room-conversation-wrapper {
@@ -918,7 +976,7 @@ html, .fx-embedded, #main,
   /* `top` is chosen to vertically position the area near the center
      of the media element. */
   top: calc(50% - 140px);
-  left: 25%;
+  left: calc(25% + 62.5px + 10px);
   z-index: 1000;
   /* `width` here is specified by the design spec. */
   width: 250px;
@@ -971,11 +1029,14 @@ html, .fx-embedded, #main,
   max-width: 400px;
 }
 
-.standalone .room-conversation h2.room-name {
+.standalone .room-conversation h2.room-name,
+.standalone .room-conversation h2.room-info-failure {
   position: absolute;
   display: inline-block;
   top: 0;
-  right: 0;
+  right: 10px;
+  /* 20px is 10px for left and right margins. */
+  width: calc(25% - 20px);
   color: #fff;
   z-index: 2000000;
   font-size: 1.2em;
@@ -988,7 +1049,7 @@ html, .fx-embedded, #main,
 
 .standalone .room-conversation .video_wrapper.remote_wrapper {
   background-color: #4e4e4e;
-  width: 75%;
+  width: calc(75% - 10px); /* Take the left margin into account. */
 }
 
 .standalone .room-conversation .conversation-toolbar {

@@ -77,9 +77,9 @@ WMFAudioMFTManager::WMFAudioMFTManager(
 {
   MOZ_COUNT_CTOR(WMFAudioMFTManager);
 
-  if (!strcmp(aConfig.mime_type, "audio/mpeg")) {
+  if (aConfig.mime_type.EqualsLiteral("audio/mpeg")) {
     mStreamType = MP3;
-  } else if (!strcmp(aConfig.mime_type, "audio/mp4a-latm")) {
+  } else if (aConfig.mime_type.EqualsLiteral("audio/mp4a-latm")) {
     mStreamType = AAC;
     AACAudioSpecificConfigToUserData(aConfig.aac_profile,
                                      aConfig.audio_specific_config->Elements(),
@@ -177,11 +177,11 @@ WMFAudioMFTManager::Init()
 }
 
 HRESULT
-WMFAudioMFTManager::Input(mp4_demuxer::MP4Sample* aSample)
+WMFAudioMFTManager::Input(MediaRawData* aSample)
 {
-  const uint8_t* data = reinterpret_cast<const uint8_t*>(aSample->data);
-  uint32_t length = aSample->size;
-  return mDecoder->Input(data, length, aSample->composition_timestamp);
+  return mDecoder->Input(aSample->mData,
+                         uint32_t(aSample->mSize),
+                         aSample->mTime);
 }
 
 HRESULT
@@ -251,7 +251,6 @@ WMFAudioMFTManager::Output(int64_t aStreamOffset,
   // reset the frame counters, and capture the timestamp. Future timestamps
   // will be offset from this block's timestamp.
   UINT32 discontinuity = false;
-  int32_t numFramesToStrip = 0;
   sample->GetUINT32(MFSampleExtension_Discontinuity, &discontinuity);
   if (mMustRecaptureAudioPosition || discontinuity) {
     // Update the output type, in case this segment has a different
@@ -267,21 +266,11 @@ WMFAudioMFTManager::Output(int64_t aStreamOffset,
     NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
     hr = HNsToFrames(timestampHns, mAudioRate, &mAudioFrameOffset);
     NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
-    if (mAudioFrameOffset < 0) {
-      // First sample has a negative timestamp. Strip off the samples until
-      // we reach positive territory.
-      numFramesToStrip = -mAudioFrameOffset;
-      mAudioFrameOffset = 0;
-    }
     mMustRecaptureAudioPosition = false;
   }
-  MOZ_ASSERT(numFramesToStrip >= 0);
   // We can assume PCM 16 output.
   int32_t numSamples = currentLength / 2;
   int32_t numFrames = numSamples / mAudioChannels;
-  int32_t offset = std::min<int32_t>(numFramesToStrip, numFrames);
-  numFrames -= offset;
-  numSamples -= offset * mAudioChannels;
   MOZ_ASSERT(numFrames >= 0);
   MOZ_ASSERT(numSamples >= 0);
   if (numFrames == 0) {
@@ -292,10 +281,7 @@ WMFAudioMFTManager::Output(int64_t aStreamOffset,
 
   nsAutoArrayPtr<AudioDataValue> audioData(new AudioDataValue[numSamples]);
 
-  int16_t* pcm = ((int16_t*)data) + (offset * mAudioChannels);
-  MOZ_ASSERT(pcm >= (int16_t*)data);
-  MOZ_ASSERT(pcm <= (int16_t*)(data + currentLength));
-  MOZ_ASSERT(pcm+numSamples <= (int16_t*)(data + currentLength));
+  int16_t* pcm = (int16_t*)data;
   for (int32_t i = 0; i < numSamples; ++i) {
     audioData[i] = AudioSampleToFloat(pcm[i]);
   }

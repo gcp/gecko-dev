@@ -181,7 +181,6 @@ BrowserElementParent.prototype = {
       "hello": this._recvHello,
       "loadstart": this._fireProfiledEventFromMsg,
       "loadend": this._fireProfiledEventFromMsg,
-      "loadprogresschanged": this._fireEventFromMsg,
       "close": this._fireEventFromMsg,
       "error": this._fireEventFromMsg,
       "firstpaint": this._fireProfiledEventFromMsg,
@@ -215,7 +214,8 @@ BrowserElementParent.prototype = {
       "metachange": this._fireEventFromMsg,
       "resize": this._fireEventFromMsg,
       "activitydone": this._fireEventFromMsg,
-      "scroll": this._fireEventFromMsg
+      "scroll": this._fireEventFromMsg,
+      "opentab": this._fireEventFromMsg
     };
 
     this._mm.addMessageListener('browser-element-api:call', function(aMsg) {
@@ -273,7 +273,8 @@ BrowserElementParent.prototype = {
     /* username and password */
     let detail = {
       host:     authDetail.host,
-      realm:    authDetail.realm
+      realm:    authDetail.realm,
+      isProxy:  authDetail.isProxy
     };
 
     evt = this._createEvent('usernameandpasswordrequired', detail,

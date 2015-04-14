@@ -76,7 +76,7 @@ NS_IMPL_ISUPPORTS(SpeakerManagerService, nsIObserver)
 void
 SpeakerManagerService::ForceSpeaker(bool aEnable, uint64_t aChildId)
 {
-  TuruOnSpeaker(aEnable);
+  TurnOnSpeaker(aEnable);
   if (aEnable) {
     mSpeakerStatusSet.Put(aChildId);
   }
@@ -88,21 +88,26 @@ void
 SpeakerManagerService::ForceSpeaker(bool aEnable, bool aVisible)
 {
   // b2g main process without oop
-  TuruOnSpeaker(aEnable && aVisible);
+  TurnOnSpeaker(aEnable && aVisible);
   mVisible = aVisible;
   mOrgSpeakerStatus = aEnable;
   Notify();
 }
 
 void
-SpeakerManagerService::TuruOnSpeaker(bool aOn)
+SpeakerManagerService::TurnOnSpeaker(bool aOn)
 {
   nsCOMPtr<nsIAudioManager> audioManager = do_GetService(NS_AUDIOMANAGER_CONTRACTID);
   NS_ENSURE_TRUE_VOID(audioManager);
+  int32_t phoneState;
+  audioManager->GetPhoneState(&phoneState);
+  int32_t forceuse = (phoneState == nsIAudioManager::PHONE_STATE_IN_CALL ||
+                      phoneState == nsIAudioManager::PHONE_STATE_IN_COMMUNICATION)
+                        ? nsIAudioManager::USE_COMMUNICATION : nsIAudioManager::USE_MEDIA;
   if (aOn) {
-    audioManager->SetForceForUse(nsIAudioManager::USE_MEDIA, nsIAudioManager::FORCE_SPEAKER);
+    audioManager->SetForceForUse(forceuse, nsIAudioManager::FORCE_SPEAKER);
   } else {
-    audioManager->SetForceForUse(nsIAudioManager::USE_MEDIA, nsIAudioManager::FORCE_NONE);
+    audioManager->SetForceForUse(forceuse, nsIAudioManager::FORCE_NONE);
   }
 }
 
@@ -146,8 +151,9 @@ SpeakerManagerService::SetAudioChannelActive(bool aIsActive)
 }
 
 NS_IMETHODIMP
-SpeakerManagerService::Observe(nsISupports* aSubject, const char* 
-                               aTopic, const char16_t* aData)
+SpeakerManagerService::Observe(nsISupports* aSubject,
+                               const char* aTopic,
+                               const char16_t* aData)
 {
   if (!strcmp(aTopic, "ipc:content-shutdown")) {
     nsCOMPtr<nsIPropertyBag2> props = do_QueryInterface(aSubject);
@@ -163,11 +169,11 @@ SpeakerManagerService::Observe(nsISupports* aSubject, const char*
         // If the audio has paused by audiochannel,
         // the enable flag should be false and don't need to handle.
         if (mSpeakerStatusSet.Contains(childID)) {
-          TuruOnSpeaker(false);
+          TurnOnSpeaker(false);
           mSpeakerStatusSet.Remove(childID);
         }
         if (mOrgSpeakerStatus) {
-          TuruOnSpeaker(!mOrgSpeakerStatus);
+          TurnOnSpeaker(!mOrgSpeakerStatus);
           mOrgSpeakerStatus = false;
         }
     } else {

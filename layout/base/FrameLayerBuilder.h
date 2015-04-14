@@ -86,16 +86,27 @@ struct ContainerLayerParameters {
     , mDisableSubpixelAntialiasingInDescendants(aParent.mDisableSubpixelAntialiasingInDescendants)
     , mInLowPrecisionDisplayPort(aParent.mInLowPrecisionDisplayPort)
   {}
+
   float mXScale, mYScale;
+
+  LayoutDeviceToLayerScale2D Scale() const {
+    return LayoutDeviceToLayerScale2D(mXScale, mYScale);
+  }
+
   /**
    * If non-null, the rectangle in which BuildContainerLayerFor stores the
    * visible rect of the layer, in the coordinate system of the created layer.
    */
   nsIntRect* mLayerContentsVisibleRect;
+
   /**
    * An offset to apply to all child layers created.
    */
   nsIntPoint mOffset;
+
+  LayerIntPoint Offset() const {
+    return LayerIntPoint::FromUntyped(mOffset);
+  }
 
   nscolor mBackgroundColor;
   bool mInTransformedSubtree;
@@ -330,7 +341,6 @@ public:
   void AddPaintedDisplayItem(PaintedLayerData* aLayer,
                             nsDisplayItem* aItem,
                             const DisplayItemClip& aClip,
-                            const nsIntRect& aItemVisibleRect,
                             ContainerState& aContainerState,
                             LayerState aLayerState,
                             const nsPoint& aTopLeft);
@@ -347,6 +357,14 @@ public:
   void ClearCachedGeometry(nsDisplayItem* aItem);
 
   static Layer* GetDebugOldLayerFor(nsIFrame* aFrame, uint32_t aDisplayItemKey);
+
+  /**
+   * Return the layer that all display items of aFrame were assigned to in the
+   * last paint, or nullptr if there was no single layer assigned to all of the
+   * frame's display items (i.e. zero, or more than one).
+   * This function is for testing purposes and not performance sensitive.
+   */
+  static Layer* GetDebugSingleOldLayerForFrame(nsIFrame* aFrame);
 
   /**
    * Destroy any stored LayerManagerDataProperty and the associated data for
@@ -416,7 +434,7 @@ public:
   /**
    * Retained data for a display item.
    */
-  class DisplayItemData MOZ_FINAL {
+  class DisplayItemData final {
   public:
     friend class FrameLayerBuilder;
 

@@ -24,6 +24,7 @@ namespace jit {
     _(SimdInsertElement)                                                    \
     _(SimdSignMask)                                                         \
     _(SimdSwizzle)                                                          \
+    _(SimdGeneralShuffle)                                                   \
     _(SimdShuffle)                                                          \
     _(SimdUnaryArith)                                                       \
     _(SimdBinaryComp)                                                       \
@@ -65,7 +66,9 @@ namespace jit {
     _(ArraySplice)                                                          \
     _(Bail)                                                                 \
     _(Unreachable)                                                          \
+    _(EncodeSnapshot)                                                       \
     _(AssertFloat32)                                                        \
+    _(AssertRecoveredOnBailout)                                             \
     _(GetDynamicName)                                                       \
     _(FilterArgumentsOrEval)                                                \
     _(CallDirectEval)                                                       \
@@ -159,10 +162,12 @@ namespace jit {
     _(SetElementCache)                                                      \
     _(BindNameCache)                                                        \
     _(GuardShape)                                                           \
-    _(GuardShapePolymorphic)                                                \
+    _(GuardReceiverPolymorphic)                                             \
     _(GuardObjectGroup)                                                     \
     _(GuardObjectIdentity)                                                  \
     _(GuardClass)                                                           \
+    _(GuardUnboxedExpando)                                                  \
+    _(LoadUnboxedExpando)                                                   \
     _(ArrayLength)                                                          \
     _(SetArrayLength)                                                       \
     _(TypedArrayLength)                                                     \
@@ -178,10 +183,12 @@ namespace jit {
     _(InArray)                                                              \
     _(LoadElement)                                                          \
     _(LoadElementHole)                                                      \
+    _(LoadUnboxedScalar)                                                    \
     _(LoadUnboxedObjectOrNull)                                              \
     _(LoadUnboxedString)                                                    \
     _(StoreElement)                                                         \
     _(StoreElementHole)                                                     \
+    _(StoreUnboxedScalar)                                                   \
     _(StoreUnboxedObjectOrNull)                                             \
     _(StoreUnboxedString)                                                   \
     _(ConvertUnboxedObjectToNative)                                         \
@@ -189,10 +196,8 @@ namespace jit {
     _(ArrayPush)                                                            \
     _(ArrayConcat)                                                          \
     _(ArrayJoin)                                                            \
-    _(LoadTypedArrayElement)                                                \
     _(LoadTypedArrayElementHole)                                            \
     _(LoadTypedArrayElementStatic)                                          \
-    _(StoreTypedArrayElement)                                               \
     _(StoreTypedArrayElementHole)                                           \
     _(StoreTypedArrayElementStatic)                                         \
     _(CompareExchangeTypedArrayElement)                                     \
@@ -267,7 +272,7 @@ namespace jit {
 class MDefinitionVisitor // interface i.e. pure abstract class
 {
   public:
-#define VISIT_INS(op) virtual void visit##op(M##op *) = 0;
+#define VISIT_INS(op) virtual void visit##op(M##op*) = 0;
     MIR_OPCODE_LIST(VISIT_INS)
 #undef VISIT_INS
 };
@@ -277,7 +282,7 @@ class MDefinitionVisitor // interface i.e. pure abstract class
 class MDefinitionVisitorDefaultNYI : public MDefinitionVisitor
 {
   public:
-#define VISIT_INS(op) virtual void visit##op(M##op *) { MOZ_CRASH("NYI: " #op); }
+#define VISIT_INS(op) virtual void visit##op(M##op*) { MOZ_CRASH("NYI: " #op); }
     MIR_OPCODE_LIST(VISIT_INS)
 #undef VISIT_INS
 };
@@ -286,7 +291,7 @@ class MDefinitionVisitorDefaultNYI : public MDefinitionVisitor
 class MDefinitionVisitorDefaultNoop : public MDefinitionVisitor
 {
   public:
-#define VISIT_INS(op) virtual void visit##op(M##op *) { }
+#define VISIT_INS(op) virtual void visit##op(M##op*) { }
     MIR_OPCODE_LIST(VISIT_INS)
 #undef VISIT_INS
 };

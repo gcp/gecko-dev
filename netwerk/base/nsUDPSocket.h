@@ -12,22 +12,26 @@
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 
+#ifdef MOZ_WIDGET_GONK
+#include "nsINetworkManager.h"
+#endif
+
 //-----------------------------------------------------------------------------
 
-class nsUDPSocket MOZ_FINAL : public nsASocketHandler
-                            , public nsIUDPSocket
+class nsUDPSocket final : public nsASocketHandler
+                        , public nsIUDPSocket
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIUDPSOCKET
 
   // nsASocketHandler methods:
-  virtual void OnSocketReady(PRFileDesc* fd, int16_t outFlags) MOZ_OVERRIDE;
-  virtual void OnSocketDetached(PRFileDesc* fd) MOZ_OVERRIDE;
-  virtual void IsLocal(bool* aIsLocal) MOZ_OVERRIDE;
+  virtual void OnSocketReady(PRFileDesc* fd, int16_t outFlags) override;
+  virtual void OnSocketDetached(PRFileDesc* fd) override;
+  virtual void IsLocal(bool* aIsLocal) override;
 
-  uint64_t ByteCountSent() MOZ_OVERRIDE { return mByteWriteCount; }
-  uint64_t ByteCountReceived() MOZ_OVERRIDE { return mByteReadCount; }
+  uint64_t ByteCountSent() override { return mByteWriteCount; }
+  uint64_t ByteCountReceived() override { return mByteReadCount; }
 
   void AddOutputBytes(uint64_t aBytes);
 
@@ -50,11 +54,15 @@ private:
                                   const PRNetAddr& aIface);
   nsresult SetMulticastInterfaceInternal(const PRNetAddr& aIface);
 
+  void SaveNetworkStats(bool aEnforce);
+
   // lock protects access to mListener;
   // so mListener is not cleared while being used/locked.
   mozilla::Mutex                       mLock;
   PRFileDesc                           *mFD;
   mozilla::net::NetAddr                mAddr;
+  uint32_t                             mAppId;
+  bool                                 mIsInBrowserElement;
   nsCOMPtr<nsIUDPSocketListener>       mListener;
   nsCOMPtr<nsIEventTarget>             mListenerTarget;
   bool                                 mAttached;
@@ -62,6 +70,9 @@ private:
 
   uint64_t   mByteReadCount;
   uint64_t   mByteWriteCount;
+#ifdef MOZ_WIDGET_GONK
+  nsMainThreadPtrHandle<nsINetworkInterface> mActiveNetwork;
+#endif
 };
 
 //-----------------------------------------------------------------------------

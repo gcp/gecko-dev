@@ -136,17 +136,17 @@ Rule::SizeOfCOMArrayElementIncludingThis(css::Rule* aElement,
 // Style Rule List for group rules
 //
 
-class GroupRuleRuleList MOZ_FINAL : public dom::CSSRuleList
+class GroupRuleRuleList final : public dom::CSSRuleList
 {
 public:
   explicit GroupRuleRuleList(GroupRule *aGroupRule);
 
-  virtual CSSStyleSheet* GetParentObject() MOZ_OVERRIDE;
+  virtual CSSStyleSheet* GetParentObject() override;
 
   virtual nsIDOMCSSRule*
-  IndexedGetter(uint32_t aIndex, bool& aFound) MOZ_OVERRIDE;
+  IndexedGetter(uint32_t aIndex, bool& aFound) override;
   virtual uint32_t
-  Length() MOZ_OVERRIDE;
+  Length() override;
 
   void DropReference() { mGroupRule = nullptr; }
 
@@ -1667,9 +1667,9 @@ nsCSSFontFaceStyleDecl::GetParentObject()
 }
 
 JSObject*
-nsCSSFontFaceStyleDecl::WrapObject(JSContext *cx)
+nsCSSFontFaceStyleDecl::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return mozilla::dom::CSSStyleDeclarationBinding::Wrap(cx, this);
+  return mozilla::dom::CSSStyleDeclarationBinding::Wrap(cx, this, aGivenProto);
 }
 
 // -------------------------------------------
@@ -2103,7 +2103,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsCSSKeyframeStyleDeclaration)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMCSSDeclaration)
 
 css::Declaration*
-nsCSSKeyframeStyleDeclaration::GetCSSDeclaration(bool aAllocate)
+nsCSSKeyframeStyleDeclaration::GetCSSDeclaration(Operation aOperation)
 {
   if (mRule) {
     return mRule->Declaration();
@@ -2664,7 +2664,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsCSSPageStyleDeclaration)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMCSSDeclaration)
 
 css::Declaration*
-nsCSSPageStyleDeclaration::GetCSSDeclaration(bool aAllocate)
+nsCSSPageStyleDeclaration::GetCSSDeclaration(Operation aOperation)
 {
   if (mRule) {
     return mRule->Declaration();

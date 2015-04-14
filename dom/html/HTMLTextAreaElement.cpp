@@ -1480,7 +1480,7 @@ HTMLTextAreaElement::GetWrapCols()
   nsITextControlElement::GetWrapPropertyEnum(this, wrapProp);
   if (wrapProp == nsITextControlElement::eHTMLTextWrap_Off) {
     // do not wrap when wrap=off
-    return -1;
+    return 0;
   }
 
   // Otherwise we just wrap at the given number of columns
@@ -1554,9 +1554,9 @@ HTMLTextAreaElement::FieldSetDisabledChanged(bool aNotify)
 }
 
 JSObject*
-HTMLTextAreaElement::WrapNode(JSContext* aCx)
+HTMLTextAreaElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLTextAreaElementBinding::Wrap(aCx, this);
+  return HTMLTextAreaElementBinding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

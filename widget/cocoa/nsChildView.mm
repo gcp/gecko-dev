@@ -60,6 +60,7 @@
 #include "ScopedGLHelpers.h"
 #include "HeapCopyOfStackArray.h"
 #include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/APZThreadUtils.h"
 #include "mozilla/layers/GLManager.h"
 #include "mozilla/layers/CompositorOGL.h"
 #include "mozilla/layers/CompositorParent.h"
@@ -318,10 +319,6 @@ public:
                            const nsIntRegion& aDirtyRegion,
                            CGContextRef aCGContext);
 
-  void UpdateFromDrawTarget(const nsIntSize& aNewSize,
-                            const nsIntRegion& aDirtyRegion,
-                            gfx::DrawTarget* aFromDrawTarget);
-
   nsIntRegion GetUpdateRegion() {
     MOZ_ASSERT(mInUpdate, "update region only valid during update");
     return mUpdateRegion;
@@ -361,24 +358,24 @@ public:
   explicit GLPresenter(GLContext* aContext);
   virtual ~GLPresenter();
 
-  virtual GLContext* gl() const MOZ_OVERRIDE { return mGLContext; }
-  virtual ShaderProgramOGL* GetProgram(GLenum aTarget, gfx::SurfaceFormat aFormat) MOZ_OVERRIDE
+  virtual GLContext* gl() const override { return mGLContext; }
+  virtual ShaderProgramOGL* GetProgram(GLenum aTarget, gfx::SurfaceFormat aFormat) override
   {
     MOZ_ASSERT(aTarget == LOCAL_GL_TEXTURE_RECTANGLE_ARB);
     MOZ_ASSERT(aFormat == gfx::SurfaceFormat::R8G8B8A8);
     return mRGBARectProgram;
   }
-  virtual const gfx::Matrix4x4& GetProjMatrix() const MOZ_OVERRIDE
+  virtual const gfx::Matrix4x4& GetProjMatrix() const override
   {
     return mProjMatrix;
   }
-  virtual void ActivateProgram(ShaderProgramOGL *aProg) MOZ_OVERRIDE
+  virtual void ActivateProgram(ShaderProgramOGL *aProg) override
   {
     mGLContext->fUseProgram(aProg->GetProgram());
   }
   virtual void BindAndDrawQuad(ShaderProgramOGL *aProg,
                                const gfx::Rect& aLayerRect,
-                               const gfx::Rect& aTextureRect) MOZ_OVERRIDE;
+                               const gfx::Rect& aTextureRect) override;
 
   void BeginFrame(nsIntSize aRenderSize);
   void EndFrame();
@@ -1605,10 +1602,6 @@ nsChildView::NotifyIMEInternal(const IMENotification& aIMENotification)
       mTextInputHandler->OnFocusChangeInGecko(true);
       return NS_OK;
     case NOTIFY_IME_OF_BLUR:
-      // When we're going to be deactive, we must disable the secure event input
-      // mode, see the Carbon Event Manager Reference.
-      TextInputHandler::EnsureSecureEventInputDisabled();
-
       NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
       mTextInputHandler->OnFocusChangeInGecko(false);
       return NS_OK;
@@ -1896,6 +1889,14 @@ nsChildView::ConfigureAPZCTreeManager()
     [EventThreadRunner start];
   }
   gNumberOfWidgetsNeedingEventThread++;
+}
+
+void
+nsChildView::ConfigureAPZControllerThread()
+{
+  // On OS X the EventThreadRunner is the controller thread, but it doesn't
+  // have a MessageLoop.
+  APZThreadUtils::SetControllerThread(nullptr);
 }
 
 nsIntRect
@@ -2372,11 +2373,13 @@ nsChildView::UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometri
   if (![[mView window] isKindOfClass:[ToolbarWindow class]])
     return;
 
-  // Update unified toolbar height.
+  // Update unified toolbar height and sheet attachment position.
   int32_t windowWidth = mBounds.width;
   int32_t titlebarBottom = FindTitlebarBottom(aThemeGeometries, windowWidth);
   int32_t unifiedToolbarBottom =
     FindUnifiedToolbarBottom(aThemeGeometries, windowWidth, titlebarBottom);
+  int32_t toolboxBottom =
+    FindFirstRectOfType(aThemeGeometries, nsNativeThemeCocoa::eThemeGeometryTypeToolbox).YMost();
 
   ToolbarWindow* win = (ToolbarWindow*)[mView window];
   bool drawsContentsIntoWindowFrame = [win drawsContentsIntoWindowFrame];
@@ -2384,6 +2387,8 @@ nsChildView::UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometri
   int32_t contentOffset = drawsContentsIntoWindowFrame ? titlebarHeight : 0;
   int32_t devUnifiedHeight = titlebarHeight + unifiedToolbarBottom - contentOffset;
   [win setUnifiedToolbarHeight:DevPixelsToCocoaPoints(devUnifiedHeight)];
+  int32_t devSheetPosition = titlebarHeight + std::max(toolboxBottom, unifiedToolbarBottom) - contentOffset;
+  [win setSheetAttachmentPosition:DevPixelsToCocoaPoints(devSheetPosition)];
 
   // Update titlebar control offsets.
   nsIntRect windowButtonRect = FindFirstRectOfType(aThemeGeometries, nsNativeThemeCocoa::eThemeGeometryTypeWindowButtons);
@@ -2728,29 +2733,6 @@ RectTextureImage::UpdateFromCGContext(const nsIntSize& aNewSize,
     dt->PopClip();
     EndUpdate();
   }
-}
-
-void
-RectTextureImage::UpdateFromDrawTarget(const nsIntSize& aNewSize,
-                                       const nsIntRegion& aDirtyRegion,
-                                       gfx::DrawTarget* aFromDrawTarget)
-{
-  mUpdateDrawTarget = aFromDrawTarget;
-  mBufferSize.SizeTo(aFromDrawTarget->GetSize().width, aFromDrawTarget->GetSize().height);
-  RefPtr<gfx::DrawTarget> drawTarget = BeginUpdate(aNewSize, aDirtyRegion);
-  if (drawTarget) {
-    if (drawTarget != aFromDrawTarget) {
-      RefPtr<gfx::SourceSurface> source = aFromDrawTarget->Snapshot();
-      gfx::Rect rect(0, 0, aFromDrawTarget->GetSize().width, aFromDrawTarget->GetSize().height);
-      gfxUtils::ClipToRegion(drawTarget, GetUpdateRegion());
-      drawTarget->DrawSurface(source, rect, rect,
-                              gfx::DrawSurfaceOptions(),
-                              gfx::DrawOptions(1.0, gfx::CompositionOp::OP_SOURCE));
-      drawTarget->PopClip();
-    }
-    EndUpdate();
-  }
-  mUpdateDrawTarget = nullptr;
 }
 
 void
@@ -3456,6 +3438,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
       gfx::Factory::CreateDrawTargetForCairoCGContext(aContext,
                                                       gfx::IntSize(backingSize.width,
                                                                    backingSize.height));
+    MOZ_ASSERT(dt); // see implementation
     dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
     targetContext = new gfxContext(dt);
   } else if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BackendType::CAIRO)) {
@@ -5376,8 +5359,8 @@ static int32_t RoundUp(double aDouble)
   if (mGeckoChild && mTextInputHandler && mTextInputHandler->IsFocused()) {
 #ifdef MOZ_CRASHREPORTER
     NSWindow* window = [self window];
-    NSString* info = [NSString stringWithFormat:@"\nview [%@], window [%@], key event [%@], window is key %i, is fullscreen %i, app is active %i",
-                      self, window, theEvent, [window isKeyWindow], ([window styleMask] & (1 << 14)) != 0,
+    NSString* info = [NSString stringWithFormat:@"\nview [%@], window [%@], window is key %i, is fullscreen %i, app is active %i",
+                      self, window, [window isKeyWindow], ([window styleMask] & (1 << 14)) != 0,
                       [NSApp isActive]];
     nsAutoCString additionalInfo([info UTF8String]);
 #endif
@@ -5525,6 +5508,8 @@ static int32_t RoundUp(double aDouble)
   nsIWidgetListener* listener = mGeckoChild->GetWidgetListener();
   if (listener)
     listener->WindowDeactivated();
+
+  TextInputHandler::EnsureSecureEventInputDisabled();
 }
 
 // If the call to removeFromSuperview isn't delayed from nsChildView::

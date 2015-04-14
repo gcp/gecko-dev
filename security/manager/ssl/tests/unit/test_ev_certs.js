@@ -63,7 +63,7 @@ function check_ee_for_ev(cert_name, expected_ev) {
     let error = certdb.verifyCertNow(cert, certificateUsageSSLServer,
                                      NO_FLAGS, verifiedChain, hasEVPolicy);
     do_check_eq(hasEVPolicy.value, expected_ev);
-    do_check_eq(0, error);
+    do_check_eq(error, PRErrorCodeSuccess);
 }
 
 function run_test() {
@@ -175,7 +175,8 @@ function run_test() {
                                        flags, verifiedChain, hasEVPolicy);
       do_check_eq(hasEVPolicy.value, gEVExpected);
       do_check_eq(error,
-                  gEVExpected ? 0 : SEC_ERROR_POLICY_VALIDATION_FAILED);
+                  gEVExpected ? PRErrorCodeSuccess
+                              : SEC_ERROR_POLICY_VALIDATION_FAILED);
       failingOcspResponder.stop(run_next_test);
     });
   });
@@ -255,9 +256,5 @@ function check_no_ocsp_requests(cert_name, expected_error) {
   // Since we're not doing OCSP requests, no certificate will be EV.
   do_check_eq(hasEVPolicy.value, false);
   do_check_eq(expected_error, error);
-  // Also check that isExtendedValidation doesn't cause OCSP requests.
-  let identityInfo = cert.QueryInterface(Ci.nsIIdentityInfo);
-  do_check_eq(identityInfo.isExtendedValidation, false);
   ocspResponder.stop(run_next_test);
 }
-

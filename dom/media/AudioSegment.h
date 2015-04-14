@@ -24,7 +24,7 @@ public:
     mBuffers.SwapElements(*aBuffers);
   }
 
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     size_t amount = 0;
     amount += mBuffers.SizeOfExcludingThis(aMallocSizeOf);
@@ -35,7 +35,7 @@ public:
     return amount;
   }
 
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
@@ -164,7 +164,6 @@ struct AudioChunk {
 #endif
 };
 
-
 /**
  * A list of audio samples consisting of a sequence of slices of SharedBuffers.
  * The audio rate is determined by the track, not stored in this class.
@@ -198,20 +197,27 @@ public:
       MOZ_ASSERT(channels == segmentChannelCount);
       output.SetLength(channels);
       bufferPtrs.SetLength(channels);
+#if !defined(MOZILLA_XPCOMRT_API)
+// FIXME Bug 1126414 - XPCOMRT does not support dom::WebAudioUtils::SpeexResamplerProcess
       uint32_t inFrames = c.mDuration;
+#endif // !defined(MOZILLA_XPCOMRT_API)
       // Round up to allocate; the last frame may not be used.
       NS_ASSERTION((UINT32_MAX - aInRate + 1) / c.mDuration >= aOutRate,
                    "Dropping samples");
       uint32_t outSize = (c.mDuration * aOutRate + aInRate - 1) / aInRate;
       for (uint32_t i = 0; i < channels; i++) {
-        const T* in = static_cast<const T*>(c.mChannelData[i]);
         T* out = output[i].AppendElements(outSize);
         uint32_t outFrames = outSize;
 
+#if !defined(MOZILLA_XPCOMRT_API)
+// FIXME Bug 1126414 - XPCOMRT does not support dom::WebAudioUtils::SpeexResamplerProcess
+        const T* in = static_cast<const T*>(c.mChannelData[i]);
         dom::WebAudioUtils::SpeexResamplerProcess(aResampler, i,
                                                   in, &inFrames,
                                                   out, &outFrames);
         MOZ_ASSERT(inFrames == c.mDuration);
+#endif // !defined(MOZILLA_XPCOMRT_API)
+
         bufferPtrs[i] = out;
         output[i].SetLength(outFrames);
       }
@@ -301,7 +307,7 @@ public:
 
   static Type StaticType() { return AUDIO; }
 
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }

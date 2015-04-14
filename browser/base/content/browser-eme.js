@@ -129,14 +129,14 @@ let gEMEHandler = {
       let btnAccessKeyId = msgPrefix + "button.accesskey";
       buttons.push({
         label: gNavigatorBundle.getString(btnLabelId),
-        accesskey: gNavigatorBundle.getString(btnAccessKeyId),
+        accessKey: gNavigatorBundle.getString(btnAccessKeyId),
         callback: callback
       });
 
       let optionsId = "emeNotifications.optionsButton";
       buttons.push({
         label: gNavigatorBundle.getString(optionsId + ".label"),
-        accesskey: gNavigatorBundle.getString(optionsId + ".accesskey"),
+        accessKey: gNavigatorBundle.getString(optionsId + ".accesskey"),
         popup: "emeNotificationsPopup"
       });
     }
@@ -155,6 +155,18 @@ let gEMEHandler = {
                            buttons);
   },
   showPopupNotificationForSuccess: function(browser, keySystem) {
+    // We're playing EME content! Remove any "we can't play because..." messages.
+    var box = gBrowser.getNotificationBox(browser);
+    ["drmContentDisabled",
+     "drmContentCDMNotSupported",
+     "drmContentCDMInsufficientVersion",
+     "drmContentCDMInstalling"
+     ].forEach(function (value) {
+        var notification = box.getNotificationWithValue(value);
+        if (notification)
+          box.removeNotification(notification);
+      });
+
     // Don't bother creating it if it's already there:
     if (PopupNotifications.getNotification("drmContentPlaying", browser)) {
       return;
@@ -167,6 +179,15 @@ let gEMEHandler = {
 
     let message = gNavigatorBundle.getFormattedString(msgId, [this._brandShortName]);
     let anchorId = "eme-notification-icon";
+    let firstPlayPref = "browser.eme.ui.firstContentShown";
+    if (!Services.prefs.getPrefType(firstPlayPref) ||
+        !Services.prefs.getBoolPref(firstPlayPref)) {
+      document.getElementById(anchorId).setAttribute("firstplay", "true");
+      Services.prefs.setBoolPref(firstPlayPref, true);
+    } else {
+      document.getElementById(anchorId).removeAttribute("firstplay");
+    }
+
 
     let mainAction = {
       label: gNavigatorBundle.getString(btnLabelId),

@@ -43,7 +43,8 @@ loop.shared.actions = (function() {
      * Extract the token information and type for the standalone window
      */
     ExtractTokenInfo: Action.define("extractTokenInfo", {
-      windowPath: String
+      windowPath: String,
+      windowHash: String
     }),
 
     /**
@@ -65,6 +66,7 @@ loop.shared.actions = (function() {
      * token.
      */
     FetchServerData: Action.define("fetchServerData", {
+      // cryptoKey: String - Optional.
       token: String,
       windowType: String
     }),
@@ -94,6 +96,20 @@ loop.shared.actions = (function() {
      * Used to retry a failed call.
      */
     RetryCall: Action.define("retryCall", {
+    }),
+
+    /**
+     * Signals when the user wishes to accept a call.
+     */
+    AcceptCall: Action.define("acceptCall", {
+      callType: String
+    }),
+
+    /**
+     * Signals when the user declines a call.
+     */
+    DeclineCall: Action.define("declineCall", {
+      blockCaller: Boolean
     }),
 
     /**
@@ -235,7 +251,9 @@ loop.shared.actions = (function() {
       // The localized template to use to name the new room
       // (eg. "Conversation {{conversationLabel}}").
       nameTemplate: String,
-      roomOwner: String
+      roomOwner: String,
+      // See https://wiki.mozilla.org/Loop/Architecture/Context#Format_of_context.value
+      // urls: Object - Optional
     }),
 
     /**
@@ -344,10 +362,35 @@ loop.shared.actions = (function() {
     }),
 
     /**
+     * Share a room url via the Social API.
+     * XXX: should move to some roomActions module - refs bug 1079284
+     */
+    ShareRoomUrl: Action.define("shareRoomUrl", {
+      provider: Object,
+      roomUrl: String
+    }),
+
+    /**
+     * Add the Social Share button to the browser toolbar.
+     * XXX: should move to some roomActions module - refs bug 1079284
+     */
+    AddSocialShareButton: Action.define("addSocialShareButton", {
+    }),
+
+    /**
+     * Open the share panel to add a Social share provider.
+     * XXX: should move to some roomActions module - refs bug 1079284
+     */
+    AddSocialShareProvider: Action.define("addSocialShareProvider", {
+    }),
+
+    /**
      * XXX: should move to some roomActions module - refs bug 1079284
      */
     RoomFailure: Action.define("roomFailure", {
-      error: Object
+      error: Object,
+      // True when the failures occurs in the join room request to the loop-server.
+      failedJoinRequest: Boolean
     }),
 
     /**
@@ -357,10 +400,12 @@ loop.shared.actions = (function() {
      * @see https://wiki.mozilla.org/Loop/Architecture/Rooms#GET_.2Frooms.2F.7Btoken.7D
      */
     SetupRoomInfo: Action.define("setupRoomInfo", {
-      roomName: String,
+      // roomName: String - Optional.
       roomOwner: String,
       roomToken: String,
-      roomUrl: String
+      roomUrl: String,
+      socialShareButtonAvailable: Boolean,
+      socialShareProviders: Array
     }),
 
     /**
@@ -370,9 +415,19 @@ loop.shared.actions = (function() {
      * @see https://wiki.mozilla.org/Loop/Architecture/Rooms#GET_.2Frooms.2F.7Btoken.7D
      */
     UpdateRoomInfo: Action.define("updateRoomInfo", {
-      roomName: String,
+      // context: Object - Optional.
+      // roomName: String - Optional.
       roomOwner: String,
       roomUrl: String
+    }),
+
+    /**
+     * Updates the Social API information when it is received.
+     * XXX: should move to some roomActions module - refs bug 1079284
+     */
+    UpdateSocialShareInfo: Action.define("updateSocialShareInfo", {
+      socialShareButtonAvailable: Boolean,
+      socialShareProviders: Array
     }),
 
     /**

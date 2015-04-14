@@ -30,15 +30,20 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoRestore.h"
+#include "mozilla/AutoTimelineMarker.h"
 #include "mozilla/Base64.h"
+#include "mozilla/CheckedInt.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/dom/DOMTypes.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/HTMLContentElement.h"
 #include "mozilla/dom/HTMLShadowElement.h"
+#include "mozilla/dom/ipc/BlobChild.h"
+#include "mozilla/dom/ipc/BlobParent.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/TabParent.h"
@@ -332,7 +337,7 @@ static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
 
 static PLDHashTable sEventListenerManagersHash;
 
-class DOMEventListenerManagersHashReporter MOZ_FINAL : public nsIMemoryReporter
+class DOMEventListenerManagersHashReporter final : public nsIMemoryReporter
 {
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf)
 
@@ -342,7 +347,7 @@ public:
   NS_DECL_ISUPPORTS
 
   NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
-                            nsISupports* aData, bool aAnonymize) MOZ_OVERRIDE
+                            nsISupports* aData, bool aAnonymize) override
   {
     // We don't measure the |EventListenerManager| objects pointed to by the
     // entries because those references are non-owning.
@@ -397,8 +402,8 @@ EventListenerManagerHashClearEntry(PLDHashTable *table, PLDHashEntryHdr *entry)
   lm->~EventListenerManagerMapEntry();
 }
 
-class SameOriginCheckerImpl MOZ_FINAL : public nsIChannelEventSink,
-                                        public nsIInterfaceRequestor
+class SameOriginCheckerImpl final : public nsIChannelEventSink,
+                                    public nsIInterfaceRequestor
 {
   ~SameOriginCheckerImpl() {}
 
@@ -407,12 +412,12 @@ class SameOriginCheckerImpl MOZ_FINAL : public nsIChannelEventSink,
   NS_DECL_NSIINTERFACEREQUESTOR
 };
 
-class CharsetDetectionObserver MOZ_FINAL : public nsICharsetDetectionObserver
+class CharsetDetectionObserver final : public nsICharsetDetectionObserver
 {
 public:
   NS_DECL_ISUPPORTS
 
-  NS_IMETHOD Notify(const char *aCharset, nsDetectionConfident aConf) MOZ_OVERRIDE
+  NS_IMETHOD Notify(const char *aCharset, nsDetectionConfident aConf) override
   {
     mCharset = aCharset;
     return NS_OK;
@@ -458,7 +463,12 @@ nsContentUtils::Init()
 
   sSecurityManager->GetSystemPrincipal(&sSystemPrincipal);
   MOZ_ASSERT(sSystemPrincipal);
-  NS_ADDREF(sNullSubjectPrincipal = new nsNullPrincipal());
+
+  // We use the constructor here because we want infallible initialization; we
+  // apparently don't care whether sNullSubjectPrincipal has a sane URI or not.
+  nsRefPtr<nsNullPrincipal> nullPrincipal = new nsNullPrincipal();
+  nullPrincipal->Init();
+  nullPrincipal.forget(&sNullSubjectPrincipal);
 
   nsresult rv = CallGetService(NS_IOSERVICE_CONTRACTID, &sIOService);
   if (NS_FAILED(rv)) {
@@ -985,19 +995,29 @@ nsContentUtils::ParseHTMLInteger(const nsAString& aValue,
   }
 
   bool foundValue = false;
-  int32_t value = 0;
-  int32_t pValue = 0; // Previous value, used to check integer overflow
+  CheckedInt32 value = 0;
+
+  // Check for leading zeros first.
+  uint64_t leadingZeros = 0;
+  while (iter != end) {
+    if (*iter != char16_t('0')) {
+      break;
+    }
+
+    ++leadingZeros;
+    foundValue = true;
+    ++iter;
+  }
+
   while (iter != end) {
     if (*iter >= char16_t('0') && *iter <= char16_t('9')) {
       value = (value * 10) + (*iter - char16_t('0'));
       ++iter;
-      // Checking for integer overflow.
-      if (pValue > value) {
+      if (!value.isValid()) {
         result |= eParseHTMLInteger_Error | eParseHTMLInteger_ErrorOverflow;
         break;
       } else {
         foundValue = true;
-        pValue = value;
       }
     } else if (*iter == char16_t('%')) {
       ++iter;
@@ -1012,12 +1032,17 @@ nsContentUtils::ParseHTMLInteger(const nsAString& aValue,
     result |= eParseHTMLInteger_Error | eParseHTMLInteger_ErrorNoValue;
   }
 
-  if (negate) {
+  if (value.isValid() && negate) {
     value = -value;
     // Checking the special case of -0.
-    if (!value) {
+    if (value == 0) {
       result |= eParseHTMLInteger_NonStandard;
     }
+  }
+
+  if (value.isValid() &&
+      (leadingZeros > 1 || (leadingZeros == 1 && !(value == 0)))) {
+    result |= eParseHTMLInteger_NonStandard;
   }
 
   if (iter != end) {
@@ -1025,7 +1050,7 @@ nsContentUtils::ParseHTMLInteger(const nsAString& aValue,
   }
 
   *aResult = (ParseHTMLIntegerResultFlags)result;
-  return value;
+  return value.isValid() ? value.value() : 0;
 }
 
 #define SKIP_WHITESPACE(iter, end_iter, end_res)                 \
@@ -1508,42 +1533,41 @@ nsContentUtils::IsHTMLWhitespaceOrNBSP(char16_t aChar)
 
 /* static */
 bool
-nsContentUtils::IsHTMLBlock(nsIAtom* aLocalName)
+nsContentUtils::IsHTMLBlock(nsIContent* aContent)
 {
-  return
-    (aLocalName == nsGkAtoms::address) ||
-    (aLocalName == nsGkAtoms::article) ||
-    (aLocalName == nsGkAtoms::aside) ||
-    (aLocalName == nsGkAtoms::blockquote) ||
-    (aLocalName == nsGkAtoms::center) ||
-    (aLocalName == nsGkAtoms::dir) ||
-    (aLocalName == nsGkAtoms::div) ||
-    (aLocalName == nsGkAtoms::dl) || // XXX why not dt and dd?
-    (aLocalName == nsGkAtoms::fieldset) ||
-    (aLocalName == nsGkAtoms::figure) || // XXX shouldn't figcaption be on this list
-    (aLocalName == nsGkAtoms::footer) ||
-    (aLocalName == nsGkAtoms::form) ||
-    (aLocalName == nsGkAtoms::h1) ||
-    (aLocalName == nsGkAtoms::h2) ||
-    (aLocalName == nsGkAtoms::h3) ||
-    (aLocalName == nsGkAtoms::h4) ||
-    (aLocalName == nsGkAtoms::h5) ||
-    (aLocalName == nsGkAtoms::h6) ||
-    (aLocalName == nsGkAtoms::header) ||
-    (aLocalName == nsGkAtoms::hgroup) ||
-    (aLocalName == nsGkAtoms::hr) ||
-    (aLocalName == nsGkAtoms::li) ||
-    (aLocalName == nsGkAtoms::listing) ||
-    (aLocalName == nsGkAtoms::menu) ||
-    (aLocalName == nsGkAtoms::multicol) || // XXX get rid of this one?
-    (aLocalName == nsGkAtoms::nav) ||
-    (aLocalName == nsGkAtoms::ol) ||
-    (aLocalName == nsGkAtoms::p) ||
-    (aLocalName == nsGkAtoms::pre) ||
-    (aLocalName == nsGkAtoms::section) ||
-    (aLocalName == nsGkAtoms::table) ||
-    (aLocalName == nsGkAtoms::ul) ||
-    (aLocalName == nsGkAtoms::xmp);
+  return aContent->IsAnyOfHTMLElements(nsGkAtoms::address,
+                                       nsGkAtoms::article,
+                                       nsGkAtoms::aside,
+                                       nsGkAtoms::blockquote,
+                                       nsGkAtoms::center,
+                                       nsGkAtoms::dir,
+                                       nsGkAtoms::div,
+                                       nsGkAtoms::dl, // XXX why not dt and dd?
+                                       nsGkAtoms::fieldset,
+                                       nsGkAtoms::figure, // XXX shouldn't figcaption be on this list
+                                       nsGkAtoms::footer,
+                                       nsGkAtoms::form,
+                                       nsGkAtoms::h1,
+                                       nsGkAtoms::h2,
+                                       nsGkAtoms::h3,
+                                       nsGkAtoms::h4,
+                                       nsGkAtoms::h5,
+                                       nsGkAtoms::h6,
+                                       nsGkAtoms::header,
+                                       nsGkAtoms::hgroup,
+                                       nsGkAtoms::hr,
+                                       nsGkAtoms::li,
+                                       nsGkAtoms::listing,
+                                       nsGkAtoms::menu,
+                                       nsGkAtoms::multicol, // XXX get rid of this one?
+                                       nsGkAtoms::nav,
+                                       nsGkAtoms::ol,
+                                       nsGkAtoms::p,
+                                       nsGkAtoms::pre,
+                                       nsGkAtoms::section,
+                                       nsGkAtoms::table,
+                                       nsGkAtoms::ul,
+                                       nsGkAtoms::xmp);
 }
 
 /* static */
@@ -2546,7 +2570,8 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
     // we can't figure out form info.  Append the tag name if it's an element
     // to avoid restoring state for one type of element on another type.
     if (aContent->IsElement()) {
-      KeyAppendString(nsDependentAtomString(aContent->Tag()), aKey);
+      KeyAppendString(nsDependentAtomString(aContent->NodeInfo()->NameAtom()),
+                      aKey);
     }
     else {
       // Append a character that is not "d" or "f" to disambiguate from
@@ -4101,7 +4126,7 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
   // If we don't have a document here, we can't get the right security context
   // for compiling event handlers... so just bail out.
   nsCOMPtr<nsIDocument> document = aContextNode->OwnerDoc();
-  bool isHTML = document->IsHTML();
+  bool isHTML = document->IsHTMLDocument();
 #ifdef DEBUG
   nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(document);
   NS_ASSERTION(!isHTML || htmlDoc, "Should have HTMLDocument here!");
@@ -4120,9 +4145,9 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
       }
     }
     
-    if (contextAsContent && !contextAsContent->IsHTML(nsGkAtoms::html)) {
+    if (contextAsContent && !contextAsContent->IsHTMLElement(nsGkAtoms::html)) {
       aRv = ParseFragmentHTML(aFragment, frag,
-                              contextAsContent->Tag(),
+                              contextAsContent->NodeInfo()->NameAtom(),
                               contextAsContent->GetNameSpaceID(),
                               (document->GetCompatibilityMode() ==
                                eCompatibility_NavQuirks),
@@ -4225,6 +4250,8 @@ nsContentUtils::ParseFragmentHTML(const nsAString& aSourceBuffer,
                                   bool aQuirks,
                                   bool aPreventScriptExecution)
 {
+  AutoTimelineMarker m(aTargetNode->OwnerDoc()->GetDocShell(), "Parse HTML");
+
   if (nsContentUtils::sFragmentParsingActive) {
     NS_NOTREACHED("Re-entrant fragment parsing attempted.");
     return NS_ERROR_DOM_INVALID_STATE_ERR;
@@ -4251,6 +4278,8 @@ nsContentUtils::ParseDocumentHTML(const nsAString& aSourceBuffer,
                                   nsIDocument* aTargetDocument,
                                   bool aScriptingEnabledForNoscriptParsing)
 {
+  AutoTimelineMarker m(aTargetDocument->GetDocShell(), "Parse HTML");
+
   if (nsContentUtils::sFragmentParsingActive) {
     NS_NOTREACHED("Re-entrant fragment parsing attempted.");
     return NS_ERROR_DOM_INVALID_STATE_ERR;
@@ -4276,6 +4305,8 @@ nsContentUtils::ParseFragmentXML(const nsAString& aSourceBuffer,
                                  bool aPreventScriptExecution,
                                  nsIDOMDocumentFragment** aReturn)
 {
+  AutoTimelineMarker m(aDocument->GetDocShell(), "Parse XML");
+
   if (nsContentUtils::sFragmentParsingActive) {
     NS_NOTREACHED("Re-entrant fragment parsing attempted.");
     return NS_ERROR_DOM_INVALID_STATE_ERR;
@@ -4749,8 +4780,9 @@ nsContentUtils::TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
     // as downloadable. If this check fails we will just do the normal thing
     // (i.e. navigate to the resource).
     nsAutoString fileName;
-    if ((!aContent->IsHTML(nsGkAtoms::a) && !aContent->IsHTML(nsGkAtoms::area) &&
-         !aContent->IsSVG(nsGkAtoms::a)) ||
+    if ((!aContent->IsHTMLElement(nsGkAtoms::a) &&
+         !aContent->IsHTMLElement(nsGkAtoms::area) &&
+         !aContent->IsSVGElement(nsGkAtoms::a)) ||
         !aContent->GetAttr(kNameSpaceID_None, nsGkAtoms::download, fileName) ||
         NS_FAILED(aContent->NodePrincipal()->CheckMayLoad(aLinkURI, false, true))) {
       fileName.SetIsVoid(true); // No actionable download attribute was found.
@@ -5730,7 +5762,7 @@ SameOriginCheckerImpl::GetInterface(const nsIID& aIID, void** aResult)
 
 /* static */
 nsresult
-nsContentUtils::GetASCIIOrigin(nsIPrincipal* aPrincipal, nsCString& aOrigin)
+nsContentUtils::GetASCIIOrigin(nsIPrincipal* aPrincipal, nsACString& aOrigin)
 {
   NS_PRECONDITION(aPrincipal, "missing principal");
 
@@ -5751,7 +5783,7 @@ nsContentUtils::GetASCIIOrigin(nsIPrincipal* aPrincipal, nsCString& aOrigin)
 
 /* static */
 nsresult
-nsContentUtils::GetASCIIOrigin(nsIURI* aURI, nsCString& aOrigin)
+nsContentUtils::GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin)
 {
   NS_PRECONDITION(aURI, "missing uri");
 
@@ -5805,7 +5837,7 @@ nsContentUtils::GetASCIIOrigin(nsIURI* aURI, nsCString& aOrigin)
 
 /* static */
 nsresult
-nsContentUtils::GetUTFOrigin(nsIPrincipal* aPrincipal, nsString& aOrigin)
+nsContentUtils::GetUTFOrigin(nsIPrincipal* aPrincipal, nsAString& aOrigin)
 {
   NS_PRECONDITION(aPrincipal, "missing principal");
 
@@ -5826,7 +5858,7 @@ nsContentUtils::GetUTFOrigin(nsIPrincipal* aPrincipal, nsString& aOrigin)
 
 /* static */
 nsresult
-nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsString& aOrigin)
+nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin)
 {
   NS_PRECONDITION(aURI, "missing uri");
 
@@ -6035,7 +6067,7 @@ nsContentUtils::CreateBlobBuffer(JSContext* aCx,
                                  JS::MutableHandle<JS::Value> aBlob)
 {
   uint32_t blobLen = aData.Length();
-  void* blobData = moz_malloc(blobLen);
+  void* blobData = malloc(blobLen);
   nsRefPtr<File> blob;
   if (blobData) {
     memcpy(blobData, aData.BeginReading(), blobLen);
@@ -6474,6 +6506,11 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
   AutoJSAPI jsapi;
   jsapi.Init();
   JSContext* cx = jsapi.cx();
+
+  // Failure to create or run the regexp results in the invalid pattern
+  // matching, but we can still report the error to the console.
+  jsapi.TakeOwnershipOfErrorReporting();
+
   // We can use the junk scope here, because we're just using it for
   // regexp evaluation, not actual script execution.
   JSAutoCompartment ac(cx, xpc::UnprivilegedJunkScope());
@@ -6487,7 +6524,6 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
                                   static_cast<char16_t*>(aPattern.BeginWriting()),
                                   aPattern.Length(), 0));
   if (!re) {
-    JS_ClearPendingException(cx);
     return true;
   }
 
@@ -6496,7 +6532,6 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
   if (!JS_ExecuteRegExpNoStatics(cx, re,
                                  static_cast<char16_t*>(aValue.BeginWriting()),
                                  aValue.Length(), &idx, true, &rval)) {
-    JS_ClearPendingException(cx);
     return true;
   }
 
@@ -6772,7 +6807,7 @@ nsContentUtils::GetSelectionInTextControl(Selection* aSelection,
 {
   MOZ_ASSERT(aSelection && aRoot);
 
-  if (!aSelection->GetRangeCount()) {
+  if (!aSelection->RangeCount()) {
     // Nothing selected
     aOutStartOffset = aOutEndOffset = 0;
     return;
@@ -6833,7 +6868,7 @@ nsContentUtils::GetSelectionBoundingRect(Selection* aSel)
       res = nsLayoutUtils::TransformFrameRectToAncestor(frame, res, relativeTo);
     }
   } else {
-    int32_t rangeCount = aSel->GetRangeCount();
+    int32_t rangeCount = aSel->RangeCount();
     nsLayoutUtils::RectAccumulator accumulator;
     for (int32_t idx = 0; idx < rangeCount; ++idx) {
       nsRange* range = aSel->GetRangeAt(idx);
@@ -6895,7 +6930,7 @@ nsContentUtils::IsContentInsertionPoint(const nsIContent* aContent)
   }
 
   // Check if the content is a web components content insertion point.
-  if (aContent->IsHTML(nsGkAtoms::content)) {
+  if (aContent->IsHTMLElement(nsGkAtoms::content)) {
     return static_cast<const HTMLContentElement*>(aContent)->IsInsertionPoint();
   }
 
@@ -7172,3 +7207,94 @@ nsContentUtils::CallOnAllRemoteChildren(nsIDOMWindow* aWindow,
   }
 }
 
+void
+nsContentUtils::TransferablesToIPCTransferables(nsISupportsArray* aTransferables,
+                                                nsTArray<IPCDataTransfer>& aIPC,
+                                                mozilla::dom::nsIContentChild* aChild,
+                                                mozilla::dom::nsIContentParent* aParent)
+{
+  aIPC.Clear();
+  MOZ_ASSERT((aChild && !aParent) || (!aChild && aParent));
+  if (aTransferables) {
+    uint32_t transferableCount = 0;
+    aTransferables->Count(&transferableCount);
+    for (uint32_t i = 0; i < transferableCount; ++i) {
+      IPCDataTransfer* dt = aIPC.AppendElement();
+      nsCOMPtr<nsISupports> genericItem;
+      aTransferables->GetElementAt(i, getter_AddRefs(genericItem));
+      nsCOMPtr<nsITransferable> item(do_QueryInterface(genericItem));
+      if (item) {
+        nsCOMPtr<nsISupportsArray> flavorList;
+        item->FlavorsTransferableCanExport(getter_AddRefs(flavorList));
+        if (flavorList) {
+          uint32_t flavorCount = 0;
+          flavorList->Count(&flavorCount);
+          for (uint32_t j = 0; j < flavorCount; ++j) {
+            nsCOMPtr<nsISupportsCString> flavor = do_QueryElementAt(flavorList, j);
+            if (!flavor) {
+              continue;
+            }
+
+            nsAutoCString flavorStr;
+            flavor->GetData(flavorStr);
+            if (!flavorStr.Length()) {
+              continue;
+            }
+
+            nsCOMPtr<nsISupports> data;
+            uint32_t dataLen = 0;
+            item->GetTransferData(flavorStr.get(), getter_AddRefs(data), &dataLen);
+
+            nsCOMPtr<nsISupportsString> text = do_QueryInterface(data);
+            if (text) {
+              nsAutoString dataAsString;
+              text->GetData(dataAsString);
+              IPCDataTransferItem* item = dt->items().AppendElement();
+              item->flavor() = nsCString(flavorStr);
+              item->data() = nsString(dataAsString);
+            } else {
+              nsCOMPtr<nsISupportsInterfacePointer> sip =
+                do_QueryInterface(data);
+              if (sip) {
+                sip->GetData(getter_AddRefs(data));
+              }
+              nsCOMPtr<FileImpl> fileImpl;
+              nsCOMPtr<nsIFile> file = do_QueryInterface(data);
+              if (file) {
+                fileImpl = new FileImplFile(file, false);
+                ErrorResult rv;
+                fileImpl->GetSize(rv);
+                fileImpl->GetLastModified(rv);
+              } else {
+                fileImpl = do_QueryInterface(data);
+              }
+              if (fileImpl) {
+                IPCDataTransferItem* item = dt->items().AppendElement();
+                item->flavor() = nsCString(flavorStr);
+                if (aChild) {
+                  item->data() =
+                    mozilla::dom::BlobChild::GetOrCreate(aChild,
+                      static_cast<FileImpl*>(fileImpl.get()));
+                } else if (aParent) {
+                  item->data() =
+                    mozilla::dom::BlobParent::GetOrCreate(aParent,
+                      static_cast<FileImpl*>(fileImpl.get()));
+                }
+              } else {
+                // This is a hack to support kFilePromiseMime.
+                // On Windows there just needs to be an entry for it, 
+                // and for OSX we need to create
+                // nsContentAreaDragDropDataProvider as nsIFlavorDataProvider.
+                if (flavorStr.EqualsLiteral(kFilePromiseMime)) {
+                  IPCDataTransferItem* item = dt->items().AppendElement();
+                  item->flavor() = nsCString(flavorStr);
+                  item->data() = NS_ConvertUTF8toUTF16(flavorStr);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

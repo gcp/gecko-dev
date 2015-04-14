@@ -5,6 +5,7 @@
 
 #include "mozilla/dom/FetchDriver.h"
 
+#include "nsIDocument.h"
 #include "nsIInputStream.h"
 #include "nsIOutputStream.h"
 #include "nsIHttpChannel.h"
@@ -42,7 +43,6 @@ FetchDriver::FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal,
   , mLoadGroup(aLoadGroup)
   , mRequest(aRequest)
   , mFetchRecursionCount(0)
-  , mReferrerPolicy(net::RP_Default)
   , mResponseAvailableCalled(false)
 {
 }
@@ -59,6 +59,9 @@ FetchDriver::Fetch(FetchDriverObserver* aObserver)
 {
   workers::AssertIsOnMainThread();
   mObserver = aObserver;
+
+  Telemetry::Accumulate(Telemetry::SERVICE_WORKER_REQUEST_PASSTHROUGH,
+                        mRequest->WasCreatedByFetchEvent());
 
   return Fetch(false /* CORS flag */);
 }
@@ -99,10 +102,26 @@ FetchDriver::ContinueFetch(bool aCORSFlag)
     return FailWithNetworkError();
   }
 
+  // CSP/mixed content checks.
+  int16_t shouldLoad;
+  rv = NS_CheckContentLoadPolicy(mRequest->ContentPolicyType(),
+                                 requestURI,
+                                 mPrincipal,
+                                 mDocument,
+                                 // FIXME(nsm): Should MIME be extracted from
+                                 // Content-Type header?
+                                 EmptyCString(), /* mime guess */
+                                 nullptr, /* extra */
+                                 &shouldLoad,
+                                 nsContentUtils::GetContentPolicy(),
+                                 nsContentUtils::GetSecurityManager());
+  if (NS_WARN_IF(NS_FAILED(rv) || NS_CP_REJECTED(shouldLoad))) {
+    // Disallowed by content policy.
+    return FailWithNetworkError();
+  }
+
   // Begin Step 4 of the Fetch algorithm
   // https://fetch.spec.whatwg.org/#fetching
-
-  // FIXME(nsm): Bug 1039846: Add CSP checks
 
   nsAutoCString scheme;
   rv = requestURI->GetScheme(scheme);
@@ -289,7 +308,6 @@ FetchDriver::HttpFetch(bool aCORSFlag, bool aCORSPreflightFlag, bool aAuthentica
 {
   // Step 1. "Let response be null."
   mResponse = nullptr;
-
   nsresult rv;
 
   nsCOMPtr<nsIIOService> ios = do_GetIOService(&rv);
@@ -406,7 +424,12 @@ FetchDriver::HttpFetch(bool aCORSFlag, bool aCORSPreflightFlag, bool aAuthentica
         return FailWithNetworkError();
       }
 
-      rv = httpChan->SetReferrerWithPolicy(refURI, mReferrerPolicy);
+      net::ReferrerPolicy referrerPolicy = net::RP_Default;
+      if (mDocument) {
+        referrerPolicy = mDocument->GetReferrerPolicy();
+      }
+
+      rv = httpChan->SetReferrerWithPolicy(refURI, referrerPolicy);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return FailWithNetworkError();
       }
@@ -465,16 +488,24 @@ FetchDriver::HttpFetch(bool aCORSFlag, bool aCORSPreflightFlag, bool aAuthentica
     internalChan->ForceNoIntercept();
   }
 
-  // Set up a CORS proxy that will handle the various requirements of the CORS
-  // protocol. It handles the preflight cache and CORS response headers.
-  // If the request is allowed, it will start our original request
-  // and our observer will be notified. On failure, our observer is notified
-  // directly.
-  nsRefPtr<nsCORSListenerProxy> corsListener =
-    new nsCORSListenerProxy(this, mPrincipal, useCredentials);
-  rv = corsListener->Init(chan, true /* allow data uri */);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return FailWithNetworkError();
+  nsCOMPtr<nsIStreamListener> listener = this;
+
+  // Unless the cors mode is explicitly no-cors, we set up a cors proxy even in
+  // the same-origin case, since the proxy does not enforce cors header checks
+  // in the same-origin case.
+  if (mRequest->Mode() != RequestMode::No_cors) {
+    // Set up a CORS proxy that will handle the various requirements of the CORS
+    // protocol. It handles the preflight cache and CORS response headers.
+    // If the request is allowed, it will start our original request
+    // and our observer will be notified. On failure, our observer is notified
+    // directly.
+    nsRefPtr<nsCORSListenerProxy> corsListener =
+      new nsCORSListenerProxy(this, mPrincipal, useCredentials);
+    rv = corsListener->Init(chan, true /* allow data uri */);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return FailWithNetworkError();
+    }
+    listener = corsListener.forget();
   }
 
   // If preflight is required, start a "CORS preflight fetch"
@@ -487,12 +518,12 @@ FetchDriver::HttpFetch(bool aCORSFlag, bool aCORSPreflightFlag, bool aAuthentica
     nsAutoTArray<nsCString, 5> unsafeHeaders;
     mRequest->Headers()->GetUnsafeHeaders(unsafeHeaders);
 
-    rv = NS_StartCORSPreflight(chan, corsListener, mPrincipal,
+    rv = NS_StartCORSPreflight(chan, listener, mPrincipal,
                                useCredentials,
                                unsafeHeaders,
                                getter_AddRefs(preflightChannel));
   } else {
-   rv = chan->AsyncOpen(corsListener, nullptr);
+   rv = chan->AsyncOpen(listener, nullptr);
   }
 
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -528,13 +559,13 @@ FetchDriver::BeginAndGetFilteredResponse(InternalResponse* aResponse)
   nsRefPtr<InternalResponse> filteredResponse;
   switch (mRequest->GetResponseTainting()) {
     case InternalRequest::RESPONSETAINT_BASIC:
-      filteredResponse = InternalResponse::BasicResponse(aResponse);
+      filteredResponse = aResponse->BasicResponse();
       break;
     case InternalRequest::RESPONSETAINT_CORS:
-      filteredResponse = InternalResponse::CORSResponse(aResponse);
+      filteredResponse = aResponse->CORSResponse();
       break;
     case InternalRequest::RESPONSETAINT_OPAQUE:
-      filteredResponse = InternalResponse::OpaqueResponse();
+      filteredResponse = aResponse->OpaqueResponse();
       break;
     default:
       MOZ_CRASH("Unexpected case");
@@ -580,7 +611,7 @@ FetchDriver::FailWithNetworkError()
 }
 
 namespace {
-class FillResponseHeaders MOZ_FINAL : public nsIHttpHeaderVisitor {
+class FillResponseHeaders final : public nsIHttpHeaderVisitor {
   InternalResponse* mResponse;
 
   ~FillResponseHeaders()
@@ -594,7 +625,7 @@ public:
   }
 
   NS_IMETHOD
-  VisitHeader(const nsACString & aHeader, const nsACString & aValue) MOZ_OVERRIDE
+  VisitHeader(const nsACString & aHeader, const nsACString & aValue) override
   {
     ErrorResult result;
     mResponse->Headers()->Append(aHeader, aValue, result);
@@ -643,8 +674,6 @@ FetchDriver::OnStartRequest(nsIRequest* aRequest,
     NS_WARNING("Failed to visit all headers.");
   }
 
-  mResponse = BeginAndGetFilteredResponse(response);
-
   // We open a pipe so that we can immediately set the pipe's read end as the
   // response's body. Setting the segment size to UINT32_MAX means that the
   // pipe has infinite space. The nsIChannel will continue to buffer data in
@@ -655,14 +684,25 @@ FetchDriver::OnStartRequest(nsIRequest* aRequest,
   rv = NS_NewPipe(getter_AddRefs(pipeInputStream),
                   getter_AddRefs(mPipeOutputStream),
                   0, /* default segment size */
-                  UINT32_MAX /* infinite pipe */);
+                  UINT32_MAX /* infinite pipe */,
+                  true /* non-blocking input, otherwise you deadlock */,
+                  false /* blocking output, since the pipe is 'in'finite */ );
   if (NS_WARN_IF(NS_FAILED(rv))) {
     FailWithNetworkError();
     // Cancel request.
     return rv;
   }
+  response->SetBody(pipeInputStream);
 
-  mResponse->SetBody(pipeInputStream);
+  nsCOMPtr<nsISupports> securityInfo;
+  rv = channel->GetSecurityInfo(getter_AddRefs(securityInfo));
+  if (securityInfo) {
+    response->SetSecurityInfo(securityInfo);
+  }
+
+  // Resolves fetch() promise which may trigger code running in a worker.  Make
+  // sure the Response is fully initialized before calling this.
+  mResponse = BeginAndGetFilteredResponse(response);
 
   nsCOMPtr<nsIEventTarget> sts = do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID, &rv);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -747,7 +787,7 @@ FetchDriver::AsyncOnChannelRedirect(nsIChannel* aOldChannel,
   if (!NS_IsInternalSameURIRedirect(aOldChannel, aNewChannel, aFlags)) {
     rv = DoesNotRequirePreflight(aNewChannel);
     if (NS_FAILED(rv)) {
-      NS_WARNING("nsXMLHttpRequest::OnChannelRedirect: "
+      NS_WARNING("FetchDriver::OnChannelRedirect: "
                  "DoesNotRequirePreflight returned failure");
       return rv;
     }
@@ -866,6 +906,14 @@ FetchDriver::OnRedirectVerifyCallback(nsresult aResult)
   mRedirectCallback->OnRedirectVerifyCallback(aResult);
   mRedirectCallback = nullptr;
   return NS_OK;
+}
+
+void
+FetchDriver::SetDocument(nsIDocument* aDocument)
+{
+  // Cannot set document after Fetch() has been called.
+  MOZ_ASSERT(mFetchRecursionCount == 0);
+  mDocument = aDocument;
 }
 } // namespace dom
 } // namespace mozilla

@@ -43,8 +43,9 @@ enum TrackType { kVideo = 1, kAudio };
 class MP4Demuxer
 {
 public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MP4Demuxer)
+
   explicit MP4Demuxer(Stream* aSource, Monitor* aMonitor);
-  ~MP4Demuxer();
 
   bool Init();
   Microseconds Duration();
@@ -58,8 +59,8 @@ public:
 
   // DemuxAudioSample and DemuxVideoSample functions
   // return nullptr on end of stream or error.
-  MP4Sample* DemuxAudioSample();
-  MP4Sample* DemuxVideoSample();
+  already_AddRefed<mozilla::MediaRawData> DemuxAudioSample();
+  already_AddRefed<mozilla::MediaRawData> DemuxVideoSample();
 
   const CryptoFile& Crypto() { return mCrypto; }
   const AudioDecoderConfig& AudioConfig() { return mAudioConfig; }
@@ -77,7 +78,11 @@ public:
   // report this.
   Microseconds GetNextKeyframeTime();
 
+protected:
+  ~MP4Demuxer();
+
 private:
+  void UpdateCrypto(const stagefright::MetaData* aMetaData);
   AudioDecoderConfig mAudioConfig;
   VideoDecoderConfig mVideoConfig;
   CryptoFile mCrypto;

@@ -38,13 +38,12 @@ NS_NewXBLContentSink(nsIXMLContentSink** aResult,
 {
   NS_ENSURE_ARG_POINTER(aResult);
 
-  nsXBLContentSink* it = new nsXBLContentSink();
-
-  nsCOMPtr<nsIXMLContentSink> kungFuDeathGrip = it;
+  nsRefPtr<nsXBLContentSink> it = new nsXBLContentSink();
   nsresult rv = it->Init(aDoc, aURI, aContainer);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return CallQueryInterface(it, aResult);
+  it.forget(aResult);
+  return NS_OK;
 }
 
 nsXBLContentSink::nsXBLContentSink()
@@ -137,9 +136,9 @@ nsXBLContentSink::FlushText(bool aReleaseTextNode)
     nsIContent* content = GetCurrentContent();
     if (content &&
         (content->NodeInfo()->NamespaceEquals(kNameSpaceID_XBL) ||
-         (content->NodeInfo()->NamespaceEquals(kNameSpaceID_XUL) &&
-          content->Tag() != nsGkAtoms::label &&
-          content->Tag() != nsGkAtoms::description))) {
+         (content->IsXULElement() &&
+          !content->IsAnyOfXULElements(nsGkAtoms::label,
+                                       nsGkAtoms::description)))) {
 
       bool isWS = true;
       if (mTextLength > 0) {
@@ -884,7 +883,7 @@ nsresult
 nsXBLContentSink::AddAttributes(const char16_t** aAtts,
                                 nsIContent* aContent)
 {
-  if (aContent->IsXUL())
+  if (aContent->IsXULElement())
     return NS_OK; // Nothing to do, since the proto already has the attrs.
 
   return nsXMLContentSink::AddAttributes(aAtts, aContent);

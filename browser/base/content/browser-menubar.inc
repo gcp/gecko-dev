@@ -306,6 +306,9 @@
                           type="checkbox"
                           observes="View:FullScreen"/>
 #endif
+                <menuitem id="menu_readerModeItem"
+                          observes="View:ReaderView"
+                          hidden="true"/>
                 <menuitem id="menu_showAllTabs"
                           hidden="true"
                           accesskey="&showAllTabsCmd.accesskey;"
@@ -317,7 +320,9 @@
                           hidden="true"
                           label="&bidiSwitchPageDirectionItem.label;"
                           accesskey="&bidiSwitchPageDirectionItem.accesskey;"
-                          oncommand="SwitchDocumentDirection(window.content)"/>
+                          oncommand="gBrowser.selectedBrowser
+                                             .messageManager
+                                             .sendAsyncMessage('SwitchDocumentDirection');"/>
               </menupopup>
             </menu>
 
@@ -446,7 +451,9 @@
       </menu>
 #ifndef XP_MACOSX
 # Disabled on Mac because we can't fill native menupopups asynchronously
-      <menuseparator/>
+      <menuseparator id="menu_readingListSeparator">
+        <observes element="readingListSidebar" attribute="hidden"/>
+      </menuseparator>
       <menu id="menu_readingList"
             class="menu-iconic bookmark-item"
             label="&readingList.label;"

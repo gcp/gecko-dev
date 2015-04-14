@@ -110,6 +110,8 @@ static StaticRefPtr<HwcComposer2D> sInstance;
 HwcComposer2D::HwcComposer2D()
     : mHwc(nullptr)
     , mList(nullptr)
+    , mDpy(EGL_NO_DISPLAY)
+    , mSur(EGL_NO_SURFACE)
     , mGLContext(nullptr)
     , mMaxLayerCount(0)
     , mColorFill(false)
@@ -117,7 +119,6 @@ HwcComposer2D::HwcComposer2D()
 #if ANDROID_VERSION >= 17
     , mPrevRetireFence(Fence::NO_FENCE)
     , mPrevDisplayFence(Fence::NO_FENCE)
-    , mLastVsyncTime(0)
 #endif
     , mPrepared(false)
     , mHasHWVsync(false)
@@ -126,21 +127,11 @@ HwcComposer2D::HwcComposer2D()
 #if ANDROID_VERSION >= 17
     RegisterHwcEventCallback();
 #endif
-}
-
-HwcComposer2D::~HwcComposer2D() {
-    free(mList);
-}
-
-int
-HwcComposer2D::Init(hwc_display_t dpy, hwc_surface_t sur, gl::GLContext* aGLContext)
-{
-    MOZ_ASSERT(!Initialized());
 
     mHwc = (HwcDevice*)GetGonkDisplay()->GetHWCDevice();
     if (!mHwc) {
-        LOGE("Failed to initialize hwc");
-        return -1;
+        LOGD("no hwc support");
+        return;
     }
 
     nsIntSize screenSize;
@@ -170,12 +161,10 @@ HwcComposer2D::Init(hwc_display_t dpy, hwc_surface_t sur, gl::GLContext* aGLCont
     mColorFill = (atoi(propValue) == 1) ? true : false;
     mRBSwapSupport = true;
 #endif
+}
 
-    mDpy = dpy;
-    mSur = sur;
-    mGLContext = aGLContext;
-
-    return 0;
+HwcComposer2D::~HwcComposer2D() {
+    free(mList);
 }
 
 HwcComposer2D*
@@ -229,12 +218,6 @@ void
 HwcComposer2D::Vsync(int aDisplay, nsecs_t aVsyncTimestamp)
 {
     TimeStamp vsyncTime = mozilla::TimeStamp::FromSystemTime(aVsyncTimestamp);
-    nsecs_t vsyncInterval = aVsyncTimestamp - mLastVsyncTime;
-    if (vsyncInterval < 16000000 || vsyncInterval > 17000000) {
-      LOGE("Non-uniform vsync interval: %lld\n", vsyncInterval);
-    }
-    mLastVsyncTime = aVsyncTimestamp;
-
     gfxPlatform::GetPlatform()->GetHardwareVsync()->GetGlobalDisplay().NotifyVsync(vsyncTime);
 }
 
@@ -242,7 +225,7 @@ HwcComposer2D::Vsync(int aDisplay, nsecs_t aVsyncTimestamp)
 void
 HwcComposer2D::Invalidate()
 {
-    if (!Initialized()) {
+    if (!mHwc) {
         LOGE("HwcComposer2D::Invalidate failed!");
         return;
     }
@@ -259,6 +242,14 @@ HwcComposer2D::SetCompositorParent(CompositorParent* aCompositorParent)
 {
     MutexAutoLock lock(mLock);
     mCompositorParent = aCompositorParent;
+}
+
+void
+HwcComposer2D::SetEGLInfo(hwc_display_t aDisplay, hwc_surface_t aSurface, gl::GLContext* aGLContext)
+{
+    mDpy = aDisplay;
+    mSur = aSurface;
+    mGLContext = aGLContext;
 }
 
 bool
@@ -328,6 +319,10 @@ HwcComposer2D::PrepareLayerList(Layer* aLayer,
     }
 
     uint8_t opacity = std::min(0xFF, (int)(aLayer->GetEffectiveOpacity() * 256.0));
+    if (opacity == 0) {
+        LOGD("%s Layer has zero opacity; skipping", aLayer->Name());
+        return true;
+    }
 #if ANDROID_VERSION < 18
     if (opacity < 0xFF) {
         LOGD("%s Layer has planar semitransparency which is unsupported by hwcomposer", aLayer->Name());
@@ -738,13 +733,6 @@ HwcComposer2D::TryHwComposition()
             // GPU or partial OVERLAY Composition
             return false;
         } else if (blitComposite) {
-            // Some EGLSurface implementations require glClear() on blit composition.
-            // See bug 1029856.
-            if (mGLContext) {
-                mGLContext->MakeCurrent();
-                mGLContext->fClearColor(0.0, 0.0, 0.0, 0.0);
-                mGLContext->fClear(LOCAL_GL_COLOR_BUFFER_BIT);
-            }
             // BLIT Composition, flip FB target
             GetGonkDisplay()->UpdateFBSurface(mDpy, mSur);
             FramebufferSurface* fbsurface = (FramebufferSurface*)(GetGonkDisplay()->GetFBSurface());
@@ -766,14 +754,12 @@ HwcComposer2D::TryHwComposition()
 }
 
 bool
-HwcComposer2D::Render(EGLDisplay dpy, EGLSurface sur)
+HwcComposer2D::Render()
 {
-    if (!mList) {
-        // After boot, HWC list hasn't been created yet
-        return GetGonkDisplay()->SwapBuffers(dpy, sur);
+    // HWC module does not exist.
+    if (!mHwc) {
+        GetGonkDisplay()->SwapBuffers(mDpy, mSur);// Only GonkDisplayICS uses arguments.
     }
-
-    GetGonkDisplay()->UpdateFBSurface(dpy, sur);
 
     FramebufferSurface* fbsurface = (FramebufferSurface*)(GetGonkDisplay()->GetFBSurface());
     if (!fbsurface) {
@@ -914,9 +900,9 @@ HwcComposer2D::TryHwComposition()
 }
 
 bool
-HwcComposer2D::Render(EGLDisplay dpy, EGLSurface sur)
+HwcComposer2D::Render()
 {
-    return GetGonkDisplay()->SwapBuffers(dpy, sur);
+    return GetGonkDisplay()->SwapBuffers(mDpy, mSur);
 }
 
 void
@@ -927,10 +913,13 @@ HwcComposer2D::Reset()
 #endif
 
 bool
-HwcComposer2D::TryRender(Layer* aRoot,
-                         bool aGeometryChanged)
+HwcComposer2D::TryRenderWithHwc(Layer* aRoot,
+                                bool aGeometryChanged)
 {
-    MOZ_ASSERT(Initialized());
+    if (!mHwc) {
+        return false;
+    }
+
     if (mList) {
         setHwcGeometry(aGeometryChanged);
         mList->numHwLayers = 0;
@@ -959,7 +948,7 @@ HwcComposer2D::TryRender(Layer* aRoot,
     SendtoLayerScope();
 
     if (!TryHwComposition()) {
-        LOGD("H/W Composition failed");
+        LOGD("Full HWC Composition failed. Fallback to GPU Composition or partial OVERLAY Composition");
         LayerScope::CleanLayer();
         return false;
     }

@@ -32,29 +32,29 @@ public:
   {}
 
 
-  virtual void GetName(nsAString& aName) MOZ_OVERRIDE;
-  virtual void GetUUID(nsAString& aUUID) MOZ_OVERRIDE;
-  virtual void SetDirectListeners(bool aHasListeners) MOZ_OVERRIDE;
+  virtual void GetName(nsAString& aName) override;
+  virtual void GetUUID(nsAString& aUUID) override;
+  virtual void SetDirectListeners(bool aHasListeners) override;
   virtual nsresult Config(bool aEchoOn, uint32_t aEcho,
                           bool aAgcOn, uint32_t aAGC,
                           bool aNoiseOn, uint32_t aNoise,
-                          int32_t aPlayoutDelay) MOZ_OVERRIDE
+                          int32_t aPlayoutDelay) override
   {
     return NS_OK;
   };
 
-  virtual bool IsFake() MOZ_OVERRIDE
+  virtual bool IsFake() override
   {
     return false;
   }
 
-  virtual nsresult TakePhoto(PhotoCallback* aCallback) MOZ_OVERRIDE
+  virtual nsresult TakePhoto(PhotoCallback* aCallback) override
   {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
   uint32_t GetBestFitnessDistance(
-      const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets) MOZ_OVERRIDE;
+      const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets) override;
 
 protected:
   struct CapabilityCandidate {
@@ -78,6 +78,8 @@ protected:
   static uint32_t GetFitnessDistance(const webrtc::CaptureCapability& aCandidate,
                                      const dom::MediaTrackConstraintSet &aConstraints);
   static void TrimLessFitCandidates(CapabilitySet& set);
+  static void LogConstraints(const dom::MediaTrackConstraintSet& aConstraints,
+                             bool aAdvanced);
   virtual size_t NumCapabilities();
   virtual void GetCapability(size_t aIndex, webrtc::CaptureCapability& aOut);
   bool ChooseCapability(const dom::MediaTrackConstraints &aConstraints,
@@ -93,7 +95,7 @@ protected:
 
   // All the mMonitor accesses are from the child classes.
   Monitor mMonitor; // Monitor for processing Camera frames.
-  nsTArray<SourceMediaStream*> mSources; // When this goes empty, we shut down HW
+  nsTArray<nsRefPtr<SourceMediaStream>> mSources; // When this goes empty, we shut down HW
   nsRefPtr<layers::Image> mImage;
   nsRefPtr<layers::ImageContainer> mImageContainer;
   int mWidth, mHeight; // protected with mMonitor on Gonk due to different threading

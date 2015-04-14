@@ -184,8 +184,8 @@ public:
   }
 #endif
 
-  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) MOZ_OVERRIDE;
-  virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) MOZ_OVERRIDE;
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) override;
+  virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("RangeFocusRing", TYPE_OUTLINE)
 };
 
@@ -279,6 +279,7 @@ nsRangeFrame::Reflow(nsPresContext*           aPresContext,
                      const nsHTMLReflowState& aReflowState,
                      nsReflowStatus&          aStatus)
 {
+  MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsRangeFrame");
   DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
 
@@ -450,7 +451,7 @@ nsRangeFrame::AccessibleType()
 double
 nsRangeFrame::GetValueAsFractionOfRange()
 {
-  MOZ_ASSERT(mContent->IsHTML(nsGkAtoms::input), "bad cast");
+  MOZ_ASSERT(mContent->IsHTMLElement(nsGkAtoms::input), "bad cast");
   dom::HTMLInputElement* input = static_cast<dom::HTMLInputElement*>(mContent);
 
   MOZ_ASSERT(input->GetType() == NS_FORM_INPUT_RANGE);
@@ -479,7 +480,7 @@ nsRangeFrame::GetValueAtEventPoint(WidgetGUIEvent* aEvent)
              aEvent->mClass == eTouchEventClass,
              "Unexpected event type - aEvent->refPoint may be meaningless");
 
-  MOZ_ASSERT(mContent->IsHTML(nsGkAtoms::input), "bad cast");
+  MOZ_ASSERT(mContent->IsHTMLElement(nsGkAtoms::input), "bad cast");
   dom::HTMLInputElement* input = static_cast<dom::HTMLInputElement*>(mContent);
 
   MOZ_ASSERT(input->GetType() == NS_FORM_INPUT_RANGE);
@@ -516,7 +517,7 @@ nsRangeFrame::GetValueAtEventPoint(WidgetGUIEvent* aEvent)
     // We need to get the size of the thumb from the theme.
     nsPresContext *presContext = PresContext();
     bool notUsedCanOverride;
-    nsIntSize size;
+    LayoutDeviceIntSize size;
     presContext->GetTheme()->
       GetMinimumWidgetSize(presContext, this, NS_THEME_RANGE_THUMB, &size,
                            &notUsedCanOverride);
@@ -710,7 +711,7 @@ nsRangeFrame::AttributeChanged(int32_t  aNameSpaceID,
       // HTMLInputElement. Given that we're changing away from being a range
       // and this frame will shortly be destroyed, there's no point in calling
       // UpdateForValueChange() anyway.
-      MOZ_ASSERT(mContent->IsHTML(nsGkAtoms::input), "bad cast");
+      MOZ_ASSERT(mContent->IsHTMLElement(nsGkAtoms::input), "bad cast");
       bool typeIsRange = static_cast<dom::HTMLInputElement*>(mContent)->GetType() ==
                            NS_FORM_INPUT_RANGE;
       // If script changed the <input>'s type before setting these attributes

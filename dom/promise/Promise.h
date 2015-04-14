@@ -50,7 +50,7 @@ public:
   }
 
   virtual bool
-  Notify(JSContext* aCx, workers::Status aStatus) MOZ_OVERRIDE;
+  Notify(JSContext* aCx, workers::Status aStatus) override;
 };
 
 #define NS_PROMISE_IID \
@@ -62,6 +62,7 @@ class Promise : public nsISupports,
                 public SupportsWeakPtr<Promise>
 {
   friend class NativePromiseCallback;
+  friend class PromiseCallbackTask;
   friend class PromiseResolverTask;
   friend class PromiseTask;
   friend class PromiseReportRejectFeature;
@@ -138,7 +139,7 @@ public:
   }
 
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   static already_AddRefed<Promise>
   Constructor(const GlobalObject& aGlobal, PromiseInit& aInit,
@@ -291,8 +292,7 @@ private:
   JSCallbackThenableRejecter(JSContext *aCx, unsigned aArgc, JS::Value *aVp);
 
   static JSObject*
-  CreateFunction(JSContext* aCx, JSObject* aParent, Promise* aPromise,
-                int32_t aTask);
+  CreateFunction(JSContext* aCx, Promise* aPromise, int32_t aTask);
 
   static JSObject*
   CreateThenableFunction(JSContext* aCx, Promise* aPromise, uint32_t aTask);

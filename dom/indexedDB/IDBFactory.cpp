@@ -54,7 +54,7 @@ const char kPrefIndexedDBEnabled[] = "dom.indexedDB.enabled";
 
 } // anonymous namespace
 
-class IDBFactory::BackgroundCreateCallback MOZ_FINAL
+class IDBFactory::BackgroundCreateCallback final
   : public nsIIPCBackgroundChildCreateCallback
 {
   nsRefPtr<IDBFactory> mFactory;
@@ -309,6 +309,7 @@ IDBFactory::CreateForJSInternal(JSContext* aCx,
   if (aPrincipalInfo->type() != PrincipalInfo::TContentPrincipalInfo &&
       aPrincipalInfo->type() != PrincipalInfo::TSystemPrincipalInfo) {
     NS_WARNING("IndexedDB not allowed for this principal!");
+    aPrincipalInfo = nullptr;
     *aFactory = nullptr;
     return NS_OK;
   }
@@ -899,9 +900,9 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBFactory)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 JSObject*
-IDBFactory::WrapObject(JSContext* aCx)
+IDBFactory::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return IDBFactoryBinding::Wrap(aCx, this);
+  return IDBFactoryBinding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_ISUPPORTS(IDBFactory::BackgroundCreateCallback,

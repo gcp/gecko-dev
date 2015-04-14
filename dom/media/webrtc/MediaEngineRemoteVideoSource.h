@@ -50,14 +50,14 @@ public:
 
   // ExternalRenderer
   virtual int FrameSizeChange(unsigned int w, unsigned int h,
-                              unsigned int streams) MOZ_OVERRIDE;
+                              unsigned int streams) override;
   virtual int DeliverFrame(unsigned char* buffer,
                            int size,
                            uint32_t time_stamp,
                            int64_t ntp_time,
                            int64_t render_time,
-                           void *handle) MOZ_OVERRIDE;
-  virtual bool IsTextureSupported() MOZ_OVERRIDE { return false; };
+                           void *handle) override;
+  virtual bool IsTextureSupported() override { return false; };
 
   //
   MediaEngineRemoteVideoSource(int aIndex, mozilla::camera::CaptureEngine aCapEngine,
@@ -65,15 +65,15 @@ public:
                                const char* aMonitorName = "RemoteVideo.Monitor");
 
   virtual nsresult Allocate(const dom::MediaTrackConstraints& aConstraints,
-                            const MediaEnginePrefs& aPrefs) MOZ_OVERRIDE;
-  virtual nsresult Deallocate() MOZ_OVERRIDE;;
-  virtual nsresult Start(SourceMediaStream*, TrackID) MOZ_OVERRIDE;
-  virtual nsresult Stop(SourceMediaStream*, TrackID) MOZ_OVERRIDE;
+                            const MediaEnginePrefs& aPrefs) override;
+  virtual nsresult Deallocate() override;;
+  virtual nsresult Start(SourceMediaStream*, TrackID) override;
+  virtual nsresult Stop(SourceMediaStream*, TrackID) override;
   virtual void NotifyPull(MediaStreamGraph* aGraph,
                           SourceMediaStream* aSource,
                           TrackID aId,
-                          StreamTime aDesiredTime) MOZ_OVERRIDE;
-  virtual const dom::MediaSourceEnum GetMediaSource() MOZ_OVERRIDE {
+                          StreamTime aDesiredTime) override;
+  virtual const dom::MediaSourceEnum GetMediaSource() override {
     return mMediaSource;
   }
   void Refresh(int aIndex);
@@ -85,8 +85,8 @@ private:
   // Initialize the needed Video engine interfaces.
   void Init();
   void Shutdown();
-  size_t NumCapabilities() MOZ_OVERRIDE;
-  void GetCapability(size_t aIndex, webrtc::CaptureCapability& aOut) MOZ_OVERRIDE;
+  size_t NumCapabilities() override;
+  void GetCapability(size_t aIndex, webrtc::CaptureCapability& aOut) override;
 
   dom::MediaSourceEnum mMediaSource; // source of media (camera | application | screen)
   mozilla::camera::CaptureEngine mCapEngine;

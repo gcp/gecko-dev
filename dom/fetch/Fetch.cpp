@@ -12,8 +12,10 @@
 #include "nsIUnicodeDecoder.h"
 #include "nsIUnicodeEncoder.h"
 
+#include "nsCharSeparatedTokenizer.h"
 #include "nsDOMString.h"
 #include "nsNetUtil.h"
+#include "nsReadableUtils.h"
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
 
@@ -28,10 +30,12 @@
 #include "mozilla/dom/Response.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/URLSearchParams.h"
+#include "mozilla/Telemetry.h"
 
 #include "InternalRequest.h"
 #include "InternalResponse.h"
 
+#include "nsFormData.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
@@ -42,8 +46,8 @@ namespace dom {
 
 using namespace workers;
 
-class WorkerFetchResolver MOZ_FINAL : public FetchDriverObserver,
-                                      public WorkerFeature
+class WorkerFetchResolver final : public FetchDriverObserver,
+                                  public WorkerFeature
 {
   friend class MainThreadFetchRunnable;
   friend class WorkerFetchResponseEndRunnable;
@@ -67,13 +71,13 @@ public:
   }
 
   void
-  OnResponseAvailable(InternalResponse* aResponse) MOZ_OVERRIDE;
+  OnResponseAvailable(InternalResponse* aResponse) override;
 
   void
-  OnResponseEnd() MOZ_OVERRIDE;
+  OnResponseEnd() override;
 
   bool
-  Notify(JSContext* aCx, Status aStatus) MOZ_OVERRIDE
+  Notify(JSContext* aCx, Status aStatus) override
   {
     if (aStatus > Running) {
       CleanUp(aCx);
@@ -126,7 +130,7 @@ private:
   }
 };
 
-class MainThreadFetchResolver MOZ_FINAL : public FetchDriverObserver
+class MainThreadFetchResolver final : public FetchDriverObserver
 {
   nsRefPtr<Promise> mPromise;
   nsRefPtr<Response> mResponse;
@@ -136,7 +140,7 @@ public:
   explicit MainThreadFetchResolver(Promise* aPromise);
 
   void
-  OnResponseAvailable(InternalResponse* aResponse) MOZ_OVERRIDE;
+  OnResponseAvailable(InternalResponse* aResponse) override;
 
 private:
   ~MainThreadFetchResolver();
@@ -177,7 +181,7 @@ public:
     nsRefPtr<FetchDriver> fetch = new FetchDriver(mRequest, principal, loadGroup);
     nsIDocument* doc = mResolver->GetWorkerPrivate()->GetDocument();
     if (doc) {
-      fetch->SetReferrerPolicy(doc->GetReferrerPolicy());
+      fetch->SetDocument(doc);
     }
 
     nsresult rv = fetch->Fetch(mResolver);
@@ -230,11 +234,13 @@ FetchRequest(nsIGlobalObject* aGlobal, const RequestOrUSVString& aInput,
       return nullptr;
     }
 
+    Telemetry::Accumulate(Telemetry::FETCH_IS_MAINTHREAD, 1);
+
     nsRefPtr<MainThreadFetchResolver> resolver = new MainThreadFetchResolver(p);
     nsCOMPtr<nsILoadGroup> loadGroup = doc->GetDocumentLoadGroup();
     nsRefPtr<FetchDriver> fetch =
       new FetchDriver(r, doc->NodePrincipal(), loadGroup);
-    fetch->SetReferrerPolicy(doc->GetReferrerPolicy());
+    fetch->SetDocument(doc);
     aRv = fetch->Fetch(resolver);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
@@ -242,6 +248,8 @@ FetchRequest(nsIGlobalObject* aGlobal, const RequestOrUSVString& aInput,
   } else {
     WorkerPrivate* worker = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(worker);
+
+    Telemetry::Accumulate(Telemetry::FETCH_IS_MAINTHREAD, 0);
 
     if (worker->IsServiceWorker()) {
       r->SetSkipServiceWorker();
@@ -283,7 +291,7 @@ MainThreadFetchResolver::~MainThreadFetchResolver()
   NS_ASSERT_OWNINGTHREAD(MainThreadFetchResolver);
 }
 
-class WorkerFetchResponseRunnable MOZ_FINAL : public WorkerRunnable
+class WorkerFetchResponseRunnable final : public WorkerRunnable
 {
   nsRefPtr<WorkerFetchResolver> mResolver;
   // Passed from main thread to worker thread after being initialized.
@@ -297,7 +305,7 @@ public:
   }
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     MOZ_ASSERT(aWorkerPrivate);
     aWorkerPrivate->AssertIsOnWorkerThread();
@@ -315,12 +323,11 @@ public:
       result.ThrowTypeError(MSG_FETCH_FAILED);
       promise->MaybeReject(result);
     }
-
     return true;
   }
 };
 
-class WorkerFetchResponseEndRunnable MOZ_FINAL : public WorkerRunnable
+class WorkerFetchResponseEndRunnable final : public WorkerRunnable
 {
   nsRefPtr<WorkerFetchResolver> mResolver;
 public:
@@ -331,7 +338,7 @@ public:
   }
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     MOZ_ASSERT(aWorkerPrivate);
     aWorkerPrivate->AssertIsOnWorkerThread();
@@ -454,6 +461,16 @@ ExtractFromBlob(const File& aFile, nsIInputStream** aStream,
 }
 
 nsresult
+ExtractFromFormData(nsFormData& aFormData, nsIInputStream** aStream,
+                    nsCString& aContentType)
+{
+  uint64_t unusedContentLength;
+  nsAutoCString unusedCharset;
+  return aFormData.GetSendInfo(aStream, &unusedContentLength,
+                               aContentType, unusedCharset);
+}
+
+nsresult
 ExtractFromUSVString(const nsString& aStr,
                      nsIInputStream** aStream,
                      nsCString& aContentType)
@@ -500,10 +517,386 @@ ExtractFromURLSearchParams(const URLSearchParams& aParams,
   aContentType = NS_LITERAL_CSTRING("application/x-www-form-urlencoded;charset=UTF-8");
   return NS_NewStringInputStream(aStream, serialized);
 }
+
+void
+FillFormData(const nsString& aName, const nsString& aValue, void* aFormData)
+{
+  MOZ_ASSERT(aFormData);
+  nsFormData* fd = static_cast<nsFormData*>(aFormData);
+  fd->Append(aName, aValue);
+}
+
+/**
+ * A simple multipart/form-data parser as defined in RFC 2388 and RFC 2046.
+ * This does not respect any encoding specified per entry, using UTF-8
+ * throughout. This is as the Fetch spec states in the consume body algorithm.
+ * Borrows some things from Necko's nsMultiMixedConv, but is simpler since
+ * unlike Necko we do not have to deal with receiving incomplete chunks of data.
+ *
+ * This parser will fail the entire parse on any invalid entry, so it will
+ * never return a partially filled FormData.
+ * The content-disposition header is used to figure out the name and filename
+ * entries. The inclusion of the filename parameter decides if the entry is
+ * inserted into the nsFormData as a string or a File.
+ *
+ * File blobs are copies of the underlying data string since we cannot adopt
+ * char* chunks embedded within the larger body without significant effort.
+ * FIXME(nsm): Bug 1127552 - We should add telemetry to calls to formData() and
+ * friends to figure out if Fetch ends up copying big blobs to see if this is
+ * worth optimizing.
+ */
+class MOZ_STACK_CLASS FormDataParser
+{
+private:
+  nsRefPtr<nsFormData> mFormData;
+  nsCString mMimeType;
+  nsCString mData;
+
+  // Entry state, reset in START_PART.
+  nsCString mName;
+  nsCString mFilename;
+  nsCString mContentType;
+
+  enum
+  {
+    START_PART,
+    PARSE_HEADER,
+    PARSE_BODY,
+  } mState;
+
+  nsIGlobalObject* mParentObject;
+
+  // Reads over a boundary and sets start to the position after the end of the
+  // boundary. Returns false if no boundary is found immediately.
+  bool
+  PushOverBoundary(const nsACString& aBoundaryString,
+                   nsACString::const_iterator& aStart,
+                   nsACString::const_iterator& aEnd)
+  {
+    // We copy the end iterator to keep the original pointing to the real end
+    // of the string.
+    nsACString::const_iterator end(aEnd);
+    const char* beginning = aStart.get();
+    if (FindInReadable(aBoundaryString, aStart, end)) {
+      // We either should find the body immediately, or after 2 chars with the
+      // 2 chars being '-', everything else is failure.
+      if ((aStart.get() - beginning) == 0) {
+        aStart.advance(aBoundaryString.Length());
+        return true;
+      }
+
+      if ((aStart.get() - beginning) == 2) {
+        if (*(--aStart) == '-' && *(--aStart) == '-') {
+          aStart.advance(aBoundaryString.Length() + 2);
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  // Reads over a CRLF and positions start after it.
+  bool
+  PushOverLine(nsACString::const_iterator& aStart)
+  {
+    if (*aStart == nsCRT::CR && (aStart.size_forward() > 1) && *(++aStart) == nsCRT::LF) {
+      ++aStart; // advance to after CRLF
+      return true;
+    }
+
+    return false;
+  }
+
+  bool
+  FindCRLF(nsACString::const_iterator& aStart,
+           nsACString::const_iterator& aEnd)
+  {
+    nsACString::const_iterator end(aEnd);
+    return FindInReadable(NS_LITERAL_CSTRING("\r\n"), aStart, end);
+  }
+
+  bool
+  ParseHeader(nsACString::const_iterator& aStart,
+              nsACString::const_iterator& aEnd,
+              bool* aWasEmptyHeader)
+  {
+    MOZ_ASSERT(aWasEmptyHeader);
+    // Set it to a valid value here so we don't forget later.
+    *aWasEmptyHeader = false;
+
+    const char* beginning = aStart.get();
+    nsACString::const_iterator end(aEnd);
+    if (!FindCRLF(aStart, end)) {
+      return false;
+    }
+
+    if (aStart.get() == beginning) {
+      *aWasEmptyHeader = true;
+      return true;
+    }
+
+    nsAutoCString header(beginning, aStart.get() - beginning);
+
+    nsACString::const_iterator headerStart, headerEnd;
+    header.BeginReading(headerStart);
+    header.EndReading(headerEnd);
+    if (!FindCharInReadable(':', headerStart, headerEnd)) {
+      return false;
+    }
+
+    nsAutoCString headerName(StringHead(header, headerStart.size_backward()));
+    headerName.CompressWhitespace();
+    if (!NS_IsValidHTTPToken(headerName)) {
+      return false;
+    }
+
+    nsAutoCString headerValue(Substring(++headerStart, headerEnd));
+    if (!NS_IsReasonableHTTPHeaderValue(headerValue)) {
+      return false;
+    }
+    headerValue.CompressWhitespace();
+
+    if (headerName.LowerCaseEqualsLiteral("content-disposition")) {
+      nsCCharSeparatedTokenizer tokenizer(headerValue, ';');
+      bool seenFormData = false;
+      while (tokenizer.hasMoreTokens()) {
+        const nsDependentCSubstring& token = tokenizer.nextToken();
+        if (token.IsEmpty()) {
+          continue;
+        }
+
+        if (token.EqualsLiteral("form-data")) {
+          seenFormData = true;
+          continue;
+        }
+
+        if (seenFormData &&
+            StringBeginsWith(token, NS_LITERAL_CSTRING("name="))) {
+          mName = StringTail(token, token.Length() - 5);
+          mName.Trim(" \"");
+          continue;
+        }
+
+        if (seenFormData &&
+            StringBeginsWith(token, NS_LITERAL_CSTRING("filename="))) {
+          mFilename = StringTail(token, token.Length() - 9);
+          mFilename.Trim(" \"");
+          continue;
+        }
+      }
+
+      if (mName.IsVoid()) {
+        // Could not parse a valid entry name.
+        return false;
+      }
+    } else if (headerName.LowerCaseEqualsLiteral("content-type")) {
+      mContentType = headerValue;
+    }
+
+    return true;
+  }
+
+  // The end of a body is marked by a CRLF followed by the boundary. So the
+  // CRLF is part of the boundary and not the body, but any prior CRLFs are
+  // part of the body. This will position the iterator at the beginning of the
+  // boundary (after the CRLF).
+  bool
+  ParseBody(const nsACString& aBoundaryString,
+            nsACString::const_iterator& aStart,
+            nsACString::const_iterator& aEnd)
+  {
+    const char* beginning = aStart.get();
+
+    // Find the boundary marking the end of the body.
+    nsACString::const_iterator end(aEnd);
+    if (!FindInReadable(aBoundaryString, aStart, end)) {
+      return false;
+    }
+
+    // We found a boundary, strip the just prior CRLF, and consider
+    // everything else the body section.
+    if (aStart.get() - beginning < 2) {
+      // Only the first entry can have a boundary right at the beginning. Even
+      // an empty body will have a CRLF before the boundary. So this is
+      // a failure.
+      return false;
+    }
+
+    // Check that there is a CRLF right before the boundary.
+    aStart.advance(-2);
+
+    // Skip optional hyphens.
+    if (*aStart == '-' && *(aStart.get()+1) == '-') {
+      if (aStart.get() - beginning < 2) {
+        return false;
+      }
+
+      aStart.advance(-2);
+    }
+
+    if (*aStart != nsCRT::CR || *(aStart.get()+1) != nsCRT::LF) {
+      return false;
+    }
+
+    nsAutoCString body(beginning, aStart.get() - beginning);
+
+    // Restore iterator to after the \r\n as we promised.
+    // We do not need to handle the extra hyphens case since our boundary
+    // parser in PushOverBoundary()
+    aStart.advance(2);
+
+    if (!mFormData) {
+      mFormData = new nsFormData();
+    }
+
+    NS_ConvertUTF8toUTF16 name(mName);
+
+    if (mFilename.IsVoid()) {
+      mFormData->Append(name, NS_ConvertUTF8toUTF16(body));
+    } else {
+      // Unfortunately we've to copy the data first since all our strings are
+      // going to free it. We also need fallible alloc, so we can't just use
+      // ToNewCString().
+      char* copy = static_cast<char*>(NS_Alloc(body.Length()));
+      if (!copy) {
+        NS_WARNING("Failed to copy File entry body.");
+        return false;
+      }
+      nsCString::const_iterator bodyIter, bodyEnd;
+      body.BeginReading(bodyIter);
+      body.EndReading(bodyEnd);
+      char *p = copy;
+      while (bodyIter != bodyEnd) {
+        *p++ = *bodyIter++;
+      }
+      p = nullptr;
+
+      nsRefPtr<File> file =
+        File::CreateMemoryFile(mParentObject,
+                               reinterpret_cast<void *>(copy), body.Length(),
+                               NS_ConvertUTF8toUTF16(mFilename),
+                               NS_ConvertUTF8toUTF16(mContentType), /* aLastModifiedDate */ 0);
+      Optional<nsAString> dummy;
+      mFormData->Append(name, *file, dummy);
+    }
+
+    return true;
+  }
+
+public:
+  FormDataParser(const nsACString& aMimeType, const nsACString& aData, nsIGlobalObject* aParent)
+    : mMimeType(aMimeType), mData(aData), mState(START_PART), mParentObject(aParent)
+  {
+  }
+
+  bool
+  Parse()
+  {
+    // Determine boundary from mimetype.
+    const char* boundaryId = nullptr;
+    boundaryId = strstr(mMimeType.BeginWriting(), "boundary");
+    if (!boundaryId) {
+      return false;
+    }
+
+    boundaryId = strchr(boundaryId, '=');
+    if (!boundaryId) {
+      return false;
+    }
+
+    // Skip over '='.
+    boundaryId++;
+
+    char *attrib = (char *) strchr(boundaryId, ';');
+    if (attrib) *attrib = '\0';
+
+    nsAutoCString boundaryString(boundaryId);
+    if (attrib) *attrib = ';';
+
+    boundaryString.Trim(" \"");
+
+    if (boundaryString.Length() == 0) {
+      return false;
+    }
+
+    nsACString::const_iterator start, end;
+    mData.BeginReading(start);
+    // This should ALWAYS point to the end of data.
+    // Helpers make copies.
+    mData.EndReading(end);
+
+    while (start != end) {
+      switch(mState) {
+        case START_PART:
+          mName.SetIsVoid(true);
+          mFilename.SetIsVoid(true);
+          mContentType = NS_LITERAL_CSTRING("text/plain");
+
+          // MUST start with boundary.
+          if (!PushOverBoundary(boundaryString, start, end)) {
+            return false;
+          }
+
+          if (start != end && *start == '-') {
+            // End of data.
+            if (!mFormData) {
+              mFormData = new nsFormData();
+            }
+            return true;
+          }
+
+          if (!PushOverLine(start)) {
+            return false;
+          }
+          mState = PARSE_HEADER;
+          break;
+
+        case PARSE_HEADER:
+          bool emptyHeader;
+          if (!ParseHeader(start, end, &emptyHeader)) {
+            return false;
+          }
+
+          if (!PushOverLine(start)) {
+            return false;
+          }
+
+          mState = emptyHeader ? PARSE_BODY : PARSE_HEADER;
+          break;
+
+        case PARSE_BODY:
+          if (mName.IsVoid()) {
+            NS_WARNING("No content-disposition header with a valid name was "
+                       "found. Failing at body parse.");
+            return false;
+          }
+
+          if (!ParseBody(boundaryString, start, end)) {
+            return false;
+          }
+
+          mState = START_PART;
+          break;
+
+        default:
+          MOZ_CRASH("Invalid case");
+      }
+    }
+
+    NS_NOTREACHED("Should never reach here.");
+    return false;
+  }
+
+  already_AddRefed<nsFormData> FormData()
+  {
+    return mFormData.forget();
+  }
+};
 } // anonymous namespace
 
 nsresult
-ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrBlobOrUSVStringOrURLSearchParams& aBodyInit,
+ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrBlobOrFormDataOrUSVStringOrURLSearchParams& aBodyInit,
                           nsIInputStream** aStream,
                           nsCString& aContentType)
 {
@@ -518,6 +911,9 @@ ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrBlobOrUSVStr
   } else if (aBodyInit.IsBlob()) {
     const File& blob = aBodyInit.GetAsBlob();
     return ExtractFromBlob(blob, aStream, aContentType);
+  } else if (aBodyInit.IsFormData()) {
+    nsFormData& form = aBodyInit.GetAsFormData();
+    return ExtractFromFormData(form, aStream, aContentType);
   } else if (aBodyInit.IsUSVString()) {
     nsAutoString str;
     str.Assign(aBodyInit.GetAsUSVString());
@@ -532,7 +928,7 @@ ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrBlobOrUSVStr
 }
 
 nsresult
-ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrBlobOrUSVStringOrURLSearchParams& aBodyInit,
+ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrBlobOrFormDataOrUSVStringOrURLSearchParams& aBodyInit,
                           nsIInputStream** aStream,
                           nsCString& aContentType)
 {
@@ -547,6 +943,9 @@ ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrBlobOrUSVStringOrU
   } else if (aBodyInit.IsBlob()) {
     const File& blob = aBodyInit.GetAsBlob();
     return ExtractFromBlob(blob, aStream, aContentType);
+  } else if (aBodyInit.IsFormData()) {
+    nsFormData& form = aBodyInit.GetAsFormData();
+    return ExtractFromFormData(form, aStream, aContentType);
   } else if (aBodyInit.IsUSVString()) {
     nsAutoString str;
     str.Assign(aBodyInit.GetAsUSVString());
@@ -561,7 +960,7 @@ ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrBlobOrUSVStringOrU
 }
 
 namespace {
-class StreamDecoder MOZ_FINAL
+class StreamDecoder final
 {
   nsCOMPtr<nsIUnicodeDecoder> mDecoder;
   nsString mDecoded;
@@ -612,7 +1011,7 @@ public:
  * Called on successfully reading the complete stream.
  */
 template <class Derived>
-class ContinueConsumeBodyRunnable MOZ_FINAL : public WorkerRunnable
+class ContinueConsumeBodyRunnable final : public WorkerRunnable
 {
   // This has been addrefed before this runnable is dispatched,
   // released in WorkerRun().
@@ -634,7 +1033,7 @@ public:
   }
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     mFetchBody->ContinueConsumeBody(mStatus, mLength, mResult);
     return true;
@@ -643,7 +1042,7 @@ public:
 
 // OnStreamComplete always adopts the buffer, utility class to release it in
 // a couple of places.
-class MOZ_STACK_CLASS AutoFreeBuffer MOZ_FINAL {
+class MOZ_STACK_CLASS AutoFreeBuffer final {
   uint8_t* mBuffer;
 
 public:
@@ -653,7 +1052,7 @@ public:
 
   ~AutoFreeBuffer()
   {
-    moz_free(mBuffer);
+    free(mBuffer);
   }
 
   void
@@ -676,7 +1075,7 @@ public:
   }
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     mBody->ContinueConsumeBody(NS_ERROR_FAILURE, 0, nullptr);
     return true;
@@ -688,7 +1087,7 @@ public:
  * worker, ensure we cleanup properly. Thread agnostic.
  */
 template <class Derived>
-class MOZ_STACK_CLASS AutoFailConsumeBody MOZ_FINAL
+class MOZ_STACK_CLASS AutoFailConsumeBody final
 {
   FetchBody<Derived>* mBody;
 public:
@@ -737,7 +1136,7 @@ public:
                    nsISupports* aCtxt,
                    nsresult aStatus,
                    uint32_t aResultLength,
-                   const uint8_t* aResult) MOZ_OVERRIDE
+                   const uint8_t* aResult) override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -788,7 +1187,7 @@ NS_INTERFACE_MAP_BEGIN(ConsumeBodyDoneObserver<Derived>)
 NS_INTERFACE_MAP_END
 
 template <class Derived>
-class BeginConsumeBodyRunnable MOZ_FINAL : public nsRunnable
+class BeginConsumeBodyRunnable final : public nsRunnable
 {
   FetchBody<Derived>* mFetchBody;
 public:
@@ -797,7 +1196,7 @@ public:
   { }
 
   NS_IMETHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     mFetchBody->BeginConsumeBodyMainThread();
     return NS_OK;
@@ -805,7 +1204,7 @@ public:
 };
 
 template <class Derived>
-class CancelPumpRunnable MOZ_FINAL : public WorkerMainThreadRunnable
+class CancelPumpRunnable final : public WorkerMainThreadRunnable
 {
   FetchBody<Derived>* mBody;
 public:
@@ -815,7 +1214,7 @@ public:
   { }
 
   bool
-  MainThreadRun() MOZ_OVERRIDE
+  MainThreadRun() override
   {
     mBody->CancelPump();
     return true;
@@ -824,7 +1223,7 @@ public:
 } // anonymous namespace
 
 template <class Derived>
-class FetchBodyFeature MOZ_FINAL : public workers::WorkerFeature
+class FetchBodyFeature final : public workers::WorkerFeature
 {
   // This is addrefed before the feature is created, and is released in ContinueConsumeBody()
   // so we can hold a rawptr.
@@ -838,7 +1237,7 @@ public:
   ~FetchBodyFeature()
   { }
 
-  bool Notify(JSContext* aCx, workers::Status aStatus) MOZ_OVERRIDE
+  bool Notify(JSContext* aCx, workers::Status aStatus) override
   {
     MOZ_ASSERT(aStatus > workers::Running);
     mBody->ContinueConsumeBody(NS_BINDING_ABORTED, 0, nullptr);
@@ -1121,6 +1520,56 @@ FetchBody<Derived>::ContinueConsumeBody(nsresult aStatus, uint32_t aResultLength
       autoFree.Reset();
       return;
     }
+    case CONSUME_FORMDATA: {
+      nsCString data;
+      data.Adopt(reinterpret_cast<char*>(aResult), aResultLength);
+      autoFree.Reset();
+
+      NS_NAMED_LITERAL_CSTRING(formDataMimeType, NS_LITERAL_CSTRING("multipart/form-data"));
+
+      // Allow semicolon separated boundary/encoding suffix like multipart/form-data; boundary=
+      // but disallow multipart/form-datafoobar.
+      bool isValidFormDataMimeType = StringBeginsWith(mMimeType, formDataMimeType);
+
+      if (isValidFormDataMimeType && mMimeType.Length() > formDataMimeType.Length()) {
+        isValidFormDataMimeType = mMimeType[formDataMimeType.Length()] == ';';
+      }
+
+      if (isValidFormDataMimeType) {
+        FormDataParser parser(mMimeType, data, DerivedClass()->GetParentObject());
+        if (!parser.Parse()) {
+          ErrorResult result;
+          result.ThrowTypeError(MSG_BAD_FORMDATA);
+          localPromise->MaybeReject(result);
+          return;
+        }
+
+        nsRefPtr<nsFormData> fd = parser.FormData();
+        MOZ_ASSERT(fd);
+        localPromise->MaybeResolve(fd);
+      } else {
+        NS_NAMED_LITERAL_CSTRING(urlDataMimeType, NS_LITERAL_CSTRING("application/x-www-form-urlencoded"));
+        bool isValidUrlEncodedMimeType = StringBeginsWith(mMimeType, urlDataMimeType);
+
+        if (isValidUrlEncodedMimeType && mMimeType.Length() > urlDataMimeType.Length()) {
+          isValidUrlEncodedMimeType = mMimeType[urlDataMimeType.Length()] == ';';
+        }
+
+        if (isValidUrlEncodedMimeType) {
+          nsRefPtr<URLSearchParams> params = new URLSearchParams();
+          params->ParseInput(data, /* aObserver */ nullptr);
+
+          nsRefPtr<nsFormData> fd = new nsFormData(DerivedClass()->GetParentObject());
+          params->ForEach(FillFormData, static_cast<void*>(fd));
+          localPromise->MaybeResolve(fd);
+        } else {
+          ErrorResult result;
+          result.ThrowTypeError(MSG_BAD_FORMDATA);
+          localPromise->MaybeReject(result);
+        }
+      }
+      return;
+    }
     case CONSUME_TEXT:
       // fall through handles early exit.
     case CONSUME_JSON: {
@@ -1195,15 +1644,15 @@ FetchBody<Response>::ConsumeBody(ConsumeType aType, ErrorResult& aRv);
 
 template <class Derived>
 void
-FetchBody<Derived>::SetMimeType(ErrorResult& aRv)
+FetchBody<Derived>::SetMimeType()
 {
   // Extract mime type.
+  ErrorResult result;
   nsTArray<nsCString> contentTypeValues;
   MOZ_ASSERT(DerivedClass()->GetInternalHeaders());
-  DerivedClass()->GetInternalHeaders()->GetAll(NS_LITERAL_CSTRING("Content-Type"), contentTypeValues, aRv);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return;
-  }
+  DerivedClass()->GetInternalHeaders()->GetAll(NS_LITERAL_CSTRING("Content-Type"),
+                                               contentTypeValues, result);
+  MOZ_ALWAYS_TRUE(!result.Failed());
 
   // HTTP ABNF states Content-Type may have only one value.
   // This is from the "parse a header value" of the fetch spec.
@@ -1215,10 +1664,10 @@ FetchBody<Derived>::SetMimeType(ErrorResult& aRv)
 
 template
 void
-FetchBody<Request>::SetMimeType(ErrorResult& aRv);
+FetchBody<Request>::SetMimeType();
 
 template
 void
-FetchBody<Response>::SetMimeType(ErrorResult& aRv);
+FetchBody<Response>::SetMimeType();
 } // namespace dom
 } // namespace mozilla

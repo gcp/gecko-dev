@@ -441,6 +441,12 @@ function waitForClientEvents(aPanel, aEventName, aEventRepeat = 1) {
   return deferred.promise;
 }
 
+function waitForClipboardPromise(setup, expected) {
+  return new Promise((resolve, reject) => {
+    SimpleTest.waitForClipboard(expected, setup, resolve, reject);
+  });
+}
+
 function ensureThreadClientState(aPanel, aState) {
   let thread = aPanel.panelWin.gThreadClient;
   let state = thread.state;
@@ -563,6 +569,7 @@ AddonDebugger.prototype = {
       DebuggerServer.init();
       DebuggerServer.addBrowserActors();
     }
+    DebuggerServer.allowChromeProcess = true;
 
     this.frame = document.createElement("iframe");
     this.frame.setAttribute("height", 400);
@@ -581,7 +588,8 @@ AddonDebugger.prototype = {
     let targetOptions = {
       form: addonActor,
       client: this.client,
-      chrome: true
+      chrome: true,
+      isTabActor: false
     };
 
     let toolboxOptions = {

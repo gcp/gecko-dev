@@ -34,18 +34,6 @@ ifndef EXTERNALLY_MANAGED_MAKE_FILE
 # scenarios.
 _current_makefile = $(CURDIR)/$(firstword $(MAKEFILE_LIST))
 
-CHECK_MOZBUILD_VARIABLES = $(foreach var,$(_MOZBUILD_EXTERNAL_VARIABLES), \
-  $(if $(subst $($(var)_FROZEN),,'$($(var))'), \
-	  $(error Variable $(var) is defined in $(_current_makefile). It should only be defined in moz.build files),\
-  )) $(foreach var,$(_DEPRECATED_VARIABLES), \
-	$(if $(subst $($(var)_FROZEN),,'$($(var))'), \
-    $(error Variable $(var) is defined in $(_current_makefile). This variable has been deprecated. It does nothing. It must be removed in order to build),\
-    ))
-
-# Check variables set after autoconf.mk (included at the top of Makefiles) is
-# included and before config.mk is included.
-_eval_for_side_effects := $(CHECK_MOZBUILD_VARIABLES)
-
 # Import the automatically generated backend file. If this file doesn't exist,
 # the backend hasn't been properly configured. We want this to be a fatal
 # error, hence not using "-include".
@@ -54,8 +42,6 @@ GLOBAL_DEPS += backend.mk
 include backend.mk
 endif
 
-# Freeze the values specified by moz.build to catch them if they fail.
-$(foreach var,$(_MOZBUILD_EXTERNAL_VARIABLES) $(_DEPRECATED_VARIABLES),$(eval $(var)_FROZEN := '$($(var))'))
 endif
 
 space = $(NULL) $(NULL)
@@ -386,23 +372,15 @@ endif # CROSS_COMPILE
 CFLAGS += $(MOZ_FRAMEPTR_FLAGS)
 CXXFLAGS += $(MOZ_FRAMEPTR_FLAGS)
 
-# Check for FAIL_ON_WARNINGS & FAIL_ON_WARNINGS_DEBUG (Shorthand for Makefiles
-# to request that we use the 'warnings as errors' compile flags)
+# Check for FAIL_ON_WARNINGS (Shorthand for Makefiles to request that we use
+# the 'warnings as errors' compile flags)
 
 # NOTE: First, we clear FAIL_ON_WARNINGS[_DEBUG] if we're doing a Windows PGO
 # build, since WARNINGS_AS_ERRORS has been suspected of causing isuses in that
 # situation. (See bug 437002.)
 ifeq (WINNT_1,$(OS_ARCH)_$(MOZ_PROFILE_GENERATE)$(MOZ_PROFILE_USE))
-FAIL_ON_WARNINGS_DEBUG=
 FAIL_ON_WARNINGS=
 endif # WINNT && (MOS_PROFILE_GENERATE ^ MOZ_PROFILE_USE)
-
-# Now, check for debug version of flag; it turns on normal flag in debug builds.
-ifdef FAIL_ON_WARNINGS_DEBUG
-ifdef MOZ_DEBUG
-FAIL_ON_WARNINGS = 1
-endif # MOZ_DEBUG
-endif # FAIL_ON_WARNINGS_DEBUG
 
 # Check for normal version of flag, and add WARNINGS_AS_ERRORS if it's set to 1.
 ifdef FAIL_ON_WARNINGS
@@ -705,6 +683,3 @@ export CL_INCLUDES_PREFIX
 export NONASCII
 
 DEFINES += -DNO_NSPR_10_SUPPORT
-
-# Freeze the values specified by moz.build to catch them if they fail.
-$(foreach var,$(_MOZBUILD_EXTERNAL_VARIABLES) $(_DEPRECATED_VARIABLES),$(eval $(var)_FROZEN := '$($(var))'))

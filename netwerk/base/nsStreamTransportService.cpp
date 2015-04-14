@@ -434,13 +434,15 @@ nsOutputStreamTransport::IsNonBlocking(bool *result)
 #ifdef MOZ_NUWA_PROCESS
 #include "ipc/Nuwa.h"
 
-class STSThreadPoolListener MOZ_FINAL : public nsIThreadPoolListener
+class STSThreadPoolListener final : public nsIThreadPoolListener
 {
 public:
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSITHREADPOOLLISTENER
 
     STSThreadPoolListener() {}
+
+protected:
     ~STSThreadPoolListener() {}
 };
 

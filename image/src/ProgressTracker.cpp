@@ -261,7 +261,8 @@ ProgressTracker::NotifyCurrentState(IProgressObserver* aObserver)
 
   aObserver->SetNotificationsDeferred(true);
 
-  nsCOMPtr<nsIRunnable> ev = new AsyncNotifyCurrentStateRunnable(this, aObserver);
+  nsCOMPtr<nsIRunnable> ev = new AsyncNotifyCurrentStateRunnable(this,
+                                                                 aObserver);
   NS_DispatchToCurrentThread(ev);
 }
 
@@ -492,15 +493,7 @@ ProgressTracker::OnDiscard()
 void
 ProgressTracker::OnImageAvailable()
 {
-  if (!NS_IsMainThread()) {
-    // Note: SetHasImage calls Image::Lock and Image::IncrementAnimationCounter
-    // so subsequent calls or dispatches which Unlock or Decrement~ should
-    // be issued after this to avoid race conditions.
-    NS_DispatchToMainThread(
-      NS_NewRunnableMethod(this, &ProgressTracker::OnImageAvailable));
-    return;
-  }
-
+  MOZ_ASSERT(NS_IsMainThread());
   // Notify any imgRequestProxys that are observing us that we have an Image.
   ObserverArray::ForwardIterator iter(mObservers);
   while (iter.HasMore()) {

@@ -28,7 +28,6 @@
 #include "nsISocketProvider.h"
 #include "nsISSLSocketControl.h"
 #include "nsIPipe.h"
-#include "nsIProgrammingLanguage.h"
 #include "nsIClassInfoImpl.h"
 #include "nsURLHelper.h"
 #include "nsIDNSService.h"
@@ -1047,8 +1046,8 @@ nsSocketTransport::ResolveHost()
                  "Setting both RESOLVE_DISABLE_IPV6 and RESOLVE_DISABLE_IPV4");
 
     SendStatus(NS_NET_STATUS_RESOLVING_HOST);
-    rv = dns->AsyncResolve(SocketHost(), dnsFlags, this, nullptr,
-                           getter_AddRefs(mDNSRequest));
+    rv = dns->AsyncResolveExtended(SocketHost(), dnsFlags, mNetworkInterfaceId, this,
+                                   nullptr, getter_AddRefs(mDNSRequest));
     if (NS_SUCCEEDED(rv)) {
         SOCKET_LOG(("  advancing to STATE_RESOLVING\n"));
         mState = STATE_RESOLVING;
@@ -1086,7 +1085,7 @@ nsSocketTransport::BuildSocket(PRFileDesc *&fd, bool &proxyTransparent, bool &us
         int32_t     port       = (int32_t) mPort;
         const char *proxyHost  = mProxyHost.IsEmpty() ? nullptr : mProxyHost.get();
         int32_t     proxyPort  = (int32_t) mProxyPort;
-        uint32_t    proxyFlags = 0;
+        uint32_t    controlFlags = 0;
 
         uint32_t i;
         for (i=0; i<mTypeCount; ++i) {
@@ -1099,13 +1098,13 @@ nsSocketTransport::BuildSocket(PRFileDesc *&fd, bool &proxyTransparent, bool &us
                 break;
 
             if (mProxyTransparentResolvesHost)
-                proxyFlags |= nsISocketProvider::PROXY_RESOLVES_HOST;
+                controlFlags |= nsISocketProvider::PROXY_RESOLVES_HOST;
             
             if (mConnectionFlags & nsISocketTransport::ANONYMOUS_CONNECT)
-                proxyFlags |= nsISocketProvider::ANONYMOUS_CONNECT;
+                controlFlags |= nsISocketProvider::ANONYMOUS_CONNECT;
 
             if (mConnectionFlags & nsISocketTransport::NO_PERMANENT_STORAGE)
-                proxyFlags |= nsISocketProvider::NO_PERMANENT_STORAGE;
+                controlFlags |= nsISocketProvider::NO_PERMANENT_STORAGE;
 
             nsCOMPtr<nsISupports> secinfo;
             if (i == 0) {
@@ -1119,7 +1118,7 @@ nsSocketTransport::BuildSocket(PRFileDesc *&fd, bool &proxyTransparent, bool &us
                                          mHttpsProxy ? proxyHost : host,
                                          mHttpsProxy ? proxyPort : port,
                                          proxyHost, proxyPort,
-                                         proxyFlags, &fd,
+                                         controlFlags, &fd,
                                          getter_AddRefs(secinfo));
 
                 if (NS_SUCCEEDED(rv) && !fd) {
@@ -1133,10 +1132,10 @@ nsSocketTransport::BuildSocket(PRFileDesc *&fd, bool &proxyTransparent, bool &us
                 // to the stack (such as pushing an io layer)
                 rv = provider->AddToSocket(mNetAddr.raw.family,
                                            host, port, proxyHost, proxyPort,
-                                           proxyFlags, fd,
+                                           controlFlags, fd,
                                            getter_AddRefs(secinfo));
             }
-            // proxyFlags = 0; not used below this point...
+            // controlFlags = 0; not used below this point...
             if (NS_FAILED(rv))
                 break;
 
@@ -2197,6 +2196,22 @@ nsSocketTransport::GetPort(int32_t *port)
 }
 
 NS_IMETHODIMP
+nsSocketTransport::GetNetworkInterfaceId(nsACString_internal &aNetworkInterfaceId)
+{
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread, "wrong thread");
+    aNetworkInterfaceId = mNetworkInterfaceId;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSocketTransport::SetNetworkInterfaceId(const nsACString_internal &aNetworkInterfaceId)
+{
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread, "wrong thread");
+    mNetworkInterfaceId = aNetworkInterfaceId;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
 nsSocketTransport::GetPeerAddr(NetAddr *addr)
 {
     // once we are in the connected state, mNetAddr will not change.
@@ -2439,7 +2454,7 @@ nsSocketTransport::GetInterfaces(uint32_t *count, nsIID * **array)
 }
 
 NS_IMETHODIMP
-nsSocketTransport::GetHelperForLanguage(uint32_t language, nsISupports **_retval)
+nsSocketTransport::GetScriptableHelper(nsIXPCScriptable **_retval)
 {
     *_retval = nullptr;
     return NS_OK;
@@ -2463,13 +2478,6 @@ NS_IMETHODIMP
 nsSocketTransport::GetClassID(nsCID * *aClassID)
 {
     *aClassID = nullptr;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsSocketTransport::GetImplementationLanguage(uint32_t *aImplementationLanguage)
-{
-    *aImplementationLanguage = nsIProgrammingLanguage::CPLUSPLUS;
     return NS_OK;
 }
 

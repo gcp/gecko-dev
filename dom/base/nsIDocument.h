@@ -16,6 +16,8 @@
 #include "nsILoadGroup.h"                // for member (in nsCOMPtr)
 #include "nsINode.h"                     // for base class
 #include "nsIScriptGlobalObject.h"       // for member (in nsCOMPtr)
+#include "nsIServiceManager.h"
+#include "nsIUUIDGenerator.h"
 #include "nsPIDOMWindow.h"               // for use in inline functions
 #include "nsPropertyTable.h"             // for member
 #include "nsTHashtable.h"                // for member
@@ -27,7 +29,6 @@
 #include "nsExpirationTracker.h"
 #include "nsClassHashtable.h"
 #include "prclist.h"
-#include "gfxVR.h"
 
 class imgIRequest;
 class nsAString;
@@ -61,6 +62,7 @@ class nsIObserver;
 class nsIPresShell;
 class nsIPrincipal;
 class nsIRequest;
+class nsIRunnable;
 class nsIStreamListener;
 class nsIStructuredCloneContainer;
 class nsIStyleRule;
@@ -94,8 +96,11 @@ class Loader;
 class ImageLoader;
 } // namespace css
 
+namespace gfx {
+class VRHMDInfo;
+} // namespace gfx
+
 namespace dom {
-class AnimationTimeline;
 class AnonymousContent;
 class Attr;
 class BoxObject;
@@ -103,6 +108,7 @@ class CDATASection;
 class Comment;
 struct CustomElementDefinition;
 class DocumentFragment;
+class DocumentTimeline;
 class DocumentType;
 class DOMImplementation;
 class DOMStringList;
@@ -139,17 +145,16 @@ template<typename, typename> class CallbackObjectHolder;
 typedef CallbackObjectHolder<NodeFilter, nsIDOMNodeFilter> NodeFilterHolder;
 
 struct FullScreenOptions {
-  FullScreenOptions() { }
+  FullScreenOptions();
   nsRefPtr<gfx::VRHMDInfo> mVRHMDDevice;
 };
 
 } // namespace dom
 } // namespace mozilla
 
-// 137c6144-513e-4edf-840e-5e3156638ed6
 #define NS_IDOCUMENT_IID \
-{ 0x137c6144, 0x513e, 0x4edf, \
-  { 0x84, 0x0e, 0x5e, 0x31, 0x56, 0x63, 0x8e, 0xd6 } }
+{ 0x0b78eabe, 0x8b94, 0x4ea1, \
+  { 0x93, 0x31, 0x5d, 0x48, 0xe8, 0x3a, 0xda, 0x95 } }
 
 // Enum for requesting a particular type of document when creating a doc
 enum DocumentFlavor {
@@ -182,7 +187,7 @@ class nsIDocument : public nsINode
 {
   typedef mozilla::dom::GlobalObject GlobalObject;
 public:
-  typedef mozilla::net::ReferrerPolicy ReferrerPolicy;
+  typedef mozilla::net::ReferrerPolicy ReferrerPolicyEnum;
   typedef mozilla::dom::Element Element;
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IDOCUMENT_IID)
@@ -289,9 +294,17 @@ public:
    * Return the referrer policy of the document. Return "default" if there's no
    * valid meta referrer tag found in the document.
    */
-  ReferrerPolicy GetReferrerPolicy() const
+  ReferrerPolicyEnum GetReferrerPolicy() const
   {
     return mReferrerPolicy;
+  }
+
+  /**
+   * GetReferrerPolicy() for Document.webidl.
+   */
+  uint32_t ReferrerPolicy() const
+  {
+    return GetReferrerPolicy();
   }
 
   /**
@@ -321,7 +334,7 @@ public:
     }
     return mDocumentBaseURI ? mDocumentBaseURI : mDocumentURI;
   }
-  virtual already_AddRefed<nsIURI> GetBaseURI(bool aTryUseXHRDocBaseURI = false) const MOZ_OVERRIDE;
+  virtual already_AddRefed<nsIURI> GetBaseURI(bool aTryUseXHRDocBaseURI = false) const override;
 
   virtual nsresult SetBaseURI(nsIURI* aURI) = 0;
 
@@ -748,6 +761,8 @@ public:
     return mAnonymousContents;
   }
 
+  nsresult GetId(nsAString& aId);
+
 protected:
   virtual Element *GetRootElementInternal() const = 0;
 
@@ -774,7 +789,7 @@ private:
   class SelectorCacheKeyDeleter;
 
 public:
-  class SelectorCache MOZ_FINAL
+  class SelectorCache final
     : public nsExpirationTracker<SelectorCacheKey, 4>
   {
     public:
@@ -783,7 +798,7 @@ public:
       // CacheList takes ownership of aSelectorList.
       void CacheList(const nsAString& aSelector, nsCSSSelectorList* aSelectorList);
 
-      virtual void NotifyExpired(SelectorCacheKey* aSelector) MOZ_OVERRIDE;
+      virtual void NotifyExpired(SelectorCacheKey* aSelector) override;
 
       // We do not call MarkUsed because it would just slow down lookups and
       // because we're OK expiring things after a few seconds even if they're
@@ -1302,7 +1317,7 @@ public:
    * media documents).  Returns false for XHTML and any other documents parsed
    * by the XML parser.
    */
-  bool IsHTML() const
+  bool IsHTMLDocument() const
   {
     return mType == eHTML;
   }
@@ -1310,15 +1325,15 @@ public:
   {
     return mType == eHTML || mType == eXHTML;
   }
-  bool IsXML() const
+  bool IsXMLDocument() const
   {
-    return !IsHTML();
+    return !IsHTMLDocument();
   }
-  bool IsSVG() const
+  bool IsSVGDocument() const
   {
     return mType == eSVG;
   }
-  bool IsXUL() const
+  bool IsXULDocument() const
   {
     return mType == eXUL;
   }
@@ -1328,7 +1343,7 @@ public:
   }
   bool LoadsFullXULStyleSheetUpFront()
   {
-    return IsXUL() || AllowXULXBL();
+    return IsXULDocument() || AllowXULXBL();
   }
 
   virtual bool IsScriptEnabled() = 0;
@@ -1653,11 +1668,9 @@ public:
   virtual nsresult InitializeFrameLoader(nsFrameLoader* aLoader) = 0;
   // In case of failure, the caller must handle the error, for example by
   // finalizing frame loader asynchronously.
-  virtual nsresult FinalizeFrameLoader(nsFrameLoader* aLoader) = 0;
+  virtual nsresult FinalizeFrameLoader(nsFrameLoader* aLoader, nsIRunnable* aFinalizer) = 0;
   // Removes the frame loader of aShell from the initialization list.
   virtual void TryCancelFrameLoaderInitialization(nsIDocShell* aShell) = 0;
-  //  Returns true if the frame loader of aShell is in the finalization list.
-  virtual bool FrameLoaderScheduledToBeFinalized(nsIDocShell* aShell) = 0;
 
   /**
    * Check whether this document is a root document that is not an
@@ -1966,7 +1979,7 @@ public:
    */
   virtual void MaybePreLoadImage(nsIURI* uri,
                                  const nsAString& aCrossOriginAttr,
-                                 ReferrerPolicy aReferrerPolicy) = 0;
+                                 ReferrerPolicyEnum aReferrerPolicy) = 0;
 
   /**
    * Called by images to forget an image preload when they start doing
@@ -1981,7 +1994,7 @@ public:
    */
   virtual void PreloadStyle(nsIURI* aURI, const nsAString& aCharset,
                             const nsAString& aCrossOriginAttr,
-                            ReferrerPolicy aReferrerPolicy) = 0;
+                            ReferrerPolicyEnum aReferrerPolicy) = 0;
 
   /**
    * Called by the chrome registry to load style sheets.  Can be put
@@ -2074,7 +2087,7 @@ public:
 
   virtual already_AddRefed<mozilla::dom::UndoManager> GetUndoManager() = 0;
 
-  virtual mozilla::dom::AnimationTimeline* Timeline() = 0;
+  virtual mozilla::dom::DocumentTimeline* Timeline() = 0;
 
   typedef mozilla::dom::CallbackObjectHolder<
     mozilla::dom::FrameRequestCallback,
@@ -2197,6 +2210,16 @@ public:
   void SetMayHaveDOMMutationObservers()
   {
     mMayHaveDOMMutationObservers = true;
+  }
+
+  bool MayHaveAnimationObservers()
+  {
+    return mMayHaveAnimationObservers;
+  }
+
+  void SetMayHaveAnimationObservers()
+  {
+    mMayHaveAnimationObservers = true;
   }
 
   bool IsInSyncOperation()
@@ -2542,7 +2565,7 @@ protected:
   virtual void MutationEventDispatched(nsINode* aTarget) = 0;
   friend class mozAutoSubtreeModified;
 
-  virtual Element* GetNameSpaceElement() MOZ_OVERRIDE
+  virtual Element* GetNameSpaceElement() override
   {
     return GetRootElement();
   }
@@ -2568,7 +2591,7 @@ protected:
   nsWeakPtr mDocumentLoadGroup;
 
   bool mReferrerPolicySet;
-  ReferrerPolicy mReferrerPolicy;
+  ReferrerPolicyEnum mReferrerPolicy;
 
   mozilla::WeakPtr<nsDocShell> mDocumentContainer;
 
@@ -2695,6 +2718,9 @@ protected:
   // True if a DOMMutationObserver is perhaps attached to a node in the document.
   bool mMayHaveDOMMutationObservers;
 
+  // True if an nsIAnimationObserver is perhaps attached to a node in the document.
+  bool mMayHaveAnimationObservers;
+
   // True if a document has loaded Mixed Active Script (see nsMixedContentBlocker.cpp)
   bool mHasMixedActiveContentLoaded;
 
@@ -2786,6 +2812,7 @@ protected:
   nsCOMPtr<nsIChannel> mChannel;
 private:
   nsCString mContentType;
+  nsString mId;
 protected:
 
   // The document's security info

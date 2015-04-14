@@ -170,25 +170,71 @@ body {
 /* Rooms */
 .rooms {
   min-height: 100px;
+  padding: 0 1rem;
 }
 
 .rooms > h1 {
   font-weight: bold;
   color: #999;
-  padding: .5rem 1rem;
-}
-
-.rooms > p {
   padding: .5rem 0;
-  margin: 0;
 }
 
-.rooms > p > .btn {
+.new-room-view > .context {
+  margin: .5rem 0 0;
+  background-color: #DEEFF7;
+  border-radius: 3px 3px 0 0;
+  padding: .5rem;
+}
+
+.new-room-view > .context > .context-enabled {
+  margin-bottom: .5rem;
+  display: block;
+}
+
+.new-room-view > .context > .context-enabled > input {
+  -moz-margin-start: 0;
+}
+
+.new-room-view > .context > .context-preview {
+  float: right;
+  width: 100px;
+  max-height: 200px;
+  -moz-margin-start: 10px;
+  margin-bottom: 10px;
+}
+
+body[dir=rtl] .new-room-view > .context > .context-preview {
+  float: left;
+}
+
+.new-room-view > .context > .context-preview[src=""] {
+  display: none;
+}
+
+.new-room-view > .context > .context-description {
+  display: block;
+  color: #707070;
+}
+
+.new-room-view > .context > .context-url {
+  display: block;
+  color: #59A1D7;
+  clear: both;
+}
+
+.new-room-view > .btn {
   display: block;
   font-size: 1rem;
-  margin: 0 auto;
+  margin: 0 auto .5rem;
+  width: 100%;
   padding: .5rem 1rem;
+  border-radius: 0 0 3px 3px;
+}
+
+/* Remove when bug 1142671 is backed out. */
+.new-room-view > .context.hide + .new-room-button {
   border-radius: 3px;
+  margin-top: 0.5rem;
 }
 
 .room-list {
@@ -197,6 +243,8 @@ body {
   overflow: auto;
   border-top: 1px solid #ccc;
   border-bottom: 1px solid #ccc;
+  margin-left: -1rem;
+  margin-right: -1rem;
 }
 
 .room-list:empty {
@@ -390,42 +438,21 @@ body {
   color: #fff;
 }
 
-/* Dropdown menu */
-
-.dropdown {
-  position: relative;
+.button-close {
+  background-color: transparent;
+  background-image: url(../shared/img/icons-10x10.svg#close);
+  background-repeat: no-repeat;
+  background-size: 8px 8px;
+  border: none;
+  padding: 0;
+  height: 8px;
+  width: 8px;
 }
 
-.dropdown-menu {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  background-color: #fdfdfd;
-  box-shadow: 0 1px 3px rgba(0,0,0,.3);
-  list-style: none;
-  padding: 5px;
-  border-radius: 2px;
-}
-
-body[dir=rtl] .dropdown-menu-item {
-  left: auto;
-  right: 10px;
-}
-
-.dropdown-menu-item {
-  text-align: start;
-  margin: .3em 0;
-  padding: .2em .5em;
-  cursor: pointer;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  font-size: 1em;
-  white-space: nowrap;
-}
-
-.dropdown-menu-item:hover {
-  border: 1px solid #ccc;
-  background-color: #eee;
+.button-close:hover,
+.button-close:hover:active {
+  background-color: transparent;
+  border: none;
 }
 
 /* Spinner */
@@ -669,11 +696,11 @@ body[dir=rtl] .generate-url-spinner {
 }
 
 .settings-menu .icon {
-  display: inline-block;
   background-size: contain;
   width: 12px;
   height: 12px;
   margin-right: 1em;
+  margin-top: 2px;
 }
 
 .settings-menu .icon-settings {

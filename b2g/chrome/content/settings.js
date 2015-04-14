@@ -30,6 +30,10 @@ XPCOMUtils.defineLazyServiceGetter(this, "uuidgen",
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
 
+XPCOMUtils.defineLazyServiceGetter(this, "gPACGenerator",
+                                   "@mozilla.org/pac-generator;1",
+                                   "nsIPACGenerator");
+
 // Once Bug 731746 - Allow chrome JS object to implement nsIDOMEventTarget
 // is resolved this helper could be removed.
 var SettingsListener = {
@@ -123,11 +127,6 @@ SettingsListener.observe('language.current', 'en-US', function(value) {
       }
     });
   });
-
-  // Debug flag
-  SettingsListener.observe('ril.debugging.enabled', false, function(value) {
-    Services.prefs.setBoolPref('ril.debugging.enabled', value);
-  });
 })();
 
 //=================== DeviceInfo ====================
@@ -197,19 +196,20 @@ SettingsListener.observe('devtools.overlay', false, (value) => {
 });
 
 #ifdef MOZ_WIDGET_GONK
+
 let LogShake;
-SettingsListener.observe('devtools.logshake', false, (value) => {
+(function() {
+  let scope = {};
+  Cu.import('resource://gre/modules/LogShake.jsm', scope);
+  LogShake = scope.LogShake;
+  LogShake.init();
+})();
+
+SettingsListener.observe('devtools.logshake', false, value => {
   if (value) {
-    if (!LogShake) {
-      let scope = {};
-      Cu.import('resource://gre/modules/LogShake.jsm', scope);
-      LogShake = scope.LogShake;
-    }
-    LogShake.init();
+    LogShake.enableDeviceMotionListener();
   } else {
-    if (LogShake) {
-      LogShake.uninit();
-    }
+    LogShake.disableDeviceMotionListener();
   }
 });
 #endif
@@ -487,6 +487,40 @@ SettingsListener.observe("theme.selected",
   }
 });
 
+// =================== Proxy server ======================
+(function setupBrowsingProxySettings() {
+  function setPAC() {
+    let usePAC;
+    try {
+      usePAC = Services.prefs.getBoolPref('network.proxy.pac_generator');
+    } catch (ex) {}
+
+    if (usePAC) {
+      Services.prefs.setCharPref('network.proxy.autoconfig_url',
+                                 gPACGenerator.generate());
+      Services.prefs.setIntPref('network.proxy.type',
+                                Ci.nsIProtocolProxyService.PROXYCONFIG_PAC);
+    }
+  }
+
+  SettingsListener.observe('browser.proxy.enabled', false, function(value) {
+    Services.prefs.setBoolPref('network.proxy.browsing.enabled', value);
+    setPAC();
+  });
+
+  SettingsListener.observe('browser.proxy.host', '', function(value) {
+    Services.prefs.setCharPref('network.proxy.browsing.host', value);
+    setPAC();
+  });
+
+  SettingsListener.observe('browser.proxy.port', 0, function(value) {
+    Services.prefs.setIntPref('network.proxy.browsing.port', value);
+    setPAC();
+  });
+
+  setPAC();
+})();
+
 // =================== Various simple mapping  ======================
 let settingsToObserve = {
   'accessibility.screenreader_quicknav_modes': {
@@ -527,7 +561,9 @@ let settingsToObserve = {
   'layers.effect.invert': false,
   'layers.effect.grayscale': false,
   'layers.effect.contrast': "0.0",
+  'network.debugging.enabled': false,
   'privacy.donottrackheader.enabled': false,
+  'ril.debugging.enabled': false,
   'ril.radio.disabled': false,
   'ril.mms.requestReadReport.enabled': {
     prefName: 'dom.mms.requestReadReport',

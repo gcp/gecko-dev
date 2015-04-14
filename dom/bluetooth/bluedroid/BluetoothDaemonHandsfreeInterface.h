@@ -381,7 +381,7 @@ protected:
 #endif
 };
 
-class BluetoothDaemonHandsfreeInterface MOZ_FINAL
+class BluetoothDaemonHandsfreeInterface final
   : public BluetoothHandsfreeInterface
 {
   class CleanupResultHandler;
@@ -472,6 +472,7 @@ public:
 private:
   void DispatchError(BluetoothHandsfreeResultHandler* aRes,
                      BluetoothStatus aStatus);
+  void DispatchError(BluetoothHandsfreeResultHandler* aRes, nsresult aRv);
 
   BluetoothDaemonHandsfreeModule* mModule;
 };

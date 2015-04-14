@@ -10,11 +10,16 @@ public class FxAccountConstants {
   public static final String GLOBAL_LOG_TAG = "FxAccounts";
   public static final String ACCOUNT_TYPE = AppConstants.MOZ_ANDROID_SHARED_FXACCOUNT_TYPE;
 
+  // Must be a client ID allocated with "canGrant" privileges!
+  public static final String OAUTH_CLIENT_ID_FENNEC = "3332a18d142636cb";
+
   public static final String DEFAULT_AUTH_SERVER_ENDPOINT = "https://api.accounts.firefox.com/v1";
   public static final String DEFAULT_TOKEN_SERVER_ENDPOINT = "https://token.services.mozilla.com/1.0/sync/1.5";
+  public static final String DEFAULT_OAUTH_SERVER_ENDPOINT = "https://oauth.accounts.firefox.com/v1";
 
-  public static final String STAGE_AUTH_SERVER_ENDPOINT = "https://api-accounts.stage.mozaws.net/v1";
-  public static final String STAGE_TOKEN_SERVER_ENDPOINT = "https://token.stage.mozaws.net/1.0/sync/1.5";
+  public static final String STAGE_AUTH_SERVER_ENDPOINT = "https://stable.dev.lcip.org/auth/v1";
+  public static final String STAGE_TOKEN_SERVER_ENDPOINT = "https://stable.dev.lcip.org/syncserver/token/1.0/sync/1.5";
+  public static final String STAGE_OAUTH_SERVER_ENDPOINT = "https://oauth-stable.dev.lcip.org/v1";
 
   // You must be at least 13 years old, on the day of creation, to create a Firefox Account.
   public static final int MINIMUM_AGE_TO_CREATE_AN_ACCOUNT = 13;
@@ -47,7 +52,7 @@ public class FxAccountConstants {
    * can be received only by Firefox channels sharing the same Android Firefox
    * Account type.
    * <p>
-   * See {@link org.mozilla.gecko.fxa.AndroidFxAccount#makeDeletedAccountIntent(android.content.Context, android.accounts.Account)}
+   * See {@link org.mozilla.gecko.fxa.AndroidFxAccount#makeDeletedAccountIntent()}
    * for contents of the intent.
    *
    * See bug 790931 for additional information in the context of Sync.
@@ -61,6 +66,8 @@ public class FxAccountConstants {
 
   public static final String ACCOUNT_DELETED_INTENT_VERSION_KEY = "account_deleted_intent_version";
   public static final String ACCOUNT_DELETED_INTENT_ACCOUNT_KEY = "account_deleted_intent_account";
+  public static final String ACCOUNT_OAUTH_SERVICE_ENDPOINT_KEY = "account_oauth_service_endpoint";
+  public static final String ACCOUNT_DELETED_INTENT_ACCOUNT_AUTH_TOKENS = "account_deleted_intent_auth_tokens";
 
   /**
    * This signing-level permission protects broadcast intents that should be

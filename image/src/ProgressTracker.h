@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef ProgressTracker_h__
-#define ProgressTracker_h__
+#ifndef mozilla_image_src_ProgressTracker_h
+#define mozilla_image_src_ProgressTracker_h
 
 #include "mozilla/RefPtr.h"
 #include "mozilla/WeakPtr.h"
@@ -125,7 +125,7 @@ public:
   void ResetForNewRequest();
 
   // Stateless notifications. These are dispatched and immediately forgotten
-  // about. All except OnImageAvailable are main thread only.
+  // about. All of these notifications are main thread only.
   void OnDiscard();
   void OnUnlockedDraw();
   void OnImageAvailable();
@@ -214,4 +214,4 @@ private:
 } // namespace image
 } // namespace mozilla
 
-#endif
+#endif // mozilla_image_src_ProgressTracker_h

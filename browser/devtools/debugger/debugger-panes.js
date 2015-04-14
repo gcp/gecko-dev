@@ -40,6 +40,8 @@ function SourcesView() {
   this._onConditionalPopupShown = this._onConditionalPopupShown.bind(this);
   this._onConditionalPopupHiding = this._onConditionalPopupHiding.bind(this);
   this._onConditionalTextboxKeyPress = this._onConditionalTextboxKeyPress.bind(this);
+  this._onCopyUrlCommand = this._onCopyUrlCommand.bind(this);
+  this._onNewTabCommand = this._onNewTabCommand.bind(this);
 }
 
 SourcesView.prototype = Heritage.extend(WidgetMethods, {
@@ -50,6 +52,7 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     dumpn("Initializing the SourcesView");
 
     this.widget = new SideMenuWidget(document.getElementById("sources"), {
+      contextMenu: document.getElementById("debuggerSourcesContextMenu"),
       showArrows: true
     });
 
@@ -65,6 +68,8 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     this._stopBlackBoxButton = document.getElementById("black-boxed-message-button");
     this._prettyPrintButton = document.getElementById("pretty-print");
     this._toggleBreakpointsButton = document.getElementById("toggle-breakpoints");
+    this._newTabMenuItem = document.getElementById("debugger-sources-context-newtab");
+    this._copyUrlMenuItem = document.getElementById("debugger-sources-context-copyurl");
 
     if (Prefs.prettyPrintEnabled) {
       this._prettyPrintButton.removeAttribute("hidden");
@@ -78,7 +83,10 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     this._cbPanel.addEventListener("popupshown", this._onConditionalPopupShown, false);
     this._cbPanel.addEventListener("popuphiding", this._onConditionalPopupHiding, false);
     this._cbTextbox.addEventListener("keypress", this._onConditionalTextboxKeyPress, false);
+    this._copyUrlMenuItem.addEventListener("command", this._onCopyUrlCommand, false);
+    this._newTabMenuItem.addEventListener("command", this._onNewTabCommand, false);
 
+    this.allowFocusOnRightClick = true;
     this.autoFocusOnSelection = false;
 
     // Sort the contents by the displayed label.
@@ -94,6 +102,8 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
       }
       return (a in KNOWN_SOURCE_GROUPS) ? 1 : -1;
     };
+
+    this._addCommands();
   },
 
   /**
@@ -110,6 +120,24 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     this._cbPanel.removeEventListener("popupshowing", this._onConditionalPopupShown, false);
     this._cbPanel.removeEventListener("popuphiding", this._onConditionalPopupHiding, false);
     this._cbTextbox.removeEventListener("keypress", this._onConditionalTextboxKeyPress, false);
+    this._copyUrlMenuItem.removeEventListener("command", this._onCopyUrlCommand, false);
+    this._newTabMenuItem.removeEventListener("command", this._onNewTabCommand, false);
+  },
+
+  /**
+   * Add commands that XUL can fire.
+   */
+  _addCommands: function() {
+    utils.addCommands(this._commandset, {
+      addBreakpointCommand: e => this._onCmdAddBreakpoint(e),
+      addConditionalBreakpointCommand: e => this._onCmdAddConditionalBreakpoint(e),
+      blackBoxCommand: () => this.toggleBlackBoxing(),
+      unBlackBoxButton: () => this._onStopBlackBoxing(),
+      prettyPrintCommand: () => this.togglePrettyPrint(),
+      toggleBreakpointsCommand: () =>this.toggleBreakpoints(),
+      nextSourceCommand: () => this.selectNextItem(),
+      prevSourceCommand: () => this.selectPrevItem()
+    });
   },
 
   /**
@@ -451,6 +479,19 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
   },
 
   /**
+   * Display the message thrown on breakpoint condition
+   */
+  showBreakpointConditionThrownMessage: function(aLocation, aMessage = "") {
+    let breakpointItem = this.getBreakpoint(aLocation);
+    if (!breakpointItem) {
+      return;
+    }
+    let attachment = breakpointItem.attachment;
+    attachment.view.container.classList.add("dbg-breakpoint-condition-thrown");
+    attachment.view.message.setAttribute("value", aMessage);
+  },
+
+  /**
    * Update the checked/unchecked and enabled/disabled states of the buttons in
    * the sources toolbar based on the currently selected source's state.
    */
@@ -689,12 +730,13 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
    *          - location: the breakpoint's source location and line number
    *          - disabled: the breakpoint's disabled state, boolean
    *          - text: the breakpoint's line text to be displayed
+   *          - message: thrown string when the breakpoint condition throws,
    * @return object
    *         An object containing the breakpoint container, checkbox,
    *         line number and line text nodes.
    */
   _createBreakpointView: function(aOptions) {
-    let { location, disabled, text } = aOptions;
+    let { location, disabled, text, message } = aOptions;
     let identifier = DebuggerController.Breakpoints.getIdentifier(location);
 
     let checkbox = document.createElement("checkbox");
@@ -711,8 +753,28 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     lineTextNode.setAttribute("crop", "end");
     lineTextNode.setAttribute("flex", "1");
 
-    let tooltip = text.substr(0, BREAKPOINT_LINE_TOOLTIP_MAX_LENGTH);
+    let tooltip = text ? text.substr(0, BREAKPOINT_LINE_TOOLTIP_MAX_LENGTH) : "";
     lineTextNode.setAttribute("tooltiptext", tooltip);
+
+    let thrownNode = document.createElement("label");
+    thrownNode.className = "plain dbg-breakpoint-condition-thrown-message dbg-breakpoint-text";
+    thrownNode.setAttribute("value", message);
+    thrownNode.setAttribute("crop", "end");
+    thrownNode.setAttribute("flex", "1");
+
+    let bpLineContainer = document.createElement("hbox");
+    bpLineContainer.className = "plain dbg-breakpoint-line-container";
+    bpLineContainer.setAttribute("flex", "1");
+
+    bpLineContainer.appendChild(lineNumberNode);
+    bpLineContainer.appendChild(lineTextNode);
+
+    let bpDetailContainer = document.createElement("vbox");
+    bpDetailContainer.className = "plain dbg-breakpoint-detail-container";
+    bpDetailContainer.setAttribute("flex", "1");
+
+    bpDetailContainer.appendChild(bpLineContainer);
+    bpDetailContainer.appendChild(thrownNode);
 
     let container = document.createElement("hbox");
     container.id = "breakpoint-" + identifier;
@@ -725,14 +787,14 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     checkbox.addEventListener("click", this._onBreakpointCheckboxClick, false);
 
     container.appendChild(checkbox);
-    container.appendChild(lineNumberNode);
-    container.appendChild(lineTextNode);
+    container.appendChild(bpDetailContainer);
 
     return {
       container: container,
       checkbox: checkbox,
       lineNumber: lineNumberNode,
-      lineText: lineTextNode
+      lineText: lineTextNode,
+      message: thrownNode
     };
   },
 
@@ -818,6 +880,26 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
       let menuseparator = document.createElement("menuseparator");
       menupopup.appendChild(menuseparator);
     }
+  },
+
+  /**
+   * Copy the source url from the currently selected item.
+   */
+  _onCopyUrlCommand: function() {
+    let selected = this.selectedItem && this.selectedItem.attachment;
+    if (!selected) {
+      return;
+    }
+    clipboardHelper.copyString(selected.source.url, document);
+  },
+
+  /**
+   * Opens selected item source in a new tab.
+   */
+  _onNewTabCommand: function() {
+    let win = Services.wm.getMostRecentWindow("navigator:browser");
+    let selected = this.selectedItem.attachment;
+    win.openUILinkIn(selected.source.url, "tab", { relatedToCurrent: true });
   },
 
   /**
@@ -992,7 +1074,7 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     let attachment = breakpointItem.attachment;
 
     // Check if this is an enabled conditional breakpoint, and if so,
-    // save the current conditional epression.
+    // save the current conditional expression.
     let breakpointPromise = DebuggerController.Breakpoints._getAdded(attachment);
     if (breakpointPromise) {
       let { location } = yield breakpointPromise;
@@ -1245,6 +1327,8 @@ TracerView.prototype = Heritage.extend(WidgetMethods, {
 
     this._traceButton.setAttribute("tooltiptext", this._startTooltip);
     this.emptyText = this._tracingNotStartedString;
+
+    this._addCommands();
   },
 
   /**
@@ -1261,6 +1345,17 @@ TracerView.prototype = Heritage.extend(WidgetMethods, {
     this.widget.removeEventListener("mouseover", this._onMouseOver, false);
     this.widget.removeEventListener("mouseout", this._unhighlightMatchingItems, false);
     this._search.removeEventListener("input", this._onSearch, false);
+  },
+
+  /**
+   * Add commands that XUL can fire.
+   */
+  _addCommands: function() {
+    utils.addCommands(document.getElementById('debuggerCommands'), {
+      toggleTracing: () => this._onToggleTracing(),
+      startTracing: () => this._onStartTracing(),
+      clearTraces: () => this._onClear()
+    });
   },
 
   /**
@@ -2171,6 +2266,7 @@ WatchExpressionsView.prototype = Heritage.extend(WidgetMethods, {
     this.widget.addEventListener("click", this._onClick, false);
 
     this.headerText = L10N.getStr("addWatchExpressionText");
+    this._addCommands();
   },
 
   /**
@@ -2180,6 +2276,16 @@ WatchExpressionsView.prototype = Heritage.extend(WidgetMethods, {
     dumpn("Destroying the WatchExpressionsView");
 
     this.widget.removeEventListener("click", this._onClick, false);
+  },
+
+  /**
+   * Add commands that XUL can fire.
+   */
+  _addCommands: function() {
+    utils.addCommands(document.getElementById('debuggerCommands'), {
+      addWatchExpressionCommand: () => this._onCmdAddExpression(),
+      removeAllWatchExpressionsCommand: () => this._onCmdRemoveAllExpressions()
+    });
   },
 
   /**
@@ -2517,7 +2623,7 @@ EventListenersView.prototype = Heritage.extend(WidgetMethods, {
       "overflow", "resize", "scroll", "underflow", "zoom")) {
       group = L10N.getStr("displayEvents");
     } else if (starts("drag") || starts("drop")) {
-      group = L10N.getStr("Drag and dropEvents");
+      group = L10N.getStr("dragAndDropEvents");
     } else if (starts("gamepad")) {
       group = L10N.getStr("gamepadEvents");
     } else if (is("canplay", "canplaythrough", "durationchange", "emptied",
@@ -2541,7 +2647,7 @@ EventListenersView.prototype = Heritage.extend(WidgetMethods, {
       "visibilitychange")) {
       group = L10N.getStr("navigationEvents");
     } else if (is("pointerlockchange", "pointerlockerror")) {
-      group = L10N.getStr("Pointer lockEvents");
+      group = L10N.getStr("pointerLockEvents");
     } else if (is("compassneedscalibration", "userproximity")) {
       group = L10N.getStr("sensorEvents");
     } else if (starts("storage")) {

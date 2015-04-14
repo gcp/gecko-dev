@@ -15,6 +15,7 @@ if (Cu === undefined) {
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
+Cu.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
   "resource://gre/modules/Services.jsm");
@@ -47,6 +48,42 @@ function b2gStart() {
 
   webNav.loadURI(url, null, null, null, null);
 }
+
+let TabDestroyObserver = {
+  outstanding: new Set(),
+  promiseResolver: null,
+
+  init: function() {
+    Services.obs.addObserver(this, "message-manager-close", false);
+    Services.obs.addObserver(this, "message-manager-disconnect", false);
+  },
+
+  destroy: function() {
+    Services.obs.removeObserver(this, "message-manager-close");
+    Services.obs.removeObserver(this, "message-manager-disconnect");
+  },
+
+  observe: function(subject, topic, data) {
+    if (topic == "message-manager-close") {
+      this.outstanding.add(subject);
+    } else if (topic == "message-manager-disconnect") {
+      this.outstanding.delete(subject);
+      if (!this.outstanding.size && this.promiseResolver) {
+        this.promiseResolver();
+      }
+    }
+  },
+
+  wait: function() {
+    if (!this.outstanding.size) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      this.promiseResolver = resolve;
+    });
+  },
+};
 
 function testInit() {
   gConfig = readConfig();
@@ -105,6 +142,7 @@ function Tester(aTests, aDumper, aCallback) {
   this.openedURLs = {};
 
   this._scriptLoader = Services.scriptloader;
+  this.EventUtils = {};
   this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/EventUtils.js", this.EventUtils);
   var simpleTestScope = {};
   this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/specialpowersAPI.js", simpleTestScope);
@@ -120,6 +158,8 @@ function Tester(aTests, aDumper, aCallback) {
   this.MemoryStats = simpleTestScope.MemoryStats;
   this.Task = Task;
   this.ContentTask = Components.utils.import("resource://testing-common/ContentTask.jsm", null).ContentTask;
+  this.BrowserTestUtils = Components.utils.import("resource://testing-common/BrowserTestUtils.jsm", null).BrowserTestUtils;
+  this.TestUtils = Components.utils.import("resource://testing-common/TestUtils.jsm", null).TestUtils;
   this.Task.Debugging.maintainStack = true;
   this.Promise = Components.utils.import("resource://gre/modules/Promise.jsm", null).Promise;
   this.Assert = Components.utils.import("resource://testing-common/Assert.jsm", null).Assert;
@@ -183,6 +223,8 @@ Tester.prototype = {
   },
 
   start: function Tester_start() {
+    TabDestroyObserver.init();
+
     //if testOnLoad was not called, then gConfig is not defined
     if (!gConfig)
       gConfig = readConfig();
@@ -284,11 +326,17 @@ Tester.prototype = {
       this.nextTest();
     }
     else{
+      TabDestroyObserver.destroy();
       Services.console.unregisterListener(this);
       Services.obs.removeObserver(this, "chrome-document-global-created");
       Services.obs.removeObserver(this, "content-document-global-created");
       this.Promise.Debugging.clearUncaughtErrorObservers();
       this._treatUncaughtRejectionsAsFailures = false;
+
+      // In the main process, we print the ShutdownLeaksCollector message here.
+      let pid = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).processID;
+      dump("Completed ShutdownLeaks collections in process " + pid + "\n");
+
       this.dumper.structuredLogger.info("TEST-START | Shutdown");
 
       if (this.tests.length) {
@@ -466,8 +514,7 @@ Tester.prototype = {
           .getService(Ci.nsIXULRuntime)
           .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT)
       {
-        this.MemoryStats.dump(this.dumper.structuredLogger,
-                              this.currentTestIndex,
+        this.MemoryStats.dump(this.currentTestIndex,
                               this.currentTest.path,
                               gConfig.dumpOutputDirectory,
                               gConfig.dumpAboutMemoryAfterTest,
@@ -505,20 +552,29 @@ Tester.prototype = {
         // frames and browser intentionally kept alive until shutdown to
         // eliminate false positives.
         if (gConfig.testRoot == "browser") {
-          // Replace the document currently loaded in the browser's sidebar.
-          // This will prevent false positives for tests that were the last
-          // to touch the sidebar. They will thus not be blamed for leaking
-          // a document.
-          let sidebar = document.getElementById("sidebar");
-          sidebar.setAttribute("src", "data:text/html;charset=utf-8,");
-          sidebar.docShell.createAboutBlankContentViewer(null);
-          sidebar.setAttribute("src", "about:blank");
+          //Skip if SeaMonkey
+          if (AppConstants.MOZ_APP_NAME != "seamonkey") {
+            // Replace the document currently loaded in the browser's sidebar.
+            // This will prevent false positives for tests that were the last
+            // to touch the sidebar. They will thus not be blamed for leaking
+            // a document.
+            let sidebar = document.getElementById("sidebar");
+            sidebar.setAttribute("src", "data:text/html;charset=utf-8,");
+            sidebar.docShell.createAboutBlankContentViewer(null);
+            sidebar.setAttribute("src", "about:blank");
 
-          // Do the same for the social sidebar.
-          let socialSidebar = document.getElementById("social-sidebar-browser");
-          socialSidebar.setAttribute("src", "data:text/html;charset=utf-8,");
-          socialSidebar.docShell.createAboutBlankContentViewer(null);
-          socialSidebar.setAttribute("src", "about:blank");
+            // Do the same for the social sidebar.
+            let socialSidebar = document.getElementById("social-sidebar-browser");
+            socialSidebar.setAttribute("src", "data:text/html;charset=utf-8,");
+            socialSidebar.docShell.createAboutBlankContentViewer(null);
+            socialSidebar.setAttribute("src", "about:blank");
+
+            SelfSupportBackend.uninit();
+            CustomizationTabPreloader.uninit();
+            SocialFlyout.unload();
+            SocialShare.uninit();
+            TabView.uninit();
+          }
 
           // Destroy BackgroundPageThumbs resources.
           let {BackgroundPageThumbs} =
@@ -531,12 +587,6 @@ Tester.prototype = {
             gBrowser._preloadedBrowser = null;
             gBrowser.getNotificationBox(browser).remove();
           }
-
-          SelfSupportBackend.uninit();
-          CustomizationTabPreloader.uninit();
-          SocialFlyout.unload();
-          SocialShare.uninit();
-          TabView.uninit();
         }
 
         // Schedule GC and CC runs before finishing in order to detect
@@ -575,6 +625,9 @@ Tester.prototype = {
           "ShutdownLeaks: Wait for cleanup to be finished before checking for leaks");
         Services.obs.notifyObservers({wrappedJSObject: barrier},
           "shutdown-leaks-before-check", null);
+
+        barrier.client.addBlocker("ShutdownLeaks: Wait for tabs to finish closing",
+                                  TabDestroyObserver.wait());
 
         barrier.wait().then(() => {
           // Simulate memory pressure so that we're forced to free more resources
@@ -625,6 +678,8 @@ Tester.prototype = {
     this.currentTest.scope.gTestPath = this.currentTest.path;
     this.currentTest.scope.Task = this.Task;
     this.currentTest.scope.ContentTask = this.ContentTask;
+    this.currentTest.scope.BrowserTestUtils = this.BrowserTestUtils;
+    this.currentTest.scope.TestUtils = this.TestUtils;
     // Pass a custom report function for mochitest style reporting.
     this.currentTest.scope.Assert = new this.Assert(function(err, message, stack) {
       let res;
@@ -1021,6 +1076,8 @@ testScope.prototype = {
   SimpleTest: {},
   Task: null,
   ContentTask: null,
+  BrowserTestUtils: null,
+  TestUtils: null,
   Assert: null,
 
   /**

@@ -37,6 +37,8 @@ pref("extensions.minCompatibleAppVersion", "4.0");
 // extensions.checkCompatibility=false has been set.
 pref("extensions.checkCompatibility.temporaryThemeOverride_minAppVersion", "29.0a1");
 
+pref("xpinstall.customConfirmationUI", true);
+
 // Preferences for AMO integration
 pref("extensions.getAddons.cache.enabled", true);
 pref("extensions.getAddons.maxResults", 15);
@@ -100,10 +102,10 @@ pref("app.update.log", false);
 pref("app.update.backgroundMaxErrors", 10);
 
 // The aus update xml certificate checks for application update are disabled on
-// Windows since the mar signature check which is currently only implemented on
-// Windows is sufficient for preventing us from applying a mar that is not
+// Windows and Mac OS X since the mar signature check are implemented on these
+// platforms and is sufficient to prevent us from applying a mar that is not
 // valid.
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_MACOSX)
 pref("app.update.cert.requireBuiltIn", false);
 pref("app.update.cert.checkAttributes", false);
 #else
@@ -239,7 +241,7 @@ pref("extensions.{972ce4c6-7e08-4474-a285-3208198ce6fd}.description", "chrome://
 
 pref("lightweightThemes.update.enabled", true);
 pref("lightweightThemes.getMoreURL", "https://addons.mozilla.org/%LOCALE%/firefox/themes");
-pref("lightweightThemes.recommendedThemes", "[{\"id\":\"recommended-1\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/a-web-browser-renaissance/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.header.jpg\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.footer.jpg\",\"textcolor\":\"#000000\",\"accentcolor\":\"#f2d9b1\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.icon.jpg\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.preview.jpg\",\"author\":\"Sean.Martell\",\"version\":\"0\"},{\"id\":\"recommended-2\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/space-fantasy/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.header.jpg\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.footer.jpg\",\"textcolor\":\"#ffffff\",\"accentcolor\":\"#d9d9d9\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.icon.jpg\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.preview.jpg\",\"author\":\"fx5800p\",\"version\":\"1.0\"},{\"id\":\"recommended-3\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/linen-light/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/3.header.png\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/3.footer.png\",\"textcolor\":\"#None\",\"accentcolor\":\"#ada8a8\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/3.icon.png\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/3.preview.png\",\"author\":\"DVemer\",\"version\":\"1.0\"},{\"id\":\"recommended-4\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/pastel-gradient/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.header.png\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.footer.png\",\"textcolor\":\"#000000\",\"accentcolor\":\"#000000\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.icon.png\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.preview.png\",\"author\":\"darrinhenein\",\"version\":\"1.0\"},{\"id\":\"recommended-5\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/carbon-light/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/5.header.png\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/5.footer.png\",\"textcolor\":\"#3b3b3b\",\"accentcolor\":\"#2e2e2e\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/5.icon.jpg\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/5.preview.jpg\",\"author\":\"Jaxivo\",\"version\":\"1.0\"}]");
+pref("lightweightThemes.recommendedThemes", "[{\"id\":\"recommended-1\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/a-web-browser-renaissance/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.header.jpg\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.footer.jpg\",\"textcolor\":\"#000000\",\"accentcolor\":\"#f2d9b1\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.icon.jpg\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.preview.jpg\",\"author\":\"Sean.Martell\",\"version\":\"0\"},{\"id\":\"recommended-2\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/space-fantasy/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.header.jpg\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.footer.jpg\",\"textcolor\":\"#ffffff\",\"accentcolor\":\"#d9d9d9\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.icon.jpg\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.preview.jpg\",\"author\":\"fx5800p\",\"version\":\"1.0\"},{\"id\":\"recommended-3\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/linen-light/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/3.header.png\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/3.footer.png\",\"accentcolor\":\"#ada8a8\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/3.icon.png\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/3.preview.png\",\"author\":\"DVemer\",\"version\":\"1.0\"},{\"id\":\"recommended-4\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/pastel-gradient/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.header.png\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.footer.png\",\"textcolor\":\"#000000\",\"accentcolor\":\"#000000\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.icon.png\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.preview.png\",\"author\":\"darrinhenein\",\"version\":\"1.0\"},{\"id\":\"recommended-5\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/carbon-light/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/5.header.png\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/5.footer.png\",\"textcolor\":\"#3b3b3b\",\"accentcolor\":\"#2e2e2e\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/5.icon.jpg\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/5.preview.jpg\",\"author\":\"Jaxivo\",\"version\":\"1.0\"}]");
 
 pref("browser.eme.ui.enabled", false);
 
@@ -285,6 +287,7 @@ pref("browser.slowStartup.maxSamples", 5);
 pref("browser.aboutHomeSnippets.updateUrl", "https://snippets.cdn.mozilla.net/%STARTPAGE_VERSION%/%NAME%/%VERSION%/%APPBUILDID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/");
 
 pref("browser.enable_automatic_image_resizing", true);
+pref("browser.casting.enabled", false);
 pref("browser.chrome.site_icons", true);
 pref("browser.chrome.favicons", true);
 // browser.warnOnQuit == false will override all other possible prompts when quitting or restarting
@@ -655,6 +658,7 @@ pref("plugins.update.url", "https://www.mozilla.org/%LOCALE%/plugincheck/?utm_so
 pref("plugins.update.notifyUser", false);
 
 pref("plugins.click_to_play", true);
+pref("plugins.testmode", false);
 
 pref("plugin.default.state", 1);
 
@@ -966,12 +970,7 @@ pref("gecko.handlerService.allowRegisterFromDifferentHost", false);
 pref("browser.safebrowsing.enabled", true);
 pref("browser.safebrowsing.malware.enabled", true);
 pref("browser.safebrowsing.downloads.enabled", true);
-// Remote lookups are only enabled for Windows in Nightly and Aurora
-#if defined(XP_WIN) && !defined(RELEASE_BUILD)
 pref("browser.safebrowsing.downloads.remote.enabled", true);
-#else
-pref("browser.safebrowsing.downloads.remote.enabled", false);
-#endif
 pref("browser.safebrowsing.debug", false);
 
 pref("browser.safebrowsing.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2&key=%GOOGLE_API_KEY%");
@@ -1012,12 +1011,13 @@ pref("urlclassifier.downloadBlockTable", "goog-badbinurl-shavar");
 #ifdef XP_WIN
 // Only download the whitelist on Windows, since the whitelist is
 // only useful for suppressing remote lookups for signed binaries which we can
-// only verify on Windows (Bug 974579).
+// only verify on Windows (Bug 974579). Other platforms always do remote lookups.
 pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-digest256");
 #endif
 #endif
 
 pref("browser.geolocation.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/geolocation/");
+pref("browser.push.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/push/");
 
 pref("browser.EULA.version", 3);
 pref("browser.rights.version", 3);
@@ -1028,7 +1028,7 @@ pref("browser.rights.3.shown", false);
 pref("browser.rights.override", true);
 #endif
 
-pref("browser.selfsupport.url", "http://self-repair.mozilla.org/%LOCALE%/repair");
+pref("browser.selfsupport.url", "https://self-repair.mozilla.org/%LOCALE%/repair");
 
 pref("browser.sessionstore.resume_from_crash", true);
 pref("browser.sessionstore.resume_session_once", false);
@@ -1066,6 +1066,8 @@ pref("browser.sessionstore.restore_hidden_tabs", false);
 pref("browser.sessionstore.restore_pinned_tabs_on_demand", false);
 // The version at which we performed the latest upgrade backup
 pref("browser.sessionstore.upgradeBackup.latestBuildID", "");
+// How many upgrade backups should be kept
+pref("browser.sessionstore.upgradeBackup.maxUpgradeBackups", 3);
 // End-users should not run sessionstore in debug mode
 pref("browser.sessionstore.debug", false);
 // Forget closed windows/tabs after two weeks
@@ -1156,18 +1158,10 @@ pref("browser.privatebrowsing.autostart", false);
 // bookmarking dialog
 pref("browser.bookmarks.editDialog.firstEditField", "namePicker");
 
-// Whether to use a panel that looks like an OS X sheet for customization
-#ifdef XP_MACOSX
-pref("toolbar.customization.usesheet", true);
-#else
-pref("toolbar.customization.usesheet", false);
-#endif
-
-// Disable Flash protected mode to reduce hang/crash rates.
-pref("dom.ipc.plugins.flash.disable-protected-mode", true);
+pref("dom.ipc.plugins.flash.disable-protected-mode", false);
 
 // Feature-disable the protected-mode auto-flip
-pref("browser.flash-protected-mode-flip.enable", true);
+pref("browser.flash-protected-mode-flip.enable", false);
 
 // Whether we've already flipped protected mode automatically
 pref("browser.flash-protected-mode-flip.done", false);
@@ -1179,6 +1173,8 @@ pref("dom.ipc.plugins.enabled.x86_64", true);
 #else
 pref("dom.ipc.plugins.enabled", true);
 #endif
+
+pref("dom.ipc.shims.enabledWarnings", false);
 
 // Start the browser in e10s mode
 pref("browser.tabs.remote.autostart", false);
@@ -1201,12 +1197,16 @@ pref("security.sandbox.windows.log", false);
 // 3 - the strongest settings we seem to be able to use without breaking
 //     everything, but will definitely cause some functionality restrictions
 pref("dom.ipc.plugins.sandbox-level.default", 0);
-pref("dom.ipc.plugins.sandbox-level.flash", 1);
 
 #if defined(MOZ_CONTENT_SANDBOX)
-// This controls whether the Windows content process sandbox is using a more
-// strict sandboxing policy.  This will require a restart.
-pref("security.sandbox.windows.content.moreStrict", false);
+// This controls the strength of the Windows content process sandbox for testing
+// purposes. This will require a restart.
+// On windows these levels are:
+// 0 - sandbox with USER_NON_ADMIN access token level
+// 1 - a more strict sandbox, which causes problems in specific areas
+// 2 - a policy that we can reasonably call an effective sandbox
+// 3 - an equivalent basic policy to the Chromium renderer processes
+pref("security.sandbox.content.level", 0);
 
 #if defined(MOZ_STACKWALKING)
 // This controls the depth of stack trace that is logged when Windows sandbox
@@ -1227,7 +1227,7 @@ pref("security.sandbox.windows.log.stackTraceDepth", 0);
 // This setting is read when the content process is started. On Mac the content
 // process is killed when all windows are closed, so a change will take effect
 // when the 1st window is opened.
-pref("security.sandbox.macos.content.level", 0);
+pref("security.sandbox.content.level", 1);
 #endif
 
 // This pref governs whether we attempt to work around problems caused by
@@ -1294,7 +1294,7 @@ pref("services.sync.prefs.sync.extensions.update.enabled", true);
 pref("services.sync.prefs.sync.intl.accept_languages", true);
 pref("services.sync.prefs.sync.javascript.enabled", true);
 pref("services.sync.prefs.sync.layout.spellcheckDefault", true);
-pref("services.sync.prefs.sync.lightweightThemes.isThemeSelected", true);
+pref("services.sync.prefs.sync.lightweightThemes.selectedThemeID", true);
 pref("services.sync.prefs.sync.lightweightThemes.usedThemes", true);
 pref("services.sync.prefs.sync.network.cookie.cookieBehavior", true);
 pref("services.sync.prefs.sync.network.cookie.lifetimePolicy", true);
@@ -1327,11 +1327,8 @@ pref("services.sync.prefs.sync.xpinstall.whitelist.required", true);
 
 // Developer edition preferences
 #ifdef MOZ_DEV_EDITION
+pref("lightweightThemes.selectedThemeID", "firefox-devedition@mozilla.org");
 pref("browser.devedition.theme.enabled", true);
-pref("browser.devedition.theme.showCustomizeButton", true);
-#else
-pref("browser.devedition.theme.enabled", false);
-pref("browser.devedition.theme.showCustomizeButton", false);
 #endif
 
 // Developer edition promo preferences
@@ -1366,7 +1363,7 @@ pref("devtools.toolbox.footer.height", 250);
 pref("devtools.toolbox.sidebar.width", 500);
 pref("devtools.toolbox.host", "bottom");
 pref("devtools.toolbox.selectedTool", "webconsole");
-pref("devtools.toolbox.toolbarSpec", '["splitconsole", "paintflashing toggle","tilt toggle","scratchpad","resize toggle","eyedropper","screenshot --fullpage"]');
+pref("devtools.toolbox.toolbarSpec", '["splitconsole", "paintflashing toggle","tilt toggle","scratchpad","resize toggle","eyedropper","screenshot --fullpage", "rulers"]');
 pref("devtools.toolbox.sideEnabled", true);
 pref("devtools.toolbox.zoomValue", "1");
 pref("devtools.toolbox.splitconsoleEnabled", false);
@@ -1382,6 +1379,7 @@ pref("devtools.command-button-scratchpad.enabled", false);
 pref("devtools.command-button-responsive.enabled", true);
 pref("devtools.command-button-eyedropper.enabled", false);
 pref("devtools.command-button-screenshot.enabled", false);
+pref("devtools.command-button-rulers.enabled", false);
 
 // Inspector preferences
 // Enable the Inspector
@@ -1408,7 +1406,6 @@ pref("devtools.responsiveUI.no-reload-notification", false);
 
 // Enable the Debugger
 pref("devtools.debugger.enabled", true);
-pref("devtools.debugger.chrome-enabled", true);
 pref("devtools.debugger.chrome-debugging-host", "localhost");
 pref("devtools.debugger.chrome-debugging-port", 6080);
 pref("devtools.debugger.remote-host", "localhost");
@@ -1429,35 +1426,12 @@ pref("devtools.debugger.ui.variables-sorting-enabled", true);
 pref("devtools.debugger.ui.variables-only-enum-visible", false);
 pref("devtools.debugger.ui.variables-searchbox-visible", false);
 
-// Enable the Profiler
-pref("devtools.profiler.enabled", true);
-
-// Timeline panel settings
-#ifdef NIGHTLY_BUILD
-pref("devtools.timeline.enabled", true);
-#else
-pref("devtools.timeline.enabled", false);
-#endif
-
-// TODO remove `devtools.timeline.hiddenMarkers.` branches when performance
-// tool lands (bug 1075567)
-pref("devtools.timeline.hiddenMarkers", "[]");
-
-// Enable perftools via build command
-#ifdef MOZ_DEVTOOLS_PERFTOOLS
-  pref("devtools.performance_dev.enabled", true);
-#else
-  pref("devtools.performance_dev.enabled", false);
-#endif
-
-// The default Profiler UI settings
-// TODO remove `devtools.profiler.ui.` branches when performance
-// tool lands (bug 1075567)
-pref("devtools.profiler.ui.flatten-tree-recursion", true);
-pref("devtools.profiler.ui.show-platform-data", false);
-pref("devtools.profiler.ui.show-idle-blocks", true);
+// Enable the Performance tools
+pref("devtools.performance.enabled", true);
 
 // The default Performance UI settings
+pref("devtools.performance.memory.sample-probability", "0.05");
+pref("devtools.performance.memory.max-log-length", 2147483647); // Math.pow(2,31) - 1
 pref("devtools.performance.timeline.hidden-markers", "[]");
 pref("devtools.performance.ui.invert-call-tree", true);
 pref("devtools.performance.ui.invert-flame-graph", false);
@@ -1466,9 +1440,13 @@ pref("devtools.performance.ui.show-platform-data", false);
 pref("devtools.performance.ui.show-idle-blocks", true);
 pref("devtools.performance.ui.enable-memory", false);
 pref("devtools.performance.ui.enable-framerate", true);
+pref("devtools.performance.ui.show-jit-optimizations", false);
 
 // The default cache UI setting
 pref("devtools.cache.disabled", false);
+
+// The default service workers UI setting
+pref("devtools.serviceWorkers.testing.enabled", false);
 
 // Enable the Network Monitor
 pref("devtools.netmonitor.enabled", true);
@@ -1489,11 +1467,16 @@ pref("devtools.tilt.outro_transition", true);
 //                  stored. Setting this preference to 0 will not
 //                  clear any recent files, but rather hide the
 //                  'Open Recent'-menu.
+// - lineNumbers: Whether to show line numbers or not.
+// - wrapText: Whether to wrap text or not.
 // - showTrailingSpace: Whether to highlight trailing space or not.
-// - enableCodeFolding: Whether to enable code folding or not.
+// - editorFontSize: Editor font size configuration.
 // - enableAutocompletion: Whether to enable JavaScript autocompletion.
 pref("devtools.scratchpad.recentFilesMax", 10);
+pref("devtools.scratchpad.lineNumbers", true);
+pref("devtools.scratchpad.wrapText", false);
 pref("devtools.scratchpad.showTrailingSpace", false);
+pref("devtools.scratchpad.editorFontSize", 12);
 pref("devtools.scratchpad.enableAutocompletion", true);
 
 // Enable the Storage Inspector
@@ -1577,6 +1560,9 @@ pref("devtools.browserconsole.filter.secwarn", true);
 // Text size in the Web Console. Use 0 for the system default size.
 pref("devtools.webconsole.fontSize", 0);
 
+// Max number of inputs to store in web console history.
+pref("devtools.webconsole.inputHistoryCount", 50);
+
 // Persistent logging: |true| if you want the Web Console to keep all of the
 // logged messages after reloading the page, |false| if you want the output to
 // be cleared each time page navigation happens.
@@ -1603,6 +1589,7 @@ pref("devtools.eyedropper.zoom", 6);
 // - keymap: which keymap to use (can be 'default', 'emacs' or 'vim')
 // - autoclosebrackets: whether to permit automatic bracket/quote closing.
 // - detectindentation: whether to detect the indentation from the file
+// - enableCodeFolding: Whether to enable code folding or not.
 pref("devtools.editor.tabsize", 2);
 pref("devtools.editor.expandtab", true);
 pref("devtools.editor.keymap", "default");
@@ -1683,7 +1670,7 @@ pref("pdfjs.previousHandler.alwaysAskBeforeHandling", false);
 pref("shumway.disabled", true);
 #else
 pref("shumway.disabled", false);
-pref("shumway.swf.whitelist", "http://g-ecx.images-amazon.com/*/AiryBasicRenderer*.swf");
+pref("shumway.swf.whitelist", "http://g-ecx.images-amazon.com/*/AiryBasicRenderer*.swf,http://z-ecx.images-amazon.com/*/AiryFlashlsRenderer._TTW_.swf,http://ia.media-imdb.com/*/AiryFlashlsRenderer._TTW_.swf");
 #endif
 #endif
 
@@ -1714,19 +1701,21 @@ pref("loop.debug.loglevel", "Error");
 pref("loop.debug.dispatcher", false);
 pref("loop.debug.websocket", false);
 pref("loop.debug.sdk", false);
+pref("loop.debug.twoWayMediaTelemetry", false);
 #ifdef DEBUG
-pref("loop.CSP", "default-src 'self' about: file: chrome: http://localhost:*; img-src 'self' data: http://www.gravatar.com/ about: file: chrome:; font-src 'none'; connect-src wss://*.tokbox.com https://*.opentok.com https://*.tokbox.com wss://*.mozilla.com https://*.mozilla.org wss://*.mozaws.net http://localhost:* ws://localhost:*; media-src blob:");
+pref("loop.CSP", "default-src 'self' about: file: chrome: http://localhost:*; img-src *; font-src 'none'; connect-src wss://*.tokbox.com https://*.opentok.com https://*.tokbox.com wss://*.mozilla.com https://*.mozilla.org wss://*.mozaws.net http://localhost:* ws://localhost:*; media-src blob:");
 #else
-pref("loop.CSP", "default-src 'self' about: file: chrome:; img-src 'self' data: http://www.gravatar.com/ about: file: chrome:; font-src 'none'; connect-src wss://*.tokbox.com https://*.opentok.com https://*.tokbox.com wss://*.mozilla.com https://*.mozilla.org wss://*.mozaws.net; media-src blob:");
+pref("loop.CSP", "default-src 'self' about: file: chrome:; img-src *; font-src 'none'; connect-src wss://*.tokbox.com https://*.opentok.com https://*.tokbox.com wss://*.mozilla.com https://*.mozilla.org wss://*.mozaws.net; media-src blob:");
 #endif
 pref("loop.oauth.google.redirect_uri", "urn:ietf:wg:oauth:2.0:oob:auto");
 pref("loop.oauth.google.scope", "https://www.google.com/m8/feeds");
 pref("loop.fxa_oauth.tokendata", "");
 pref("loop.fxa_oauth.profile", "");
 pref("loop.support_url", "https://support.mozilla.org/kb/group-conversations-firefox-hello-webrtc");
-
-// serverURL to be assigned by services team
-pref("services.push.serverURL", "wss://push.services.mozilla.com/");
+pref("loop.contacts.gravatars.show", false);
+pref("loop.contacts.gravatars.promo", true);
+pref("loop.browserSharing.showInfoBar", true);
+pref("loop.contextInConverations.enabled", false);
 
 pref("social.sidebar.unload_timeout_ms", 10000);
 
@@ -1755,11 +1744,26 @@ pref("plain_text.wrap_long_lines", true);
 pref("dom.debug.propagate_gesture_events_through_content", false);
 
 // The request URL of the GeoLocation backend.
+#ifdef RELEASE_BUILD
+pref("geo.wifi.uri", "https://www.googleapis.com/geolocation/v1/geolocate?key=%GOOGLE_API_KEY%");
+#else
 pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%");
+#endif
 
-// On Mac, the default geo provider is corelocation.
 #ifdef XP_MACOSX
+#ifdef RELEASE_BUILD
+pref("geo.provider.use_corelocation", false);
+#else
 pref("geo.provider.use_corelocation", true);
+#endif
+#endif
+
+#ifdef XP_WIN
+#ifdef RELEASE_BUILD
+pref("geo.provider.ms-windows-location", false);
+#else
+pref("geo.provider.ms-windows-location", true);
+#endif
 #endif
 
 // Necko IPC security checks only needed for app isolation for cookies/cache/etc:
@@ -1807,12 +1811,12 @@ pref("ui.key.menuAccessKeyFocuses", true);
 #endif
 
 // Encrypted media extensions.
-#ifdef RELEASE_BUILD
-pref("media.eme.enabled", false);
-pref("media.eme.apiVisible", false);
-#else
 pref("media.eme.enabled", true);
 pref("media.eme.apiVisible", true);
+
+#ifdef XP_WIN
+pref("media.gmp-eme-adobe.enabled", true);
+pref("browser.eme.ui.enabled", true);
 #endif
 
 // Play with different values of the decay time and get telemetry,
@@ -1843,14 +1847,11 @@ pref("privacy.trackingprotection.ui.enabled", false);
 #endif
 
 #ifdef NIGHTLY_BUILD
-pref("browser.tabs.remote.autostart.1", true);
-#endif
-
-// Temporary pref to allow printing in e10s windows on some platforms.
-#ifdef UNIX_BUT_NOT_MAC
-pref("print.enable_e10s_testing", false);
-#else
-pref("print.enable_e10s_testing", true);
+// At the moment, autostart.2 is used, while autostart.1 is unused.
+// We leave it here set to false to reset users' defaults and allow
+// us to change everybody to true in the future, when desired.
+pref("browser.tabs.remote.autostart.1", false);
+pref("browser.tabs.remote.autostart.2", true);
 #endif
 
 #ifdef NIGHTLY_BUILD
@@ -1877,8 +1878,10 @@ pref("dom.ipc.reportProcessHangs", false);
 pref("dom.ipc.reportProcessHangs", true);
 #endif
 
-// Disable reader mode by default.
-pref("reader.parse-on-load.enabled", false);
+// Enable ReadingList browser UI by default.
+pref("browser.readinglist.enabled", true);
+pref("browser.readinglist.sidebarEverOpened", false);
 
-// Disable ReadingList by default.
-pref("browser.readinglist.enabled", false);
+// Enable the readinglist engine by default.
+pref("readinglist.scheduler.enabled", true);
+pref("readinglist.server", "https://readinglist.services.mozilla.com/v1");

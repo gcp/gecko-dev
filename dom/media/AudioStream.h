@@ -22,7 +22,7 @@ class SoundTouch;
 
 namespace mozilla {
 
-struct DestroyPolicy
+struct CubebDestroyPolicy
 {
   void operator()(cubeb_stream* aStream) const {
     cubeb_stream_destroy(aStream);
@@ -177,7 +177,7 @@ class AudioInitTask;
 // callers, or made from a single thread.  One exception is that access to
 // GetPosition, GetPositionInFrames, SetVolume, and Get{Rate,Channels},
 // SetMicrophoneActive is thread-safe without external synchronization.
-class AudioStream MOZ_FINAL
+class AudioStream final
 {
   virtual ~AudioStream();
 
@@ -360,7 +360,7 @@ private:
   CircularByteBuffer mBuffer;
 
   // Owning reference to a cubeb_stream.
-  UniquePtr<cubeb_stream, DestroyPolicy> mCubebStream;
+  UniquePtr<cubeb_stream, CubebDestroyPolicy> mCubebStream;
 
   uint32_t mBytesPerFrame;
 
@@ -431,7 +431,7 @@ protected:
   virtual ~AudioInitTask() {};
 
 private:
-  NS_IMETHOD Run() MOZ_OVERRIDE MOZ_FINAL;
+  NS_IMETHOD Run() override final;
 
   RefPtr<AudioStream> mAudioStream;
   AudioStream::LatencyRequest mLatencyRequest;

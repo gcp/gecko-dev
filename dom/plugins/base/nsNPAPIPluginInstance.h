@@ -6,6 +6,7 @@
 #ifndef nsNPAPIPluginInstance_h_
 #define nsNPAPIPluginInstance_h_
 
+#include "nsSize.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
 #include "nsPIDOMWindow.h"
@@ -284,6 +285,8 @@ public:
 
   // Returns the contents scale factor of the screen the plugin is drawn on.
   double GetContentsScaleFactor();
+
+  nsresult GetRunID(uint32_t *aRunID);
 
   static bool InPluginCallUnsafeForReentry() { return gInUnsafePluginCalls > 0; }
   static void BeginPluginCall(NSPluginCallReentry aReentryState)

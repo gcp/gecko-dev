@@ -2,6 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* eslint-env node */
+
+/* XXX We should enable these and fix the warnings, but at the time of this
+ * writing, we're just bootstrapping the linting infrastructure.
+ */
+/* eslint-disable no-path-concat,no-process-exit */
+
 var express = require('express');
 var app = express();
 
@@ -24,7 +31,7 @@ function getConfigFile(req, res) {
     // XXX Update with the real marketplace url once the FxOS Loop app is
     //     uploaded to the marketplace bug 1053424
     "loop.config.marketplaceUrl = 'http://fake-market.herokuapp.com/iframe-install.html'",
-    "loop.config.brandWebsiteUrl = 'https://www.mozilla.org/firefox/';",
+    "loop.config.downloadFirefoxUrl = 'https://www.mozilla.org/firefox/new/?scene=2&utm_source=hello.firefox.com&utm_medium=referral&utm_campaign=non-webrtc-browser#download-fx';",
     "loop.config.privacyWebsiteUrl = 'https://www.mozilla.org/privacy/firefox-hello/';",
     "loop.config.learnMoreUrl = 'https://www.mozilla.org/hello/';",
     "loop.config.legalWebsiteUrl = 'https://www.mozilla.org/about/legal/terms/firefox-hello/';",

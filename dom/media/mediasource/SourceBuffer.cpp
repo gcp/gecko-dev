@@ -21,6 +21,7 @@
 #include "nsThreadUtils.h"
 #include "prlog.h"
 #include <time.h>
+#include "TimeUnits.h"
 
 struct JSContext;
 class JSObject;
@@ -55,7 +56,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() MOZ_OVERRIDE MOZ_FINAL {
+  NS_IMETHOD Run() override final {
 
     mSourceBuffer->AppendData(mData, mTimestampOffset, mUpdateID);
 
@@ -79,7 +80,7 @@ public:
   , mEnd(aEnd)
   { }
 
-  NS_IMETHOD Run() MOZ_OVERRIDE MOZ_FINAL {
+  NS_IMETHOD Run() override final {
 
     if (!mSourceBuffer->mUpdating) {
       // abort was called in between.
@@ -267,7 +268,7 @@ SourceBuffer::Remove(double aStart, double aEnd, ErrorResult& aRv)
   }
 
   StartUpdating();
-  nsRefPtr<nsIRunnable> task = new RangeRemovalRunnable(this, aStart, aEnd);
+  nsCOMPtr<nsIRunnable> task = new RangeRemovalRunnable(this, aStart, aEnd);
   NS_DispatchToMainThread(task);
 }
 
@@ -276,7 +277,7 @@ SourceBuffer::RangeRemoval(double aStart, double aEnd)
 {
   StartUpdating();
   DoRangeRemoval(aStart, aEnd);
-  nsRefPtr<nsIRunnable> task =
+  nsCOMPtr<nsIRunnable> task =
     NS_NewRunnableMethod(this, &SourceBuffer::StopUpdating);
   NS_DispatchToMainThread(task);
 }
@@ -286,9 +287,8 @@ SourceBuffer::DoRangeRemoval(double aStart, double aEnd)
 {
   MSE_DEBUG("DoRangeRemoval(%f, %f)", aStart, aEnd);
   if (mTrackBuffer && !IsInfinite(aStart)) {
-    int64_t start = aStart * USECS_PER_S;
-    int64_t end = IsInfinite(aEnd) ? INT64_MAX : (int64_t)(aEnd * USECS_PER_S);
-    mTrackBuffer->RangeRemoval(start, end);
+    mTrackBuffer->RangeRemoval(media::Microseconds::FromSeconds(aStart),
+                               media::Microseconds::FromSeconds(aEnd));
   }
 }
 
@@ -322,6 +322,7 @@ SourceBuffer::SourceBuffer(MediaSource* aMediaSource, const nsACString& aType)
   , mTimestampOffset(0)
   , mAppendMode(SourceBufferAppendMode::Segments)
   , mUpdating(false)
+  , mActive(false)
   , mUpdateID(0)
   , mType(aType)
 {
@@ -348,9 +349,9 @@ SourceBuffer::GetParentObject() const
 }
 
 JSObject*
-SourceBuffer::WrapObject(JSContext* aCx)
+SourceBuffer::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SourceBufferBinding::Wrap(aCx, this);
+  return SourceBufferBinding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -432,7 +433,7 @@ SourceBuffer::AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aR
 
   MOZ_ASSERT(mAppendMode == SourceBufferAppendMode::Segments,
              "We don't handle timestampOffset for sequence mode yet");
-  nsRefPtr<nsIRunnable> task =
+  nsCOMPtr<nsIRunnable> task =
     new AppendDataRunnable(this, data, mTimestampOffset, mUpdateID);
   NS_DispatchToMainThread(task);
 }
@@ -460,7 +461,7 @@ SourceBuffer::AppendData(LargeDataBuffer* aData, double aTimestampOffset,
   }
 
   mPendingAppend.Begin(mTrackBuffer->AppendData(aData, aTimestampOffset * USECS_PER_S)
-                       ->RefableThen(NS_GetCurrentThread(), __func__, this,
+                       ->RefableThen(AbstractThread::MainThread(), __func__, this,
                                      &SourceBuffer::AppendDataCompletedWithSuccess,
                                      &SourceBuffer::AppendDataErrored));
 }
@@ -475,7 +476,11 @@ SourceBuffer::AppendDataCompletedWithSuccess(bool aGotMedia)
   }
 
   if (mTrackBuffer->HasInitSegment()) {
-    mMediaSource->QueueInitializationEvent();
+    if (!mActive) {
+      mActive = true;
+      mMediaSource->SourceBufferIsActive(this);
+      mMediaSource->QueueInitializationEvent();
+    }
   }
 
   if (aGotMedia) {

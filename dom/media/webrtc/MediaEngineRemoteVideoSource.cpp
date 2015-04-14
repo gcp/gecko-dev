@@ -72,9 +72,9 @@ MediaEngineRemoteVideoSource::Shutdown() {
         empty = mSources.IsEmpty();
         if (empty) {
           break;
-        }
+ 	}
         source = mSources[0];
-      }
+         }
       Stop(source, kVideoTrack); // XXX change to support multiple tracks
     }
     MOZ_ASSERT(mState == kStopped);
@@ -83,6 +83,9 @@ MediaEngineRemoteVideoSource::Shutdown() {
   if (mState == kAllocated || mState == kStopped) {
     Deallocate();
   }
+
+
+
 
   mozilla::camera::Shutdown();
   return;

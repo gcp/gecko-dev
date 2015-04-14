@@ -69,38 +69,56 @@ SandboxBroker::LaunchApp(const wchar_t *aPath,
 
 #if defined(MOZ_CONTENT_SANDBOX)
 bool
-SandboxBroker::SetSecurityLevelForContentProcess(bool aMoreStrict)
+SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel)
 {
   if (!mPolicy) {
     return false;
   }
 
-  sandbox::ResultCode result;
-  bool ret;
-  if (aMoreStrict) {
-    result = mPolicy->SetJobLevel(sandbox::JOB_INTERACTIVE, 0);
-    ret = (sandbox::SBOX_ALL_OK == result);
+  sandbox::JobLevel jobLevel;
+  sandbox::TokenLevel accessTokenLevel;
+  sandbox::IntegrityLevel initialIntegrityLevel;
+  sandbox::IntegrityLevel delayedIntegrityLevel;
 
-    result = mPolicy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
-                                    sandbox::USER_INTERACTIVE);
-    ret = ret && (sandbox::SBOX_ALL_OK == result);
-
-    // If the delayed integrity level is lowered then SetUpSandboxEnvironment and
-    // CleanUpSandboxEnvironment in ContentChild should be changed or removed.
-    result = mPolicy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
-    ret = ret && (sandbox::SBOX_ALL_OK == result);
-
-    result = mPolicy->SetAlternateDesktop(true);
-    ret = ret && (sandbox::SBOX_ALL_OK == result);
+  if (aSandboxLevel > 2) {
+    jobLevel = sandbox::JOB_LOCKDOWN;
+    accessTokenLevel = sandbox::USER_LOCKDOWN;
+    initialIntegrityLevel = sandbox::INTEGRITY_LEVEL_LOW;
+    delayedIntegrityLevel = sandbox::INTEGRITY_LEVEL_UNTRUSTED;
+  } else if (aSandboxLevel == 2) {
+    jobLevel = sandbox::JOB_RESTRICTED;
+    accessTokenLevel = sandbox::USER_LIMITED;
+    initialIntegrityLevel = sandbox::INTEGRITY_LEVEL_LOW;
+    delayedIntegrityLevel = sandbox::INTEGRITY_LEVEL_LOW;
+  } else if (aSandboxLevel == 1) {
+    jobLevel = sandbox::JOB_NONE;
+    accessTokenLevel = sandbox::USER_NON_ADMIN;
+    initialIntegrityLevel = sandbox::INTEGRITY_LEVEL_LOW;
+    delayedIntegrityLevel = sandbox::INTEGRITY_LEVEL_LOW;
   } else {
-    result = mPolicy->SetJobLevel(sandbox::JOB_NONE, 0);
-    ret = (sandbox::SBOX_ALL_OK == result);
+    jobLevel = sandbox::JOB_NONE;
+    accessTokenLevel = sandbox::USER_NON_ADMIN;
+    // INTEGRITY_LEVEL_LAST effectively means don't change from the integrity
+    // level of the broker process.
+    initialIntegrityLevel = sandbox::INTEGRITY_LEVEL_LAST;
+    delayedIntegrityLevel = sandbox::INTEGRITY_LEVEL_MEDIUM;
+  }
 
-    result = mPolicy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
-                                    sandbox::USER_NON_ADMIN);
-    ret = ret && (sandbox::SBOX_ALL_OK == result);
+  sandbox::ResultCode result = mPolicy->SetJobLevel(jobLevel,
+                                                    0 /* ui_exceptions */);
+  bool ret = (sandbox::SBOX_ALL_OK == result);
 
-    result = mPolicy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_MEDIUM);
+  result = mPolicy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
+                                  accessTokenLevel);
+  ret = ret && (sandbox::SBOX_ALL_OK == result);
+
+  result = mPolicy->SetIntegrityLevel(initialIntegrityLevel);
+  ret = ret && (sandbox::SBOX_ALL_OK == result);
+  result = mPolicy->SetDelayedIntegrityLevel(delayedIntegrityLevel);
+  ret = ret && (sandbox::SBOX_ALL_OK == result);
+
+  if (aSandboxLevel > 1) {
+    result = mPolicy->SetAlternateDesktop(true);
     ret = ret && (sandbox::SBOX_ALL_OK == result);
   }
 
@@ -110,6 +128,26 @@ SandboxBroker::SetSecurityLevelForContentProcess(bool aMoreStrict)
   result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                             sandbox::TargetPolicy::FILES_ALLOW_ANY,
                             L"\\??\\pipe\\chrome.*");
+  ret = ret && (sandbox::SBOX_ALL_OK == result);
+
+  // Add the policy for the client side of the crash server pipe.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                            sandbox::TargetPolicy::FILES_ALLOW_ANY,
+                            L"\\??\\pipe\\gecko-crash-server-pipe.*");
+  ret = ret && (sandbox::SBOX_ALL_OK == result);
+
+  // The content process needs to be able to duplicate named pipes back to the
+  // broker process, which are File type handles.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
+                            sandbox::TargetPolicy::HANDLES_DUP_BROKER,
+                            L"File");
+  ret = ret && (sandbox::SBOX_ALL_OK == result);
+
+  // The content process needs to be able to duplicate shared memory to the
+  // broker process, which are Section type handles.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
+                            sandbox::TargetPolicy::HANDLES_DUP_BROKER,
+                            L"Section");
   ret = ret && (sandbox::SBOX_ALL_OK == result);
 
   return ret;
@@ -184,6 +222,13 @@ SandboxBroker::SetSecurityLevelForPluginProcess(int32_t aSandboxLevel)
                             L"\\??\\pipe\\chrome.*");
   ret = ret && (sandbox::SBOX_ALL_OK == result);
 
+  // The NPAPI process needs to be able to duplicate shared memory to the
+  // content process, which are Section type handles.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
+                            sandbox::TargetPolicy::HANDLES_DUP_ANY,
+                            L"Section");
+  ret = ret && (sandbox::SBOX_ALL_OK == result);
+
   return ret;
 }
 
@@ -250,6 +295,12 @@ SandboxBroker::SetSecurityLevelForGMPlugin()
   result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                             sandbox::TargetPolicy::FILES_ALLOW_ANY,
                             L"\\??\\pipe\\chrome.*");
+  ret = ret && (sandbox::SBOX_ALL_OK == result);
+
+  // Add the policy for the client side of the crash server pipe.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                            sandbox::TargetPolicy::FILES_ALLOW_ANY,
+                            L"\\??\\pipe\\gecko-crash-server-pipe.*");
   ret = ret && (sandbox::SBOX_ALL_OK == result);
 
 #ifdef DEBUG

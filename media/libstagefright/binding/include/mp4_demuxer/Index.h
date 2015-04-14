@@ -20,7 +20,7 @@ class SampleIterator
 {
 public:
   explicit SampleIterator(Index* aIndex);
-  MP4Sample* GetNext();
+  already_AddRefed<mozilla::MediaRawData> GetNext();
   void Seek(Microseconds aTime);
   Microseconds GetNextKeyframeTime();
 
@@ -38,7 +38,7 @@ public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Index)
 
   Index(const stagefright::Vector<stagefright::MediaSource::Indice>& aIndex,
-        Stream* aSource, uint32_t aTrackId, Monitor* aMonitor);
+        Stream* aSource, uint32_t aTrackId, bool aIsAudio, Monitor* aMonitor);
 
   void UpdateMoofIndex(const nsTArray<mozilla::MediaByteRange>& aByteRanges);
   Microseconds GetEndCompositionIfBuffered(

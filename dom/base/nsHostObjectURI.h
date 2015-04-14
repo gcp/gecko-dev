@@ -12,6 +12,7 @@
 #include "nsISerializable.h"
 #include "nsIURIWithPrincipal.h"
 #include "nsSimpleURI.h"
+#include "nsIIPCSerializableURI.h"
 
 /**
  * These URIs refer to host objects: Blobs, with scheme "blob",
@@ -33,16 +34,17 @@ public:
   NS_DECL_NSIURIWITHPRINCIPAL
   NS_DECL_NSISERIALIZABLE
   NS_DECL_NSICLASSINFO
+  NS_DECL_NSIIPCSERIALIZABLEURI
 
   // Override CloneInternal() and EqualsInternal()
   virtual nsresult CloneInternal(RefHandlingEnum aRefHandlingMode,
-                                 nsIURI** aClone) MOZ_OVERRIDE;
+                                 nsIURI** aClone) override;
   virtual nsresult EqualsInternal(nsIURI* aOther,
                                   RefHandlingEnum aRefHandlingMode,
-                                  bool* aResult) MOZ_OVERRIDE;
+                                  bool* aResult) override;
 
   // Override StartClone to hand back a nsHostObjectURI
-  virtual nsSimpleURI* StartClone(RefHandlingEnum /* unused */) MOZ_OVERRIDE
+  virtual nsSimpleURI* StartClone(RefHandlingEnum /* unused */) override
   { return new nsHostObjectURI(); }
 
   nsCOMPtr<nsIPrincipal> mPrincipal;

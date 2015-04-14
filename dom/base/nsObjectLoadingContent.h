@@ -233,6 +233,18 @@ class nsObjectLoadingContent : public nsImageLoadingContent
                     JS::MutableHandle<JS::Value> aRetval,
                     mozilla::ErrorResult& aRv);
 
+    uint32_t GetRunID(mozilla::ErrorResult& aRv)
+    {
+      uint32_t runID;
+      nsresult rv = GetRunID(&runID);
+      if (NS_FAILED(rv)) {
+        aRv.Throw(rv);
+        return 0;
+      }
+
+      return runID;
+    }
+
   protected:
     /**
      * Begins loading the object when called
@@ -505,7 +517,7 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     nsPluginFrame* GetExistingFrame();
 
     // Helper class for SetupProtoChain
-    class SetupProtoChainRunner MOZ_FINAL : public nsIRunnable
+    class SetupProtoChainRunner final : public nsIRunnable
     {
       ~SetupProtoChainRunner();
     public:
@@ -513,7 +525,7 @@ class nsObjectLoadingContent : public nsImageLoadingContent
 
       explicit SetupProtoChainRunner(nsObjectLoadingContent* aContent);
 
-      NS_IMETHOD Run() MOZ_OVERRIDE;
+      NS_IMETHOD Run() override;
 
     private:
       // We store an nsIObjectLoadingContent because we can
@@ -578,6 +590,9 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     ObjectType                  mType           : 8;
     // The type of fallback content we're showing (see ObjectState())
     FallbackType                mFallbackType : 8;
+
+    uint32_t                    mRunID;
+    bool                        mHasRunID;
 
     // If true, we have opened a channel as the listener and it has reached
     // OnStartRequest. Does not get set for channels that are passed directly to

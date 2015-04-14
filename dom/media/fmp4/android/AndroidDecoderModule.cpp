@@ -18,6 +18,7 @@
 
 #include "nsThreadUtils.h"
 #include "nsAutoPtr.h"
+#include "nsPromiseFlatString.h"
 
 #include <jni.h>
 #include <string.h>
@@ -28,14 +29,10 @@ using namespace mozilla::widget::sdk;
 
 namespace mozilla {
 
-static MediaCodec::LocalRef CreateDecoder(const char* aMimeType)
+static MediaCodec::LocalRef CreateDecoder(const nsACString& aMimeType)
 {
-  if (!aMimeType) {
-    return nullptr;
-  }
-
   MediaCodec::LocalRef codec;
-  NS_ENSURE_SUCCESS(MediaCodec::CreateDecoderByType(aMimeType, &codec), nullptr);
+  NS_ENSURE_SUCCESS(MediaCodec::CreateDecoderByType(PromiseFlatCString(aMimeType).get(), &codec), nullptr);
   return codec;
 }
 
@@ -51,7 +48,7 @@ public:
 
   }
 
-  nsresult Init() MOZ_OVERRIDE {
+  nsresult Init() override {
     mSurfaceTexture = AndroidSurfaceTexture::Create();
     if (!mSurfaceTexture) {
       NS_WARNING("Failed to create SurfaceTexture for video decode\n");
@@ -61,15 +58,11 @@ public:
     return InitDecoder(mSurfaceTexture->JavaSurface());
   }
 
-  void Cleanup() MOZ_OVERRIDE {
+  void Cleanup() override {
     mGLContext = nullptr;
   }
 
-  virtual nsresult Input(mp4_demuxer::MP4Sample* aSample) MOZ_OVERRIDE {
-    if (!mp4_demuxer::AnnexB::ConvertSampleToAnnexB(aSample)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-
+  virtual nsresult Input(MediaRawData* aSample) override {
     return MediaCodecDataDecoder::Input(aSample);
   }
 
@@ -103,7 +96,7 @@ public:
     return eglImage;
   }
 
-  virtual nsresult PostOutput(BufferInfo::Param aInfo, MediaFormat::Param aFormat, Microseconds aDuration) MOZ_OVERRIDE {
+  virtual nsresult PostOutput(BufferInfo::Param aInfo, MediaFormat::Param aFormat, Microseconds aDuration) override {
     if (!EnsureGLContext()) {
       return NS_ERROR_FAILURE;
     }
@@ -251,8 +244,13 @@ public:
 };
 
 
-bool AndroidDecoderModule::SupportsAudioMimeType(const char* aMimeType) {
-  return static_cast<bool>(CreateDecoder(aMimeType));
+bool AndroidDecoderModule::SupportsMimeType(const nsACString& aMimeType)
+{
+  if (aMimeType.EqualsLiteral("video/mp4") ||
+      aMimeType.EqualsLiteral("video/avc")) {
+    return true;
+  }
+  return static_cast<bool>(mozilla::CreateDecoder(aMimeType));
 }
 
 already_AddRefed<MediaDataDecoder>
@@ -299,18 +297,22 @@ AndroidDecoderModule::CreateAudioDecoder(const mp4_demuxer::AudioDecoderConfig& 
 
 }
 
-
-nsresult AndroidDecoderModule::Shutdown()
+PlatformDecoderModule::ConversionRequired
+AndroidDecoderModule::DecoderNeedsConversion(const mp4_demuxer::TrackConfig& aConfig) const
 {
-  return NS_OK;
+  if (aConfig.IsVideoConfig()) {
+    return kNeedAnnexB;
+  } else {
+    return kNeedNone;
+  }
 }
 
 MediaCodecDataDecoder::MediaCodecDataDecoder(MediaData::Type aType,
-                                             const char* aMimeType,
+                                             const nsACString& aMimeType,
                                              MediaFormat::Param aFormat,
                                              MediaDataDecoderCallback* aCallback)
   : mType(aType)
-  , mMimeType(strdup(aMimeType))
+  , mMimeType(aMimeType)
   , mFormat(aFormat)
   , mCallback(aCallback)
   , mInputBuffers(nullptr)
@@ -395,7 +397,7 @@ void MediaCodecDataDecoder::DecoderLoop()
   bool waitingEOF = false;
 
   AutoLocalJNIFrame frame(GetJNIForThread(), 1);
-  mp4_demuxer::MP4Sample* sample = nullptr;
+  nsRefPtr<MediaRawData> sample;
 
   MediaFormat::LocalRef outputFormat(frame.GetEnv());
   nsresult res;
@@ -462,7 +464,7 @@ void MediaCodecDataDecoder::DecoderLoop()
 
         void* directBuffer = frame.GetEnv()->GetDirectBufferAddress(buffer.Get());
 
-        MOZ_ASSERT(frame.GetEnv()->GetDirectBufferCapacity(buffer.Get()) >= sample->size,
+        MOZ_ASSERT(frame.GetEnv()->GetDirectBufferCapacity(buffer.Get()) >= sample->mSize,
           "Decoder buffer is not large enough for sample");
 
         {
@@ -471,14 +473,13 @@ void MediaCodecDataDecoder::DecoderLoop()
           mQueue.pop();
         }
 
-        PodCopy((uint8_t*)directBuffer, sample->data, sample->size);
+        PodCopy((uint8_t*)directBuffer, sample->mData, sample->mSize);
 
-        res = mDecoder->QueueInputBuffer(inputIndex, 0, sample->size,
-                                         sample->composition_timestamp, 0);
+        res = mDecoder->QueueInputBuffer(inputIndex, 0, sample->mSize,
+                                         sample->mTime, 0);
         HANDLE_DECODER_ERROR();
 
-        mDurations.push(sample->duration);
-        delete sample;
+        mDurations.push(sample->mDuration);
         sample = nullptr;
         outputDone = false;
       }
@@ -570,7 +571,6 @@ void MediaCodecDataDecoder::ClearQueue()
 {
   mMonitor.AssertCurrentThreadOwns();
   while (!mQueue.empty()) {
-    delete mQueue.front();
     mQueue.pop();
   }
   while (!mDurations.empty()) {
@@ -578,7 +578,7 @@ void MediaCodecDataDecoder::ClearQueue()
   }
 }
 
-nsresult MediaCodecDataDecoder::Input(mp4_demuxer::MP4Sample* aSample) {
+nsresult MediaCodecDataDecoder::Input(MediaRawData* aSample) {
   MonitorAutoLock lock(mMonitor);
   mQueue.push(aSample);
   lock.NotifyAll();

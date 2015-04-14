@@ -21,12 +21,6 @@ GMPDecoderModule::~GMPDecoderModule()
 {
 }
 
-nsresult
-GMPDecoderModule::Shutdown()
-{
-  return NS_OK;
-}
-
 static already_AddRefed<MediaDataDecoderProxy>
 CreateDecoderWrapper(MediaDataDecoderCallback* aCallback)
 {
@@ -52,7 +46,7 @@ GMPDecoderModule::CreateVideoDecoder(const mp4_demuxer::VideoDecoderConfig& aCon
                                      FlushableMediaTaskQueue* aVideoTaskQueue,
                                      MediaDataDecoderCallback* aCallback)
 {
-  if (strcmp(aConfig.mime_type, "video/avc") != 0) {
+  if (!aConfig.mime_type.EqualsLiteral("video/avc")) {
     return nullptr;
   }
 
@@ -70,7 +64,7 @@ GMPDecoderModule::CreateAudioDecoder(const mp4_demuxer::AudioDecoderConfig& aCon
                                      FlushableMediaTaskQueue* aAudioTaskQueue,
                                      MediaDataDecoderCallback* aCallback)
 {
-  if (strcmp(aConfig.mime_type, "audio/mp4a-latm") != 0) {
+  if (!aConfig.mime_type.EqualsLiteral("audio/mp4a-latm")) {
     return nullptr;
   }
 
@@ -81,11 +75,15 @@ GMPDecoderModule::CreateAudioDecoder(const mp4_demuxer::AudioDecoderConfig& aCon
   return wrapper.forget();
 }
 
-bool
-GMPDecoderModule::DecoderNeedsAVCC(const mp4_demuxer::VideoDecoderConfig& aConfig)
+PlatformDecoderModule::ConversionRequired
+GMPDecoderModule::DecoderNeedsConversion(const mp4_demuxer::TrackConfig& aConfig) const
 {
   // GMPVideoCodecType::kGMPVideoCodecH264 specifies that encoded frames must be in AVCC format.
-  return true;
+  if (aConfig.IsVideoConfig()) {
+    return kNeedAVCC;
+  } else {
+    return kNeedNone;
+  }
 }
 
 } // namespace mozilla

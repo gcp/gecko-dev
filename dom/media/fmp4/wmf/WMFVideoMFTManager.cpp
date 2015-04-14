@@ -19,6 +19,7 @@
 #include "prlog.h"
 #include "gfx2DGlue.h"
 #include "gfxWindowsPlatform.h"
+#include "IMFYCbCrImage.h"
 
 #ifdef PR_LOGGING
 PRLogModuleInfo* GetDemuxerLog();
@@ -29,6 +30,7 @@ PRLogModuleInfo* GetDemuxerLog();
 
 using mozilla::gfx::ToIntRect;
 using mozilla::layers::Image;
+using mozilla::layers::IMFYCbCrImage;
 using mozilla::layers::LayerManager;
 using mozilla::layers::LayersBackend;
 
@@ -71,25 +73,23 @@ WMFVideoMFTManager::WMFVideoMFTManager(
                             mozilla::layers::LayersBackend aLayersBackend,
                             mozilla::layers::ImageContainer* aImageContainer,
                             bool aDXVAEnabled)
-  : mVideoStride(0)
-  , mVideoWidth(0)
-  , mVideoHeight(0)
-  , mImageContainer(aImageContainer)
+  : mImageContainer(aImageContainer)
   , mDXVAEnabled(aDXVAEnabled)
   , mLayersBackend(aLayersBackend)
-  , mUseHwAccel(false)
+  // mVideoStride, mVideoWidth, mVideoHeight, mUseHwAccel are initialized in
+  // Init().
 {
   NS_ASSERTION(!NS_IsMainThread(), "Should not be on main thread.");
   MOZ_ASSERT(mImageContainer);
   MOZ_COUNT_CTOR(WMFVideoMFTManager);
 
   // Need additional checks/params to check vp8/vp9
-  if (!strcmp(aConfig.mime_type, "video/mp4") ||
-      !strcmp(aConfig.mime_type, "video/avc")) {
+  if (aConfig.mime_type.EqualsLiteral("video/mp4") ||
+      aConfig.mime_type.EqualsLiteral("video/avc")) {
     mStreamType = H264;
-  } else if (!strcmp(aConfig.mime_type, "video/webm; codecs=vp8")) {
+  } else if (aConfig.mime_type.EqualsLiteral("video/webm; codecs=vp8")) {
     mStreamType = VP8;
-  } else if (!strcmp(aConfig.mime_type, "video/webm; codecs=vp9")) {
+  } else if (aConfig.mime_type.EqualsLiteral("video/webm; codecs=vp9")) {
     mStreamType = VP9;
   } else {
     mStreamType = Unknown;
@@ -154,11 +154,6 @@ WMFVideoMFTManager::InitializeDXVA()
     return false;
   }
 
-  if (gfxWindowsPlatform::GetPlatform()->IsWARP() ||
-      !gfxPlatform::CanUseDXVA()) {
-    return false;
-  }
-
   // The DXVA manager must be created on the main thread.
   nsRefPtr<CreateDXVAManagerEvent> event(new CreateDXVAManagerEvent());
   NS_DispatchToMainThread(event, NS_DISPATCH_SYNC);
@@ -170,6 +165,7 @@ WMFVideoMFTManager::InitializeDXVA()
 TemporaryRef<MFTDecoder>
 WMFVideoMFTManager::Init()
 {
+  mUseHwAccel = false; // default value; changed if D3D setup succeeds.
   bool useDxva = InitializeDXVA();
 
   RefPtr<MFTDecoder> decoder(new MFTDecoder());
@@ -228,22 +224,27 @@ WMFVideoMFTManager::Init()
   mDecoder = decoder;
   LOG("Video Decoder initialized, Using DXVA: %s", (mUseHwAccel ? "Yes" : "No"));
 
+  // Just in case ConfigureVideoFrameGeometry() does not set these
+  mVideoInfo = VideoInfo();
+  mVideoStride = 0;
+  mVideoWidth = 0;
+  mVideoHeight = 0;
+  mPictureRegion.SetEmpty();
+
   return decoder.forget();
 }
 
 HRESULT
-WMFVideoMFTManager::Input(mp4_demuxer::MP4Sample* aSample)
+WMFVideoMFTManager::Input(MediaRawData* aSample)
 {
-  if (mStreamType != VP8 && mStreamType != VP9) {
-    // We must prepare samples in AVC Annex B.
-    if (!mp4_demuxer::AnnexB::ConvertSampleToAnnexB(aSample)) {
-      return E_FAIL;
-    }
+  if (!mDecoder) {
+    // This can happen during shutdown.
+    return E_FAIL;
   }
   // Forward sample data to the decoder.
-  const uint8_t* data = reinterpret_cast<const uint8_t*>(aSample->data);
-  uint32_t length = aSample->size;
-  return mDecoder->Input(data, length, aSample->composition_timestamp);
+  return mDecoder->Input(aSample->mData,
+                         uint32_t(aSample->mSize),
+                         aSample->mTime);
 }
 
 HRESULT
@@ -382,20 +383,26 @@ WMFVideoMFTManager::CreateBasicVideoFrame(IMFSample* aSample,
 
   Microseconds pts = GetSampleTime(aSample);
   Microseconds duration = GetSampleDuration(aSample);
-  nsRefPtr<VideoData> v = VideoData::Create(mVideoInfo,
-                                            mImageContainer,
-                                            aStreamOffset,
-                                            std::max(0LL, pts),
-                                            duration,
-                                            b,
-                                            false,
-                                            -1,
-                                            ToIntRect(mPictureRegion));
-  if (twoDBuffer) {
-    twoDBuffer->Unlock2D();
-  } else {
-    buffer->Unlock();
-  }
+
+  nsRefPtr<layers::PlanarYCbCrImage> image =
+    new IMFYCbCrImage(buffer, twoDBuffer);
+
+  VideoData::SetVideoDataToImage(image,
+                                 mVideoInfo,
+                                 b,
+                                 ToIntRect(mPictureRegion),
+                                 false);
+
+  nsRefPtr<VideoData> v =
+    VideoData::CreateFromImage(mVideoInfo,
+                               mImageContainer,
+                               aStreamOffset,
+                               std::max(0LL, pts),
+                               duration,
+                               image.forget(),
+                               false,
+                               -1,
+                               ToIntRect(mPictureRegion));
 
   v.forget(aOutVideoData);
   return S_OK;
@@ -500,7 +507,7 @@ WMFVideoMFTManager::Shutdown()
 bool
 WMFVideoMFTManager::IsHardwareAccelerated() const
 {
-  return mUseHwAccel;
+  return mDecoder && mUseHwAccel;
 }
 
 } // namespace mozilla

@@ -70,9 +70,6 @@ if CONFIG['MOZ_PLACES']:
         'PlacesDBUtils.jsm',
         'PlacesSearchAutocompleteProvider.jsm',
         'PlacesTransactions.jsm',
-    ]
-
-    EXTRA_PP_JS_MODULES += [
         'PlacesUtils.jsm',
     ]
 
@@ -97,3 +94,6 @@ if CONFIG['MOZ_PLACES']:
     FINAL_LIBRARY = 'xul'
 
 include('/ipc/chromium/chromium-config.mozbuild')
+
+with Files('**'):
+    BUG_COMPONENT = ('Toolkit', 'Places')

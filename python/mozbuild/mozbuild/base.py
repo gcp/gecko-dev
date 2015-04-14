@@ -6,7 +6,7 @@ from __future__ import print_function, unicode_literals
 
 import json
 import logging
-import mozpack.path
+import mozpack.path as mozpath
 import multiprocessing
 import os
 import subprocess
@@ -656,25 +656,28 @@ class MachCommandConditions(object):
         return False
 
     @staticmethod
-    def is_firefox_or_mulet(cls):
-        """Must have a Firefox or Mulet build."""
-        return (MachCommandConditions.is_firefox(cls) or
-                MachCommandConditions.is_mulet(cls))
-
-    @staticmethod
     def is_b2g(cls):
-        """Must have a Boot to Gecko build."""
+        """Must have a B2G build."""
         if hasattr(cls, 'substs'):
             return cls.substs.get('MOZ_WIDGET_TOOLKIT') == 'gonk'
         return False
 
     @staticmethod
     def is_b2g_desktop(cls):
-        """Must have a Boot to Gecko desktop build."""
+        """Must have a B2G desktop build."""
         if hasattr(cls, 'substs'):
             return cls.substs.get('MOZ_BUILD_APP') == 'b2g' and \
                    cls.substs.get('MOZ_WIDGET_TOOLKIT') != 'gonk'
         return False
+
+    @staticmethod
+    def is_emulator(cls):
+        """Must have a B2G build with an emulator configured."""
+        try:
+            return MachCommandConditions.is_b2g(cls) and \
+                   cls.device_name.startswith('emulator')
+        except AttributeError:
+            return False
 
     @staticmethod
     def is_android(cls):
@@ -706,12 +709,12 @@ class PathArgument(object):
         # path relative to that base directory.
         for base_dir in [self.topobjdir, self.topsrcdir]:
             if abspath.startswith(os.path.abspath(base_dir)):
-                return mozpack.path.relpath(abspath, base_dir)
+                return mozpath.relpath(abspath, base_dir)
 
-        return mozpack.path.normsep(self.arg)
+        return mozpath.normsep(self.arg)
 
     def srcdir_path(self):
-        return mozpack.path.join(self.topsrcdir, self.relpath())
+        return mozpath.join(self.topsrcdir, self.relpath())
 
     def objdir_path(self):
-        return mozpack.path.join(self.topobjdir, self.relpath())
+        return mozpath.join(self.topobjdir, self.relpath())

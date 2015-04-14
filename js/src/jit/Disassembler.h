@@ -17,8 +17,8 @@ namespace Disassembler {
 
 class ComplexAddress {
     int32_t disp_;
-    Register::Code base_ : 8;
-    Register::Code index_ : 8;
+    Register::Encoding base_ : 8;
+    Register::Encoding index_ : 8;
     int8_t scale_; // log2 encoding
     bool isPCRelative_;
 
@@ -33,7 +33,7 @@ class ComplexAddress {
         MOZ_ASSERT(*this == *this);
     }
 
-    ComplexAddress(int32_t disp, Register::Code base)
+    ComplexAddress(int32_t disp, Register::Encoding base)
       : disp_(disp),
         base_(base),
         index_(Registers::Invalid),
@@ -45,7 +45,7 @@ class ComplexAddress {
         MOZ_ASSERT(base_ == base);
     }
 
-    ComplexAddress(int32_t disp, Register::Code base, Register::Code index, int scale)
+    ComplexAddress(int32_t disp, Register::Encoding base, Register::Encoding index, int scale)
       : disp_(disp),
         base_(base),
         index_(index),
@@ -59,7 +59,7 @@ class ComplexAddress {
         MOZ_ASSERT(index_ == index);
     }
 
-    explicit ComplexAddress(const void *addr)
+    explicit ComplexAddress(const void* addr)
       : disp_(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(addr))),
         base_(Registers::Invalid),
         index_(Registers::Invalid),
@@ -67,10 +67,10 @@ class ComplexAddress {
         isPCRelative_(false)
     {
         MOZ_ASSERT(*this == *this);
-        MOZ_ASSERT(reinterpret_cast<const void *>(uintptr_t(disp_)) == addr);
+        MOZ_ASSERT(reinterpret_cast<const void*>(uintptr_t(disp_)) == addr);
     }
 
-    explicit ComplexAddress(const Operand &op) {
+    explicit ComplexAddress(const Operand& op) {
 #if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
         switch (op.kind()) {
           case Operand::MEM_REG_DISP:
@@ -97,11 +97,13 @@ class ComplexAddress {
         return disp_;
     }
 
-    Register::Code base() const {
+    Register::Encoding base() const {
+        MOZ_ASSERT(base_ != Registers::Invalid);
         return base_;
     }
 
-    Register::Code index() const {
+    Register::Encoding index() const {
+        MOZ_ASSERT(index_ != Registers::Invalid);
         return index_;
     }
 
@@ -110,8 +112,8 @@ class ComplexAddress {
     }
 
 #ifdef DEBUG
-    bool operator==(const ComplexAddress &other) const;
-    bool operator!=(const ComplexAddress &other) const;
+    bool operator==(const ComplexAddress& other) const;
+    bool operator!=(const ComplexAddress& other) const;
 #endif
 };
 
@@ -128,8 +130,8 @@ class OtherOperand {
     Kind kind_;
     union {
         int32_t imm;
-        Register::Code gpr;
-        FloatRegister::Code fpr;
+        Register::Encoding gpr;
+        FloatRegister::Encoding fpr;
     } u_;
 
   public:
@@ -147,14 +149,14 @@ class OtherOperand {
         MOZ_ASSERT(*this == *this);
     }
 
-    explicit OtherOperand(Register::Code gpr)
+    explicit OtherOperand(Register::Encoding gpr)
       : kind_(GPR)
     {
         u_.gpr = gpr;
         MOZ_ASSERT(*this == *this);
     }
 
-    explicit OtherOperand(FloatRegister::Code fpr)
+    explicit OtherOperand(FloatRegister::Encoding fpr)
       : kind_(FPR)
     {
         u_.fpr = fpr;
@@ -170,19 +172,19 @@ class OtherOperand {
         return u_.imm;
     }
 
-    Register::Code gpr() const {
+    Register::Encoding gpr() const {
         MOZ_ASSERT(kind_ == GPR);
         return u_.gpr;
     }
 
-    FloatRegister::Code fpr() const {
+    FloatRegister::Encoding fpr() const {
         MOZ_ASSERT(kind_ == FPR);
         return u_.fpr;
     }
 
 #ifdef DEBUG
-    bool operator==(const OtherOperand &other) const;
-    bool operator!=(const OtherOperand &other) const;
+    bool operator==(const OtherOperand& other) const;
+    bool operator!=(const OtherOperand& other) const;
 #endif
 };
 
@@ -209,7 +211,7 @@ class HeapAccess {
         MOZ_ASSERT(*this == *this);
     }
 
-    HeapAccess(Kind kind, size_t size, const ComplexAddress &address, const OtherOperand &otherOperand)
+    HeapAccess(Kind kind, size_t size, const ComplexAddress& address, const OtherOperand& otherOperand)
       : kind_(kind),
         size_(size),
         address_(address),
@@ -230,30 +232,30 @@ class HeapAccess {
         return size_;
     }
 
-    const ComplexAddress &address() const {
+    const ComplexAddress& address() const {
         return address_;
     }
 
-    const OtherOperand &otherOperand() const {
+    const OtherOperand& otherOperand() const {
         return otherOperand_;
     }
 
 #ifdef DEBUG
-    bool operator==(const HeapAccess &other) const;
-    bool operator!=(const HeapAccess &other) const;
+    bool operator==(const HeapAccess& other) const;
+    bool operator!=(const HeapAccess& other) const;
 #endif
 };
 
-MOZ_COLD uint8_t *DisassembleHeapAccess(uint8_t *ptr, HeapAccess *access);
+MOZ_COLD uint8_t* DisassembleHeapAccess(uint8_t* ptr, HeapAccess* access);
 
 #ifdef DEBUG
-void DumpHeapAccess(const HeapAccess &access);
+void DumpHeapAccess(const HeapAccess& access);
 
 inline void
-VerifyHeapAccess(uint8_t *begin, uint8_t *end, const HeapAccess &expected)
+VerifyHeapAccess(uint8_t* begin, uint8_t* end, const HeapAccess& expected)
 {
     HeapAccess disassembled;
-    uint8_t *e = DisassembleHeapAccess(begin, &disassembled);
+    uint8_t* e = DisassembleHeapAccess(begin, &disassembled);
     MOZ_ASSERT(e == end);
     MOZ_ASSERT(disassembled == expected);
 }

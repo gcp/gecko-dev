@@ -25,7 +25,7 @@
 #include "mozilla/layers/AsyncCompositionManager.h" // for ViewTransform
 #include "mozilla/layers/LayerMetricsWrapper.h" // for LayerMetricsWrapper
 #include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsRefPtr.h"                   // for nsRefPtr
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsISupportsUtils.h"           // for NS_ADDREF, NS_RELEASE
@@ -344,7 +344,8 @@ RenderLayers(ContainerT* aContainer,
     Layer* layer = layerToRender->GetLayer();
 
     gfxRGBA color;
-    if (LayerHasCheckerboardingAPZC(layer, &color)) {
+    if ((layer->GetContentFlags() & Layer::CONTENT_OPAQUE) &&
+        LayerHasCheckerboardingAPZC(layer, &color)) {
       // Ideally we would want to intersect the checkerboard region from the APZ with the layer bounds
       // and only fill in that area. However the layer bounds takes into account the base translation
       // for the painted layer whereas the checkerboard region does not. One does not simply
@@ -384,17 +385,26 @@ RenderLayers(ContainerT* aContainer,
     }
 
     // Draw a border around scrollable layers.
-    for (uint32_t i = 0; i < layer->GetFrameMetricsCount(); i++) {
-      // A layer can be scrolled by multiple scroll frames. Draw a border
-      // for each.
-      if (layer->GetFrameMetrics(i).IsScrollable()) {
+    // A layer can be scrolled by multiple scroll frames. Draw a border
+    // for each.
+    // Within the list of scroll frames for a layer, the layer border for a
+    // scroll frame lower down is affected by the async transforms on scroll
+    // frames higher up, so loop from the top down, and accumulate an async
+    // transform as we go along.
+    Matrix4x4 asyncTransform;
+    for (uint32_t i = layer->GetFrameMetricsCount(); i > 0; --i) {
+      if (layer->GetFrameMetrics(i - 1).IsScrollable()) {
         // Since the composition bounds are in the parent layer's coordinates,
         // use the parent's effective transform rather than the layer's own.
-        ParentLayerRect compositionBounds = layer->GetFrameMetrics(i).mCompositionBounds;
+        ParentLayerRect compositionBounds = layer->GetFrameMetrics(i - 1).mCompositionBounds;
         aManager->GetCompositor()->DrawDiagnostics(DiagnosticFlags::CONTAINER,
                                                    compositionBounds.ToUnknownRect(),
                                                    gfx::Rect(aClipRect.ToUnknownRect()),
-                                                   aContainer->GetEffectiveTransform());
+                                                   asyncTransform * aContainer->GetEffectiveTransform());
+        if (AsyncPanZoomController* apzc = layer->GetAsyncPanZoomController(i - 1)) {
+          asyncTransform = apzc->GetCurrentAsyncTransformWithOverscroll()
+                         * asyncTransform;
+        }
       }
     }
 

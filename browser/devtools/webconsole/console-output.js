@@ -3209,9 +3209,10 @@ Widgets.ObjectRenderers.add({
 
     let isAttached = yield this.toolbox.walker.isInDOMTree(this._nodeFront);
     if (isAttached) {
-      let onReady = this.toolbox.inspector.once("inspector-updated");
+      let onReady = promise.defer();
+      this.toolbox.inspector.once("inspector-updated", onReady.resolve);
       yield this.toolbox.selection.setNodeFront(this._nodeFront, "console");
-      yield onReady;
+      yield onReady.promise;
     } else {
       throw null;
     }
@@ -3237,7 +3238,7 @@ Widgets.ObjectRenderers.add({
 
   render: function()
   {
-    let { ownProperties, safeGetterValues } = this.objectActor.preview;
+    let { ownProperties, safeGetterValues } = this.objectActor.preview || {};
     if ((!ownProperties && !safeGetterValues) || this.options.concise) {
       this._renderConciseObject();
       return;
@@ -3273,7 +3274,7 @@ Widgets.ObjectRenderers.add({
 
   render: function()
   {
-    let { ownProperties, safeGetterValues } = this.objectActor.preview;
+    let { ownProperties, safeGetterValues } = this.objectActor.preview || {};
     if ((!ownProperties && !safeGetterValues) || this.options.concise) {
       this._renderConciseObject();
       return;

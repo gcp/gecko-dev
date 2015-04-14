@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsJPEGDecoder_h
-#define nsJPEGDecoder_h
+#ifndef mozilla_image_decoders_nsJPEGDecoder_h
+#define mozilla_image_decoders_nsJPEGDecoder_h
 
 #include "RasterImage.h"
 // On Windows systems, RasterImage.h brings in 'windows.h', which defines INT32.
@@ -56,13 +56,13 @@ public:
   nsJPEGDecoder(RasterImage* aImage, Decoder::DecodeStyle aDecodeStyle);
   virtual ~nsJPEGDecoder();
 
-  virtual nsresult SetTargetSize(const nsIntSize& aSize) MOZ_OVERRIDE;
+  virtual nsresult SetTargetSize(const nsIntSize& aSize) override;
 
-  virtual void InitInternal() MOZ_OVERRIDE;
-  virtual void WriteInternal(const char* aBuffer, uint32_t aCount) MOZ_OVERRIDE;
-  virtual void FinishInternal() MOZ_OVERRIDE;
+  virtual void InitInternal() override;
+  virtual void WriteInternal(const char* aBuffer, uint32_t aCount) override;
+  virtual void FinishInternal() override;
 
-  virtual Telemetry::ID SpeedHistogram() MOZ_OVERRIDE;
+  virtual Telemetry::ID SpeedHistogram() override;
   void NotifyDone();
 
 protected:
@@ -103,4 +103,4 @@ public:
 } // namespace image
 } // namespace mozilla
 
-#endif // nsJPEGDecoder_h
+#endif // mozilla_image_decoders_nsJPEGDecoder_h

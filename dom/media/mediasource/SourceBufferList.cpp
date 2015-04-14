@@ -17,7 +17,9 @@
 #include "prlog.h"
 
 #ifdef PR_LOGGING
+extern PRLogModuleInfo* GetMediaSourceLog();
 extern PRLogModuleInfo* GetMediaSourceAPILog();
+
 #define MSE_API(arg, ...) PR_LOG(GetMediaSourceAPILog(), PR_LOG_DEBUG, ("SourceBufferList(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 #define MSE_DEBUG(arg, ...) PR_LOG(GetMediaSourceLog(), PR_LOG_DEBUG, ("SourceBufferList(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 #else
@@ -60,6 +62,13 @@ SourceBufferList::Append(SourceBuffer* aSourceBuffer)
 }
 
 void
+SourceBufferList::AppendSimple(SourceBuffer* aSourceBuffer)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mSourceBuffers.AppendElement(aSourceBuffer);
+}
+
+void
 SourceBufferList::Remove(SourceBuffer* aSourceBuffer)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -84,6 +93,13 @@ SourceBufferList::Clear()
   }
   mSourceBuffers.Clear();
   QueueAsyncSimpleEvent("removesourcebuffer");
+}
+
+void
+SourceBufferList::ClearSimple()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mSourceBuffers.Clear();
 }
 
 bool
@@ -185,9 +201,9 @@ SourceBufferList::GetParentObject() const
 }
 
 JSObject*
-SourceBufferList::WrapObject(JSContext* aCx)
+SourceBufferList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SourceBufferListBinding::Wrap(aCx, this);
+  return SourceBufferListBinding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(SourceBufferList, DOMEventTargetHelper,

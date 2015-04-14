@@ -366,7 +366,7 @@ GStreamerReader::GetDataLength()
 nsresult GStreamerReader::ReadMetadata(MediaInfo* aInfo,
                                        MetadataTags** aTags)
 {
-  NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
+  MOZ_ASSERT(OnTaskQueue());
   nsresult ret = NS_OK;
 
   /*
@@ -596,7 +596,6 @@ nsresult GStreamerReader::CheckSupportedFormats()
       }
       case GST_ITERATOR_RESYNC:
         unsupported = false;
-        done = false;
         break;
       case GST_ITERATOR_ERROR:
         done = true;
@@ -606,6 +605,8 @@ nsresult GStreamerReader::CheckSupportedFormats()
         break;
     }
   }
+
+  gst_iterator_free(it);
 
   return unsupported ? NS_ERROR_FAILURE : NS_OK;
 }
@@ -638,7 +639,7 @@ nsresult GStreamerReader::ResetDecode()
 
 bool GStreamerReader::DecodeAudioData()
 {
-  NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
+  MOZ_ASSERT(OnTaskQueue());
 
   GstBuffer *buffer = nullptr;
 
@@ -724,7 +725,7 @@ bool GStreamerReader::DecodeAudioData()
 bool GStreamerReader::DecodeVideoFrame(bool &aKeyFrameSkip,
                                        int64_t aTimeThreshold)
 {
-  NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
+  MOZ_ASSERT(OnTaskQueue());
 
   GstBuffer *buffer = nullptr;
 
@@ -757,7 +758,7 @@ bool GStreamerReader::DecodeVideoFrame(bool &aKeyFrameSkip,
       }
     }
 
-    mDecoder->NotifyDecodedFrames(0, 1);
+    mDecoder->NotifyDecodedFrames(0, 1, 0);
 
 #if GST_VERSION_MAJOR >= 1
     GstSample *sample = gst_app_sink_pull_sample(mVideoAppSink);
@@ -771,6 +772,7 @@ bool GStreamerReader::DecodeVideoFrame(bool &aKeyFrameSkip,
 
   bool isKeyframe = !GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT);
   if ((aKeyFrameSkip && !isKeyframe)) {
+    mDecoder->NotifyDecodedFrames(0, 0, 1);
     gst_buffer_unref(buffer);
     return true;
   }
@@ -843,7 +845,7 @@ bool GStreamerReader::DecodeVideoFrame(bool &aKeyFrameSkip,
 nsRefPtr<MediaDecoderReader::SeekPromise>
 GStreamerReader::Seek(int64_t aTarget, int64_t aEndTime)
 {
-  NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
+  MOZ_ASSERT(OnTaskQueue());
 
   gint64 seekPos = aTarget * GST_USECOND;
   LOG(PR_LOG_DEBUG, "%p About to seek to %" GST_TIME_FORMAT,
@@ -1120,7 +1122,7 @@ void GStreamerReader::VideoPreroll()
   if (IsValidVideoRegion(frameSize, pictureRect, displaySize)) {
     GstStructure* structure = gst_caps_get_structure(caps, 0);
     gst_structure_get_fraction(structure, "framerate", &fpsNum, &fpsDen);
-    mInfo.mVideo.mDisplay = ThebesIntSize(displaySize.ToIntSize());
+    mInfo.mVideo.mDisplay = displaySize;
     mInfo.mVideo.mHasVideo = true;
   } else {
     LOG(PR_LOG_DEBUG, "invalid video region");
@@ -1150,7 +1152,7 @@ void GStreamerReader::NewVideoBuffer()
    * and notify the decode thread potentially blocked in DecodeVideoFrame
    */
 
-  mDecoder->NotifyDecodedFrames(1, 0);
+  mDecoder->NotifyDecodedFrames(1, 0, 0);
   mVideoSinkBufferCount++;
   mon.NotifyAll();
 }

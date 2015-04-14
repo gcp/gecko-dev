@@ -48,8 +48,10 @@
 #include "nsIMemoryReporter.h"
 #include "nsIParentalControlsService.h"
 #include "nsINetworkLinkService.h"
+#include "nsHttpChannelAuthProvider.h"
 
 #include "mozilla/net/NeckoChild.h"
+#include "mozilla/ipc/URIUtils.h"
 #include "mozilla/Telemetry.h"
 
 #if defined(XP_UNIX)
@@ -169,6 +171,7 @@ nsHttpHandler::nsHttpHandler()
     , mLegacyAppName("Mozilla")
     , mLegacyAppVersion("5.0")
     , mProduct("Gecko")
+    , mCompatFirefoxEnabled(false)
     , mUserAgentIsDirty(true)
     , mUseCache(true)
     , mPromptTempRedirect(true)
@@ -189,8 +192,8 @@ nsHttpHandler::nsHttpHandler()
     , mCoalesceSpdy(true)
     , mSpdyPersistentSettings(false)
     , mAllowPush(true)
-    , mEnableAltSvc(true)
-    , mEnableAltSvcOE(true)
+    , mEnableAltSvc(false)
+    , mEnableAltSvcOE(false)
     , mSpdySendingChunkSize(ASpdySession::kSendingChunkSize)
     , mSpdySendBufferSize(ASpdySession::kTCPSendBufferSize)
     , mSpdyPushAllowance(32768)
@@ -203,6 +206,7 @@ nsHttpHandler::nsHttpHandler()
     , mRequestTokenBucketMinParallelism(6)
     , mRequestTokenBucketHz(100)
     , mRequestTokenBucketBurst(32)
+    , mCriticalRequestPrioritization(true)
     , mTCPKeepaliveShortLivedEnabled(false)
     , mTCPKeepaliveShortLivedTimeS(60)
     , mTCPKeepaliveShortLivedIdleTimeS(10)
@@ -282,6 +286,8 @@ nsHttpHandler::Init()
         prefBranch->AddObserver(SAFE_HINT_HEADER_VALUE, this, true);
         PrefsChanged(prefBranch, nullptr);
     }
+
+    nsHttpChannelAuthProvider::InitializePrefs();
 
     mMisc.AssignLiteral("rv:" MOZILLA_UAVERSION);
 
@@ -1265,7 +1271,7 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
     }
 
     if (PREF_CHANGED(HTTP_PREF("altsvc.enabled"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("atsvc.enabled"),
+        rv = prefs->GetBoolPref(HTTP_PREF("altsvc.enabled"),
                                 &cVar);
         if (NS_SUCCEEDED(rv))
             mEnableAltSvc = cVar;
@@ -1273,7 +1279,7 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
 
 
     if (PREF_CHANGED(HTTP_PREF("altsvc.oe"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("atsvc.oe"),
+        rv = prefs->GetBoolPref(HTTP_PREF("altsvc.oe"),
                                 &cVar);
         if (NS_SUCCEEDED(rv))
             mEnableAltSvcOE = cVar;
@@ -1559,22 +1565,47 @@ nsHttpHandler::TimerCallback(nsITimer * aTimer, void * aClosure)
         thisObject->mCapabilities &= ~NS_HTTP_ALLOW_PIPELINING;
 }
 
+/**
+ * Currently, only regularizes the case of subtags.
+ */
 static void
-NormalizeLanguageTag(char *code)
+CanonicalizeLanguageTag(char *languageTag)
 {
-    bool is_region = false;
-    while (*code != '\0')
-    {
-        if (*code == '-') {
-            is_region = true;
+    char *s = languageTag;
+    while (*s != '\0') {
+        *s = nsCRT::ToLower(*s);
+        s++;
+    }
+
+    s = languageTag;
+    bool isFirst = true;
+    bool seenSingleton = false;
+    while (*s != '\0') {
+        char *subTagEnd = strchr(s, '-');
+        if (subTagEnd == nullptr) {
+            subTagEnd = strchr(s, '\0');
+        }
+
+        if (isFirst) {
+            isFirst = false;
+        } else if (seenSingleton) {
+            // Do nothing
         } else {
-            if (is_region) {
-                *code = nsCRT::ToUpper(*code);
-            } else {
-                *code = nsCRT::ToLower(*code);
+            size_t subTagLength = subTagEnd - s;
+            if (subTagLength == 1) {
+                seenSingleton = true;
+            } else if (subTagLength == 2) {
+                *s = nsCRT::ToUpper(*s);
+                *(s + 1) = nsCRT::ToUpper(*(s + 1));
+            } else if (subTagLength == 4) {
+                *s = nsCRT::ToUpper(*s);
             }
         }
-        code++;
+
+        s = subTagEnd;
+        if (*s != '\0') {
+            s++;
+        }
     }
 }
 
@@ -1633,7 +1664,7 @@ PrepareAcceptLanguages(const char *i_AcceptLanguages, nsACString &o_AcceptLangua
             *trim = '\0';
 
         if (*token != '\0') {
-            NormalizeLanguageTag(token);
+            CanonicalizeLanguageTag(token);
 
             comma = count_n++ != 0 ? "," : ""; // delimiter if not first item
             uint32_t u = QVAL_TO_UINT(q);
@@ -1989,6 +2020,13 @@ NS_IMETHODIMP
 nsHttpHandler::SpeculativeConnect(nsIURI *aURI,
                                   nsIInterfaceRequestor *aCallbacks)
 {
+    if (IsNeckoChild()) {
+        ipc::URIParams params;
+        SerializeURI(aURI, params);
+        gNeckoChild->SendSpeculativeConnect(params);
+        return NS_OK;
+    }
+
     if (!mHandlerActive)
         return NS_OK;
 

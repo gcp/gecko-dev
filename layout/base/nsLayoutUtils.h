@@ -135,6 +135,7 @@ public:
   typedef FrameMetrics::ViewID ViewID;
   typedef mozilla::CSSPoint CSSPoint;
   typedef mozilla::CSSSize CSSSize;
+  typedef mozilla::CSSIntSize CSSIntSize;
   typedef mozilla::ScreenMargin ScreenMargin;
   typedef mozilla::LayoutDeviceIntSize LayoutDeviceIntSize;
 
@@ -588,8 +589,8 @@ public:
     SCROLLABLE_ONLY_ASYNC_SCROLLABLE = 0x04,
     /**
      * If the SCROLLABLE_ALWAYS_MATCH_ROOT flag is set, then return the
-     * root scrollable frame for the root content document if we don't hit
-     * anything else.
+     * root scrollable frame for the root document (in the current process)
+     * if we don't hit anything else.
      */
     SCROLLABLE_ALWAYS_MATCH_ROOT = 0x08,
   };
@@ -1086,14 +1087,14 @@ public:
 
     RectAccumulator();
 
-    virtual void AddRect(const nsRect& aRect) MOZ_OVERRIDE;
+    virtual void AddRect(const nsRect& aRect) override;
   };
 
   struct RectListBuilder : public RectCallback {
     DOMRectList* mRectList;
 
     explicit RectListBuilder(DOMRectList* aList);
-    virtual void AddRect(const nsRect& aRect) MOZ_OVERRIDE;
+    virtual void AddRect(const nsRect& aRect) override;
   };
 
   static nsIFrame* GetContainingBlockForClientRect(nsIFrame* aFrame);
@@ -1666,7 +1667,7 @@ public:
   static DrawResult DrawBackgroundImage(gfxContext&         aContext,
                                         nsPresContext*      aPresContext,
                                         imgIContainer*      aImage,
-                                        const nsIntSize&    aImageSize,
+                                        const CSSIntSize&   aImageSize,
                                         GraphicsFilter      aGraphicsFilter,
                                         const nsRect&       aDest,
                                         const nsRect&       aFill,
@@ -1802,7 +1803,7 @@ public:
    * have less information about the frame tree.
    */
   static void ComputeSizeForDrawing(imgIContainer* aImage,
-                                    nsIntSize&     aImageSize,
+                                    CSSIntSize&    aImageSize,
                                     nsSize&        aIntrinsicRatio,
                                     bool&          aGotWidth,
                                     bool&          aGotHeight);
@@ -1815,8 +1816,9 @@ public:
    * after trying all these methods, no value is available for one or both
    * dimensions, the corresponding dimension of aFallbackSize is used instead.
    */
-  static nsIntSize ComputeSizeForDrawingWithFallback(imgIContainer* aImage,
-                                                     const nsSize&  aFallbackSize);
+  static CSSIntSize
+  ComputeSizeForDrawingWithFallback(imgIContainer* aImage,
+                                    const nsSize&  aFallbackSize);
 
   /**
    * Given a source area of an image (in appunits) and a destination area
@@ -1825,10 +1827,6 @@ public:
    * the aDest parameter of DrawImage, when we want to draw a subimage
    * of an overall image.
    */
-  static nsRect GetWholeImageDestination(const nsIntSize& aWholeImageSize,
-                                         const nsRect& aImageSourceArea,
-                                         const nsRect& aDestArea);
-
   static nsRect GetWholeImageDestination(const nsSize& aWholeImageSize,
                                          const nsRect& aImageSourceArea,
                                          const nsRect& aDestArea);
@@ -2128,10 +2126,11 @@ public:
 
   /**
    * Returns true if the content node has any current animations or transitions
-   * for the specified property.
+   * for any of the specified properties.
    */
-  static bool HasCurrentAnimationsForProperty(nsIContent* aContent,
-                                              nsCSSProperty aProperty);
+  static bool HasCurrentAnimationsForProperties(nsIContent* aContent,
+                                                const nsCSSProperty* aProperties,
+                                                size_t aPropertyCount);
 
   /**
    * Checks if off-main-thread animations are enabled.
@@ -2416,6 +2415,25 @@ public:
   static void
   AssertTreeOnlyEmptyNextInFlows(nsIFrame *aSubtreeRoot);
 #endif
+
+  /**
+   * Helper method to get touch action behaviour from the frame
+   */
+  static uint32_t
+  GetTouchActionFromFrame(nsIFrame* aFrame);
+
+  /**
+   * Helper method to transform |aBounds| from aFrame to aAncestorFrame,
+   * and combine it with |aPreciseTargetDest| if it is axis-aligned, or
+   * combine it with |aImpreciseTargetDest| if not.
+   */
+  static void
+  TransformToAncestorAndCombineRegions(
+    const nsRect& aBounds,
+    nsIFrame* aFrame,
+    const nsIFrame* aAncestorFrame,
+    nsRegion* aPreciseTargetDest,
+    nsRegion* aImpreciseTargetDest);
 
   /**
    * Determine if aImageFrame (which is an nsImageFrame, nsImageControlFrame, or

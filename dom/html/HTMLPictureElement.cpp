@@ -44,9 +44,9 @@ void
 HTMLPictureElement::RemoveChildAt(uint32_t aIndex, bool aNotify)
 {
   // Find all img siblings after this <source> to notify them of its demise
-  nsCOMPtr<nsINode> child = GetChildAt(aIndex);
+  nsCOMPtr<nsIContent> child = GetChildAt(aIndex);
   nsCOMPtr<nsIContent> nextSibling;
-  if (child && child->Tag() == nsGkAtoms::source) {
+  if (child && child->IsHTMLElement(nsGkAtoms::source)) {
     nextSibling = child->GetNextSibling();
   }
 
@@ -70,9 +70,9 @@ HTMLPictureElement::IsPictureEnabled()
 }
 
 JSObject*
-HTMLPictureElement::WrapNode(JSContext* aCx)
+HTMLPictureElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLPictureElementBinding::Wrap(aCx, this);
+  return HTMLPictureElementBinding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

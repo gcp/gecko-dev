@@ -39,6 +39,7 @@ EXTRA_JS_MODULES.devtools.server.actors += [
     'actors/canvas.js',
     'actors/child-process.js',
     'actors/childtab.js',
+    'actors/chrome.js',
     'actors/common.js',
     'actors/csscoverage.js',
     'actors/device.js',
@@ -80,6 +81,7 @@ EXTRA_JS_MODULES.devtools.server.actors.utils += [
     'actors/utils/map-uri-to-addon-id.js',
     'actors/utils/ScriptStore.js',
     'actors/utils/stack.js',
+    'actors/utils/TabSources.js'
 ]
 
 FAIL_ON_WARNINGS = True

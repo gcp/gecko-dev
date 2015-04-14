@@ -29,11 +29,15 @@ BEGIN_BLUETOOTH_NAMESPACE
 
 class BluetoothSocket;
 class ObexHeaderSet;
-class SendFileBatch;
 
 class BluetoothOppManager : public BluetoothSocketObserver
                           , public BluetoothProfileManagerBase
 {
+  class CloseSocketTask;
+  class ReadFileTask;
+  class SendFileBatch;
+  class SendSocketDataTask;
+
 public:
   BT_DECL_PROFILE_MGR_BASE
   virtual void GetName(nsACString& aName)
@@ -43,7 +47,6 @@ public:
 
   static const int MAX_PACKET_LENGTH = 0xFFFE;
 
-  virtual ~BluetoothOppManager();
   static BluetoothOppManager* Get();
   void ClientDataHandler(mozilla::ipc::UnixSocketRawData* aMessage);
   void ServerDataHandler(mozilla::ipc::UnixSocketRawData* aMessage);
@@ -68,16 +71,24 @@ public:
   // The following functions are inherited from BluetoothSocketObserver
   void ReceiveSocketData(
     BluetoothSocket* aSocket,
-    nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage) MOZ_OVERRIDE;
-  virtual void OnSocketConnectSuccess(BluetoothSocket* aSocket) MOZ_OVERRIDE;
-  virtual void OnSocketConnectError(BluetoothSocket* aSocket) MOZ_OVERRIDE;
-  virtual void OnSocketDisconnect(BluetoothSocket* aSocket) MOZ_OVERRIDE;
+    nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage) override;
+  virtual void OnSocketConnectSuccess(BluetoothSocket* aSocket) override;
+  virtual void OnSocketConnectError(BluetoothSocket* aSocket) override;
+  virtual void OnSocketDisconnect(BluetoothSocket* aSocket) override;
+
+protected:
+  virtual ~BluetoothOppManager();
 
 private:
   BluetoothOppManager();
   bool Init();
   void HandleShutdown();
+
+#ifdef MOZ_B2G_BT_API_V2
+  // Removed in bluetooth2
+#else
   void HandleVolumeStateChanged(nsISupports* aSubject);
+#endif
 
   void StartFileTransfer();
   void StartSendingNextFile();

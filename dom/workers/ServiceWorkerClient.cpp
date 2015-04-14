@@ -9,9 +9,8 @@
 
 #include "mozilla/dom/MessageEvent.h"
 #include "nsGlobalWindow.h"
+#include "nsIDocument.h"
 #include "WorkerPrivate.h"
-
-#include "mozilla/dom/ClientBinding.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -27,25 +26,55 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ServiceWorkerClient)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-JSObject*
-ServiceWorkerClient::WrapObject(JSContext* aCx)
+ServiceWorkerClientInfo::ServiceWorkerClientInfo(nsIDocument* aDoc)
 {
-  return ClientBinding::Wrap(aCx, this);
+  MOZ_ASSERT(aDoc);
+  MOZ_ASSERT(aDoc->GetWindow());
+
+  nsresult rv = aDoc->GetId(mClientId);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to get the UUID of the document.");
+  }
+
+  nsRefPtr<nsGlobalWindow> outerWindow = static_cast<nsGlobalWindow*>(aDoc->GetWindow());
+  mWindowId = outerWindow->WindowID();
+  aDoc->GetURL(mUrl);
+  mVisibilityState = aDoc->VisibilityState();
+
+  ErrorResult result;
+  mFocused = aDoc->HasFocus(result);
+  if (result.Failed()) {
+    NS_WARNING("Failed to get focus information.");
+  }
+
+  if (!outerWindow->IsTopLevelWindow()) {
+    mFrameType = FrameType::Nested;
+  } else if (outerWindow->HadOriginalOpener()) {
+    mFrameType = FrameType::Auxiliary;
+  } else {
+    mFrameType = FrameType::Top_level;
+  }
+}
+
+JSObject*
+ServiceWorkerClient::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
+{
+  return ClientBinding::Wrap(aCx, this, aGivenProto);
 }
 
 namespace {
 
-class ServiceWorkerClientPostMessageRunnable MOZ_FINAL : public nsRunnable
+class ServiceWorkerClientPostMessageRunnable final : public nsRunnable
 {
-  uint64_t mId;
+  uint64_t mWindowId;
   JSAutoStructuredCloneBuffer mBuffer;
   nsTArray<nsCOMPtr<nsISupports>> mClonedObjects;
 
 public:
-  ServiceWorkerClientPostMessageRunnable(uint64_t aId,
+  ServiceWorkerClientPostMessageRunnable(uint64_t aWindowId,
                                          JSAutoStructuredCloneBuffer&& aData,
                                          nsTArray<nsCOMPtr<nsISupports>>& aClonedObjects)
-    : mId(aId),
+    : mWindowId(aWindowId),
       mBuffer(Move(aData))
   {
     mClonedObjects.SwapElements(aClonedObjects);
@@ -55,7 +84,7 @@ public:
   Run()
   {
     AssertIsOnMainThread();
-    nsGlobalWindow* window = nsGlobalWindow::GetInnerWindowWithId(mId);
+    nsGlobalWindow* window = nsGlobalWindow::GetOuterWindowWithId(mWindowId);
     if (!window) {
       return NS_ERROR_FAILURE;
     }
@@ -158,7 +187,7 @@ ServiceWorkerClient::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
   }
 
   nsRefPtr<ServiceWorkerClientPostMessageRunnable> runnable =
-    new ServiceWorkerClientPostMessageRunnable(mId, Move(buffer), clonedObjects);
+    new ServiceWorkerClientPostMessageRunnable(mWindowId, Move(buffer), clonedObjects);
   nsresult rv = NS_DispatchToMainThread(runnable);
   if (NS_FAILED(rv)) {
     aRv.Throw(NS_ERROR_FAILURE);

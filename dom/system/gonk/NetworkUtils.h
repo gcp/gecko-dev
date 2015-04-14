@@ -146,6 +146,8 @@ public:
     COPY_OPT_FIELD(mDns1_long, 0)
     COPY_OPT_FIELD(mDns2_long, 0)
 
+    mLoopIndex = 0;
+
 #undef COPY_SEQUENCE_FIELD
 #undef COPY_OPT_STRING_FIELD
 #undef COPY_OPT_FIELD
@@ -198,7 +200,8 @@ public:
   long mDns2_long;
 
   // Auxiliary information required to carry accros command chain.
-  int mNetId;     // A locally defined id per interface.
+  int mNetId; // A locally defined id per interface.
+  uint32_t mLoopIndex; // Loop index for adding/removing multiple gateways.
 };
 
 // CommandChain store the necessary information to execute command one by one.
@@ -207,7 +210,7 @@ public:
 // 2. Command list.
 // 3. Error callback function.
 // 4. Index of current execution command.
-class CommandChain MOZ_FINAL
+class CommandChain final
 {
 public:
   CommandChain(const NetworkParams& aParams,
@@ -267,7 +270,7 @@ private:
   bool mIsPending;
 };
 
-class NetworkUtils MOZ_FINAL
+class NetworkUtils final
 {
 public:
   NetworkUtils(MessageCallback aCallback);

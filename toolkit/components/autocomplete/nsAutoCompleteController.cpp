@@ -491,6 +491,21 @@ nsAutoCompleteController::HandleKeyNavigation(uint32_t aKey, bool *_retval)
     uint32_t minResultsForPopup;
     input->GetMinResultsForPopup(&minResultsForPopup);
     if (isOpen || (mRowCount > 0 && mRowCount < minResultsForPopup)) {
+      // For completeSelectedIndex autocomplete fields, if the popup shouldn't
+      // close when the caret is moved, don't adjust the text value or caret
+      // position.
+      if (isOpen) {
+        bool noRollup;
+        input->GetNoRollupOnCaretMove(&noRollup);
+        if (noRollup) {
+          bool completeSelection;
+          input->GetCompleteSelectedIndex(&completeSelection);
+          if (completeSelection) {
+            return NS_OK;
+          }
+        }
+      }
+
       int32_t selectedIndex;
       popup->GetSelectedIndex(&selectedIndex);
       bool shouldComplete;
@@ -530,13 +545,9 @@ nsAutoCompleteController::HandleKeyNavigation(uint32_t aKey, bool *_retval)
         }
       }
 
-      bool noRollup;
-      input->GetNoRollupOnCaretMove(&noRollup);
-      if (!noRollup) {
-        // Close the pop-up even if nothing was selected
-        ClearSearchTimer();
-        ClosePopup();
-      }
+      // Close the pop-up even if nothing was selected
+      ClearSearchTimer();
+      ClosePopup();
     }
     // Update last-searched string to the current input, since the input may
     // have changed.  Without this, subsequent backspaces look like text
@@ -721,6 +732,18 @@ nsAutoCompleteController::GetSearchString(nsAString &aSearchString)
   return NS_OK;
 }
 
+void
+nsAutoCompleteController::HandleSearchResult(nsIAutoCompleteSearch *aSearch,
+                                             nsIAutoCompleteResult *aResult)
+{
+  // Look up the index of the search which is returning.
+  for (uint32_t i = 0; i < mSearches.Length(); ++i) {
+    if (mSearches[i] == aSearch) {
+      ProcessResult(i, aResult);
+    }
+  }
+}
+
 
 ////////////////////////////////////////////////////////////////////////
 //// nsIAutoCompleteObserver
@@ -728,18 +751,41 @@ nsAutoCompleteController::GetSearchString(nsAString &aSearchString)
 NS_IMETHODIMP
 nsAutoCompleteController::OnUpdateSearchResult(nsIAutoCompleteSearch *aSearch, nsIAutoCompleteResult* aResult)
 {
+  MOZ_ASSERT(mSearches.Contains(aSearch));
+
   ClearResults();
-  return OnSearchResult(aSearch, aResult);
+  HandleSearchResult(aSearch, aResult);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
 nsAutoCompleteController::OnSearchResult(nsIAutoCompleteSearch *aSearch, nsIAutoCompleteResult* aResult)
 {
-  // look up the index of the search which is returning
-  for (uint32_t i = 0; i < mSearches.Length(); ++i) {
-    if (mSearches[i] == aSearch) {
-      ProcessResult(i, aResult);
-    }
+  MOZ_ASSERT(mSearchesOngoing > 0 && mSearches.Contains(aSearch));
+
+  // If this is the first search result we are processing
+  // we should clear out the previously cached results.
+  if (mFirstSearchResult) {
+    ClearResults();
+    mFirstSearchResult = false;
+  }
+
+  uint16_t result = 0;
+  if (aResult) {
+    aResult->GetSearchResult(&result);
+  }
+
+  // If our results are incremental, the search is still ongoing.
+  if (result != nsIAutoCompleteResult::RESULT_SUCCESS_ONGOING &&
+      result != nsIAutoCompleteResult::RESULT_NOMATCH_ONGOING) {
+    --mSearchesOngoing;
+  }
+
+  HandleSearchResult(aSearch, aResult);
+
+  if (mSearchesOngoing == 0) {
+    // If this is the last search to return, cleanup.
+    PostSearchCleanup();
   }
 
   return NS_OK;
@@ -1064,8 +1110,13 @@ nsAutoCompleteController::StartSearch(uint16_t aSearchType)
   NS_ENSURE_STATE(mInput);
   nsCOMPtr<nsIAutoCompleteInput> input = mInput;
 
-  for (uint32_t i = 0; i < mSearches.Length(); ++i) {
-    nsCOMPtr<nsIAutoCompleteSearch> search = mSearches[i];
+  // Iterate a copy of |mSearches| so that we don't run into trouble if the
+  // array is mutated while we're still in the loop. An nsIAutoCompleteSearch
+  // implementation could synchronously start a new search when StartSearch()
+  // is called and that would lead to assertions down the way.
+  nsCOMArray<nsIAutoCompleteSearch> searchesCopy(mSearches);
+  for (uint32_t i = 0; i < searchesCopy.Length(); ++i) {
+    nsCOMPtr<nsIAutoCompleteSearch> search = searchesCopy[i];
 
     // Filter on search type.  Not all the searches implement this interface,
     // in such a case just consider them delayed.
@@ -1096,6 +1147,7 @@ nsAutoCompleteController::StartSearch(uint16_t aSearchType)
     rv = search->StartSearch(mSearchString, searchParam, result, static_cast<nsIAutoCompleteObserver *>(this));
     if (NS_FAILED(rv)) {
       ++mSearchesFailed;
+      MOZ_ASSERT(mSearchesOngoing > 0);
       --mSearchesOngoing;
     }
     // Because of the joy of nested event loops (which can easily happen when some
@@ -1418,22 +1470,9 @@ nsAutoCompleteController::ProcessResult(int32_t aSearchIndex, nsIAutoCompleteRes
   NS_ENSURE_STATE(mInput);
   nsCOMPtr<nsIAutoCompleteInput> input(mInput);
 
-  // If this is the first search result we are processing
-  // we should clear out the previously cached results
-  if (mFirstSearchResult) {
-    ClearResults();
-    mFirstSearchResult = false;
-  }
-
   uint16_t result = 0;
   if (aResult)
     aResult->GetSearchResult(&result);
-
-  // if our results are incremental, the search is still ongoing
-  if (result != nsIAutoCompleteResult::RESULT_SUCCESS_ONGOING &&
-      result != nsIAutoCompleteResult::RESULT_NOMATCH_ONGOING) {
-    --mSearchesOngoing;
-  }
 
   uint32_t oldMatchCount = 0;
   uint32_t matchCount = 0;
@@ -1494,7 +1533,7 @@ nsAutoCompleteController::ProcessResult(int32_t aSearchIndex, nsIAutoCompleteRes
     // get results in the future to avoid unnecessarily canceling searches.
     if (mRowCount || !minResults) {
       OpenPopup();
-    } else if (result != nsIAutoCompleteResult::RESULT_NOMATCH_ONGOING) {
+    } else if (mSearchesOngoing == 0) {
       ClosePopup();
     }
   }
@@ -1503,11 +1542,6 @@ nsAutoCompleteController::ProcessResult(int32_t aSearchIndex, nsIAutoCompleteRes
       result == nsIAutoCompleteResult::RESULT_SUCCESS_ONGOING) {
     // Try to autocomplete the default index for this search.
     CompleteDefaultIndex(resultIndex);
-  }
-
-  if (mSearchesOngoing == 0) {
-    // If this is the last search to return, cleanup.
-    PostSearchCleanup();
   }
 
   return NS_OK;

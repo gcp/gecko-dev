@@ -179,6 +179,14 @@ class HTMLElement(object):
         '''
         return self.marionette._send_message('submitElement', 'ok', id=self.id)
 
+class MouseButton(object):
+    '''
+    Enum-like class for mouse button constants
+    '''
+    LEFT = 0
+    MIDDLE = 1
+    RIGHT = 2
+
 class Actions(object):
     '''
     An Action object represents a set of actions that are executed in a particular order.
@@ -328,6 +336,44 @@ class Actions(object):
         self.action_chain.append(['press', element, x, y])
         self.action_chain.append(['release'])
         return self
+
+    def click(self, element, button=MouseButton.LEFT, count=1):
+        '''
+        Performs a click with additional parameters to allow for double clicking,
+        right click, middle click, etc.
+
+        :param element: The element to click.
+        :param button: The mouse button to click (indexed from 0, left to right).
+        :param count: Optional, the count of clicks to synthesize (for double
+                      click events).
+        '''
+        el = element.id
+        self.action_chain.append(['click', el, button, count])
+        return self
+
+    def context_click(self, element):
+        '''
+        Performs a context click on the specified element.
+
+        :param element: The element to context click.
+        '''
+        return self.click(element, button=MouseButton.RIGHT)
+
+    def middle_click(self, element):
+        '''
+        Performs a middle click on the specified element.
+
+        :param element: The element to middle click.
+        '''
+        return self.click(element, button=MouseButton.MIDDLE)
+
+    def double_click(self, element):
+        '''
+        Performs a double click on the specified element.
+
+        :param element: The element to double click.
+        '''
+        return self.click(element, count=2)
 
     def flick(self, element, x1, y1, x2, y2, duration=200):
         '''
@@ -647,8 +693,7 @@ class Marionette(object):
             self.session = None
             self.window = None
             self.client.close()
-            raise errors.TimeoutException(
-                "Connection timed out", status=errors.ErrorCodes.TIMEOUT)
+            raise errors.TimeoutException("Connection timed out")
 
         # Process any emulator commands that are sent from a script
         # while it's executing.
@@ -699,60 +744,11 @@ class Marionette(object):
                 "Malformed packet, expected key 'error' to be a dict: %s" % response)
 
         error = response["error"]
-        status = error.get("status", 500)
+        status = error.get("status")
         message = error.get("message")
         stacktrace = error.get("stacktrace")
 
-        # status numbers come from
-        # http://code.google.com/p/selenium/wiki/JsonWireProtocol#Response_Status_Codes
-        if status == errors.ErrorCodes.NO_SUCH_ELEMENT:
-            raise errors.NoSuchElementException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.NO_SUCH_FRAME:
-            raise errors.NoSuchFrameException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.STALE_ELEMENT_REFERENCE:
-            raise errors.StaleElementException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.ELEMENT_NOT_VISIBLE:
-            raise errors.ElementNotVisibleException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.ELEMENT_NOT_ACCESSIBLE:
-            raise errors.ElementNotAccessibleException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.INVALID_ELEMENT_STATE:
-            raise errors.InvalidElementStateException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.UNKNOWN_ERROR:
-            raise errors.MarionetteException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.ELEMENT_IS_NOT_SELECTABLE:
-            raise errors.ElementNotSelectableException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.JAVASCRIPT_ERROR:
-            raise errors.JavascriptException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.XPATH_LOOKUP_ERROR:
-            raise errors.XPathLookupException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.TIMEOUT:
-            raise errors.TimeoutException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.NO_SUCH_WINDOW:
-            raise errors.NoSuchWindowException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.INVALID_COOKIE_DOMAIN:
-            raise errors.InvalidCookieDomainException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.UNABLE_TO_SET_COOKIE:
-            raise errors.UnableToSetCookieException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.NO_ALERT_OPEN:
-            raise errors.NoAlertPresentException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.SCRIPT_TIMEOUT:
-            raise errors.ScriptTimeoutException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.INVALID_SELECTOR \
-             or status == errors.ErrorCodes.INVALID_XPATH_SELECTOR \
-             or status == errors.ErrorCodes.INVALID_XPATH_SELECTOR_RETURN_TYPER:
-            raise errors.InvalidSelectorException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.MOVE_TARGET_OUT_OF_BOUNDS:
-            raise errors.MoveTargetOutOfBoundsException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.FRAME_SEND_NOT_INITIALIZED_ERROR:
-            raise errors.FrameSendNotInitializedError(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.FRAME_SEND_FAILURE_ERROR:
-            raise errors.FrameSendFailureError(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.UNSUPPORTED_OPERATION:
-            raise errors.UnsupportedOperationException(message=message, status=status, stacktrace=stacktrace)
-        elif status == errors.ErrorCodes.SESSION_NOT_CREATED:
-            raise errors.SessionNotCreatedException(message=message, status=status, stacktrace=stacktrace)
-        else:
-            raise errors.MarionetteException(message=message, status=status, stacktrace=stacktrace)
+        raise errors.lookup(status)(message, stacktrace=stacktrace)
 
     def _reset_timeouts(self):
         if self.timeout is not None:
@@ -837,18 +833,36 @@ class Marionette(object):
             self.start_session()
             self._reset_timeouts()
 
-    def restart(self, clean=False):
+    def restart(self, clean=False, in_app=False):
         """
         This will terminate the currently running instance, and spawn a new instance
         with the same profile and then reuse the session id when creating a session again.
 
-        : param prefs: A dictionary whose keys are preference names.
+        : param clean: If False the same profile will be used after the restart. Note
+                       that the in app initiated restart always maintains the same
+                       profile.
+        : param in_app: If True, marionette will cause a restart from within the
+                        browser. Otherwise the browser will be restarted immediately
+                        by killing the process.
         """
         if not self.instance:
             raise errors.MarionetteException("restart can only be called " \
                                              "on gecko instances launched by Marionette")
-        self.delete_session()
-        self.instance.restart(clean=clean)
+
+        if in_app:
+            if clean:
+                raise ValueError
+            # Values here correspond to constants in nsIAppStartup.
+            # See https://developer.mozilla.org/en-US/docs/Mozilla/Tech/XPCOM/Reference/Interface/nsIAppStartup
+            restart_flags = [
+                "eForceQuit",
+                "eRestart",
+            ]
+            self._send_message('quitApplication', flags=restart_flags)
+            self.client.close()
+        else:
+            self.delete_session()
+            self.instance.restart(clean=clean)
         assert(self.wait_for_port()), "Timed out waiting for port!"
         self.start_session(session_id=self.session_id)
         self._reset_timeouts()
@@ -1246,7 +1260,8 @@ class Marionette(object):
             for arg in args:
                 wrapped[arg] = self.wrapArguments(args[arg])
         elif type(args) == HTMLElement:
-            wrapped = {'ELEMENT': args.id }
+            wrapped = {'element-6066-11e4-a52e-4f735466cecf': args.id,
+                       'ELEMENT': args.id }
         elif (isinstance(args, bool) or isinstance(args, basestring) or
               isinstance(args, int) or isinstance(args, float) or args is None):
             wrapped = args
@@ -1261,8 +1276,12 @@ class Marionette(object):
         elif isinstance(value, dict):
             unwrapped = {}
             for key in value:
-                if key == 'ELEMENT':
+                if key == 'element-6066-11e4-a52e-4f735466cecf':
                     unwrapped = HTMLElement(self, value[key])
+                    break
+                elif key == 'ELEMENT':
+                    unwrapped = HTMLElement(self, value[key])
+                    break
                 else:
                     unwrapped[key] = self.unwrapValue(value[key])
         else:

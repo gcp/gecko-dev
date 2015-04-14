@@ -44,7 +44,7 @@
 #include "ipc/ShadowLayerUtils.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
 #include "nsAppRunner.h"
-#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsRefPtr.h"                   // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_WARNING, NS_RUNTIMEABORT, etc
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
@@ -59,8 +59,6 @@
 #include "TextRenderer.h"               // for TextRenderer
 
 class gfxContext;
-struct nsIntSize;
-
 
 namespace mozilla {
 namespace layers {
@@ -443,7 +441,7 @@ LayerManagerComposite::RenderDebugOverlay(const Rect& aBounds)
 #endif
 
     float fillRatio = mCompositor->GetFillRatio();
-    mFPS->DrawFPS(now, drawFrameColorBars ? 10 : 0, 0, unsigned(fillRatio), mCompositor);
+    mFPS->DrawFPS(now, drawFrameColorBars ? 10 : 1, 2, unsigned(fillRatio), mCompositor);
 
     if (mUnusedApzTransformWarning) {
       // If we have an unused APZ transform on this composite, draw a 20x20 red box
@@ -654,14 +652,12 @@ LayerManagerComposite::Render()
 
   /** Our more efficient but less powerful alter ego, if one is available. */
   nsRefPtr<Composer2D> composer2D;
+  composer2D = mCompositor->GetWidget()->GetComposer2D();
 
-  // We can't use composert2D if we have layer effects, so only get it
-  // when we don't have any effects.
-  if (!haveLayerEffects) {
-    composer2D = mCompositor->GetWidget()->GetComposer2D();
-  }
-
-  if (!mTarget && composer2D && composer2D->TryRender(mRoot, mGeometryChanged)) {
+  // We can't use composert2D if we have layer effects
+  if (!mTarget && !haveLayerEffects &&
+      composer2D && composer2D->HasHwc() && composer2D->TryRenderWithHwc(mRoot, mGeometryChanged))
+  {
     LayerScope::SetHWComposed();
     if (mFPS) {
       double fps = mFPS->mCompositionFps.AddFrameAndGetFps(TimeStamp::Now());
@@ -674,7 +670,7 @@ LayerManagerComposite::Render()
     mInvalidRegion.SetEmpty();
     mLastFrameMissedHWC = false;
     return;
-  } else if (!mTarget) {
+  } else if (!mTarget && !haveLayerEffects) {
     mLastFrameMissedHWC = !!composer2D;
   }
 
@@ -763,6 +759,10 @@ LayerManagerComposite::Render()
 
     mCompositor->EndFrame();
     mCompositor->SetFBAcquireFence(mRoot);
+  }
+
+  if (composer2D) {
+    composer2D->Render();
   }
 
   mCompositor->GetWidget()->PostRender(this);

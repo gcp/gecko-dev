@@ -86,16 +86,18 @@ nsContainerFrame::AppendFrames(ChildListID  aListID,
 {
   MOZ_ASSERT(aListID == kPrincipalList || aListID == kNoReflowPrincipalList,
              "unexpected child list");
-  if (aFrameList.NotEmpty()) {
-    mFrames.AppendFrames(this, aFrameList);
 
-    // Ask the parent frame to reflow me.
-    if (aListID == kPrincipalList)
-    {
-      PresContext()->PresShell()->
-        FrameNeedsReflow(this, nsIPresShell::eTreeChange,
-                         NS_FRAME_HAS_DIRTY_CHILDREN);
-    }
+  if (MOZ_UNLIKELY(aFrameList.IsEmpty())) {
+    return;
+  }
+
+  DrainSelfOverflowList(); // ensure the last frame is in mFrames
+  mFrames.AppendFrames(this, aFrameList);
+
+  if (aListID != kNoReflowPrincipalList) {
+    PresContext()->PresShell()->
+      FrameNeedsReflow(this, nsIPresShell::eTreeChange,
+                       NS_FRAME_HAS_DIRTY_CHILDREN);
   }
 }
 
@@ -109,16 +111,17 @@ nsContainerFrame::InsertFrames(ChildListID aListID,
   NS_ASSERTION(!aPrevFrame || aPrevFrame->GetParent() == this,
                "inserting after sibling frame with different parent");
 
-  if (aFrameList.NotEmpty()) {
-    // Insert frames after aPrevFrame
-    mFrames.InsertFrames(this, aPrevFrame, aFrameList);
+  if (MOZ_UNLIKELY(aFrameList.IsEmpty())) {
+    return;
+  }
 
-    if (aListID == kPrincipalList)
-    {
-      PresContext()->PresShell()->
-        FrameNeedsReflow(this, nsIPresShell::eTreeChange,
-                         NS_FRAME_HAS_DIRTY_CHILDREN);
-    }
+  DrainSelfOverflowList(); // ensure aPrevFrame is in mFrames
+  mFrames.InsertFrames(this, aPrevFrame, aFrameList);
+
+  if (aListID != kNoReflowPrincipalList) {
+    PresContext()->PresShell()->
+      FrameNeedsReflow(this, nsIPresShell::eTreeChange,
+                       NS_FRAME_HAS_DIRTY_CHILDREN);
   }
 }
 
@@ -625,7 +628,7 @@ nsContainerFrame::SyncWindowProperties(nsPresContext*       aPresContext,
     return;
 
   Element* rootElement = aPresContext->Document()->GetRootElement();
-  if (!rootElement || !rootElement->IsXUL()) {
+  if (!rootElement || !rootElement->IsXULElement()) {
     // Scrollframes use native widgets which don't work well with
     // translucent windows, at least in Windows XP. So if the document
     // has a root scrollrame it's useless to try to make it transparent,
@@ -669,12 +672,12 @@ void nsContainerFrame::SetSizeConstraints(nsPresContext* aPresContext,
                                           const nsSize& aMinSize,
                                           const nsSize& aMaxSize)
 {
-  nsIntSize devMinSize(aPresContext->AppUnitsToDevPixels(aMinSize.width),
-                       aPresContext->AppUnitsToDevPixels(aMinSize.height));
-  nsIntSize devMaxSize(aMaxSize.width == NS_INTRINSICSIZE ? NS_MAXSIZE :
-                         aPresContext->AppUnitsToDevPixels(aMaxSize.width),
-                       aMaxSize.height == NS_INTRINSICSIZE ? NS_MAXSIZE :
-                         aPresContext->AppUnitsToDevPixels(aMaxSize.height));
+  LayoutDeviceIntSize devMinSize(aPresContext->AppUnitsToDevPixels(aMinSize.width),
+                                 aPresContext->AppUnitsToDevPixels(aMinSize.height));
+  LayoutDeviceIntSize devMaxSize(aMaxSize.width == NS_INTRINSICSIZE ? NS_MAXSIZE :
+                                 aPresContext->AppUnitsToDevPixels(aMaxSize.width),
+                                 aMaxSize.height == NS_INTRINSICSIZE ? NS_MAXSIZE :
+                                 aPresContext->AppUnitsToDevPixels(aMaxSize.height));
 
   // MinSize has a priority over MaxSize
   if (devMinSize.width > devMaxSize.width)
@@ -687,7 +690,8 @@ void nsContainerFrame::SetSizeConstraints(nsPresContext* aPresContext,
   // The sizes are in inner window sizes, so convert them into outer window sizes.
   // Use a size of (200, 200) as only the difference between the inner and outer
   // size is needed.
-  nsIntSize windowSize = aWidget->ClientToWindowSize(nsIntSize(200, 200));
+  LayoutDeviceIntSize windowSize =
+    aWidget->ClientToWindowSize(LayoutDeviceIntSize(200, 200));
   if (constraints.mMinSize.width)
     constraints.mMinSize.width += windowSize.width - 200;
   if (constraints.mMinSize.height)
@@ -752,16 +756,10 @@ nsContainerFrame::SyncFrameViewProperties(nsPresContext*  aPresContext,
             ? nsViewVisibility_kShow : nsViewVisibility_kHide);
   }
 
-  // See if the frame is being relatively positioned or absolutely
-  // positioned
-  bool isPositioned = aFrame->IsPositioned();
-
   int32_t zIndex = 0;
   bool    autoZIndex = false;
 
-  if (!isPositioned) {
-    autoZIndex = true;
-  } else {
+  if (aFrame->IsAbsPosContaininingBlock()) {
     // Make sure z-index is correct
     const nsStylePosition* position = aStyleContext->StylePosition();
 
@@ -770,6 +768,8 @@ nsContainerFrame::SyncFrameViewProperties(nsPresContext*  aPresContext,
     } else if (position->mZIndex.GetUnit() == eStyleUnit_Auto) {
       autoZIndex = true;
     }
+  } else {
+    autoZIndex = true;
   }
 
   vm->SetViewZIndex(aView, autoZIndex, zIndex);
@@ -794,14 +794,11 @@ nsContainerFrame::DoInlineIntrinsicISize(nsRenderingContext *aRenderingContext,
   NS_PRECONDITION(aType == nsLayoutUtils::MIN_ISIZE ||
                   aType == nsLayoutUtils::PREF_ISIZE, "bad type");
 
-  mozilla::css::Side startSide, endSide;
-  if (StyleVisibility()->mDirection == NS_STYLE_DIRECTION_LTR) {
-    startSide = NS_SIDE_LEFT;
-    endSide = NS_SIDE_RIGHT;
-  } else {
-    startSide = NS_SIDE_RIGHT;
-    endSide = NS_SIDE_LEFT;
-  }
+  WritingMode wm = GetWritingMode();
+  mozilla::css::Side startSide =
+    wm.PhysicalSideForInlineAxis(eLogicalEdgeStart);
+  mozilla::css::Side endSide =
+    wm.PhysicalSideForInlineAxis(eLogicalEdgeEnd);
 
   const nsStylePadding *stylePadding = StylePadding();
   const nsStyleBorder *styleBorder = StyleBorder();
@@ -938,11 +935,6 @@ nsContainerFrame::ComputeAutoSize(nsRenderingContext* aRenderingContext,
   return result;
 }
 
-/**
- * Invokes the WillReflow() function, positions the frame and its view (if
- * requested), and then calls Reflow(). If the reflow succeeds and the child
- * frame is complete, deletes any next-in-flows using DeleteNextInFlowChild()
- */
 void
 nsContainerFrame::ReflowChild(nsIFrame*                aKidFrame,
                               nsPresContext*           aPresContext,
@@ -958,13 +950,10 @@ nsContainerFrame::ReflowChild(nsIFrame*                aKidFrame,
   NS_PRECONDITION(aReflowState.frame == aKidFrame, "bad reflow state");
   if (aWM.IsVerticalRL() || (!aWM.IsVertical() && !aWM.IsBidiLTR())) {
     NS_ASSERTION(aContainerWidth != NS_UNCONSTRAINEDSIZE,
-                 "FinishReflowChild with unconstrained container width!");
+                 "ReflowChild with unconstrained container width!");
   }
 
-  // Send the WillReflow() notification, and position the child frame
-  // and its view if requested
-  aKidFrame->WillReflow(aPresContext);
-
+  // Position the child frame and its view if requested.
   if (NS_FRAME_NO_MOVE_FRAME != (aFlags & NS_FRAME_NO_MOVE_FRAME)) {
     aKidFrame->SetPosition(aWM, aPos, aContainerWidth);
   }
@@ -1006,10 +995,7 @@ nsContainerFrame::ReflowChild(nsIFrame*                aKidFrame,
 {
   NS_PRECONDITION(aReflowState.frame == aKidFrame, "bad reflow state");
 
-  // Send the WillReflow() notification, and position the child frame
-  // and its view if requested
-  aKidFrame->WillReflow(aPresContext);
-
+  // Position the child frame and its view if requested.
   if (NS_FRAME_NO_MOVE_FRAME != (aFlags & NS_FRAME_NO_MOVE_FRAME)) {
     aKidFrame->SetPosition(nsPoint(aX, aY));
   }

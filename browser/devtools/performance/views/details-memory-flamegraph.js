@@ -23,21 +23,27 @@ let MemoryFlameGraphView = Heritage.extend(DetailsSubview, {
 
     this.graph = new FlameGraph($("#memory-flamegraph-view"));
     this.graph.timelineTickUnits = L10N.getStr("graphs.ms");
+    this.graph.setTheme(PerformanceController.getTheme());
     yield this.graph.ready();
 
     this._onRangeChangeInGraph = this._onRangeChangeInGraph.bind(this);
+    this._onThemeChanged = this._onThemeChanged.bind(this);
 
+    PerformanceController.on(EVENTS.THEME_CHANGED, this._onThemeChanged);
     this.graph.on("selecting", this._onRangeChangeInGraph);
   }),
 
   /**
    * Unbinds events.
    */
-  destroy: function () {
+  destroy: Task.async(function* () {
     DetailsSubview.destroy.call(this);
 
+    PerformanceController.off(EVENTS.THEME_CHANGED, this._onThemeChanged);
     this.graph.off("selecting", this._onRangeChangeInGraph);
-  },
+
+    yield this.graph.destroy();
+  }),
 
   /**
    * Method for handling all the set up for rendering a new flamegraph.
@@ -87,6 +93,14 @@ let MemoryFlameGraphView = Heritage.extend(DetailsSubview, {
     let allocations = recording.getAllocations();
     let samples = RecordingUtils.getSamplesFromAllocations(allocations);
     FlameGraphUtils.removeFromCache(samples);
+  },
+
+  /**
+   * Called when `devtools.theme` changes.
+   */
+  _onThemeChanged: function (_, theme) {
+    this.graph.setTheme(theme);
+    this.graph.refresh({ force: true });
   },
 
   toString: () => "[object MemoryFlameGraphView]"

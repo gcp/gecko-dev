@@ -59,7 +59,7 @@ DOMTimeStamp nsListControlFrame::gLastKeyTime = 0;
  * Frames are not refcounted so they can't be used as event listeners.
  *****************************************************************************/
 
-class nsListEventListener MOZ_FINAL : public nsIDOMEventListener
+class nsListEventListener final : public nsIDOMEventListener
 {
 public:
   explicit nsListEventListener(nsListControlFrame *aFrame)
@@ -364,6 +364,7 @@ nsListControlFrame::Reflow(nsPresContext*           aPresContext,
     return;
   }
 
+  MarkInReflow();
   /*
    * Due to the fact that our intrinsic height depends on the heights of our
    * kids, we end up having to do two-pass reflow, in general -- the first pass
@@ -456,8 +457,6 @@ nsListControlFrame::Reflow(nsPresContext*           aPresContext,
   nscoord computedHeight = CalcIntrinsicBSize(HeightOfARow(), length); 
   computedHeight = state.ApplyMinMaxHeight(computedHeight);
   state.SetComputedHeight(computedHeight);
-
-  nsHTMLScrollFrame::WillReflow(aPresContext);
 
   // XXXbz to make the ascent really correct, we should add our
   // mComputedPadding.top to it (and subtract it from descent).  Need that
@@ -577,7 +576,6 @@ nsListControlFrame::ReflowAsDropdown(nsPresContext*           aPresContext,
 
   mLastDropdownComputedHeight = state.ComputedHeight();
 
-  nsHTMLScrollFrame::WillReflow(aPresContext);
   nsHTMLScrollFrame::Reflow(aPresContext, aDesiredSize, state, aStatus);
 }
 
@@ -588,8 +586,7 @@ nsListControlFrame::GetScrollbarStyles() const
   // and GetScrollbarStyles can be devirtualized
   int32_t verticalStyle = IsInDropDownMode() ? NS_STYLE_OVERFLOW_AUTO
     : NS_STYLE_OVERFLOW_SCROLL;
-  return ScrollbarStyles(NS_STYLE_OVERFLOW_HIDDEN, verticalStyle,
-                         NS_STYLE_SCROLL_BEHAVIOR_AUTO);
+  return ScrollbarStyles(NS_STYLE_OVERFLOW_HIDDEN, verticalStyle);
 }
 
 bool
@@ -707,7 +704,7 @@ CountOptionsAndOptgroups(nsIFrame* aFrame)
     nsIFrame* child = e.get();
     nsIContent* content = child->GetContent();
     if (content) {
-      if (content->IsHTML(nsGkAtoms::option)) {
+      if (content->IsHTMLElement(nsGkAtoms::option)) {
         ++count;
       } else {
         nsCOMPtr<nsIDOMHTMLOptGroupElement> optgroup = do_QueryInterface(content);
@@ -1763,6 +1760,17 @@ nsListControlFrame::GetIndexFromDOMEvent(nsIDOMEvent* aMouseEvent,
   return NS_ERROR_FAILURE;
 }
 
+static void
+FireShowDropDownEvent(nsIContent* aContent)
+{
+  if (XRE_GetProcessType() == GeckoProcessType_Content &&
+      Preferences::GetBool("browser.tabs.remote.desktopbehavior", false)) {
+    nsContentUtils::DispatchChromeEvent(aContent->OwnerDoc(), aContent,
+                                        NS_LITERAL_STRING("mozshowdropdown"), true,
+                                        false);
+  }
+}
+
 nsresult
 nsListControlFrame::MouseDown(nsIDOMEvent* aMouseEvent)
 {
@@ -1810,13 +1818,7 @@ nsListControlFrame::MouseDown(nsIDOMEvent* aMouseEvent)
   } else {
     // NOTE: the combo box is responsible for dropping it down
     if (mComboboxFrame) {
-      if (XRE_GetProcessType() == GeckoProcessType_Content &&
-          Preferences::GetBool("browser.tabs.remote.desktopbehavior", false)) {
-        nsContentUtils::DispatchChromeEvent(mContent->OwnerDoc(), mContent,
-                                            NS_LITERAL_STRING("mozshowdropdown"), true,
-                                            false);
-        return NS_OK;
-      }
+      FireShowDropDownEvent(mContent);
 
       if (!IgnoreMouseEventForSelection(aMouseEvent)) {
         return NS_OK;
@@ -2057,6 +2059,7 @@ nsListControlFrame::DropDownToggleKey(nsIDOMEvent* aKeyEvent)
   if (IsInDropDownMode() && !nsComboboxControlFrame::ToolkitHasNativePopup()) {
     aKeyEvent->PreventDefault();
     if (!mComboboxFrame->IsDroppedDown()) {
+      FireShowDropDownEvent(mContent);
       mComboboxFrame->ShowDropDown(true);
     } else {
       nsWeakFrame weakFrame(this);

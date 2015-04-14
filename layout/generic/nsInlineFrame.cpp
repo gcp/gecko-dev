@@ -333,6 +333,7 @@ nsInlineFrame::Reflow(nsPresContext*          aPresContext,
                       const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus)
 {
+  MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsInlineFrame");
   DISPLAY_REFLOW(aPresContext, this, aReflowState, aMetrics, aStatus);
   if (nullptr == aReflowState.mLineLayout) {
@@ -978,10 +979,9 @@ nsInlineFrame::AccessibleType()
 {
   // Broken image accessibles are created here, because layout
   // replaces the image or image control frame with an inline frame
-  nsIAtom *tagAtom = mContent->Tag();
-  if (tagAtom == nsGkAtoms::input)  // Broken <input type=image ... />
+  if (mContent->IsHTMLElement(nsGkAtoms::input))  // Broken <input type=image ... />
     return a11y::eHTMLButtonType;
-  if (tagAtom == nsGkAtoms::img)  // Create accessible for broken <img>
+  if (mContent->IsHTMLElement(nsGkAtoms::img))  // Create accessible for broken <img>
     return a11y::eHyperTextType;
 
   return a11y::eNoType;
@@ -1065,6 +1065,7 @@ nsFirstLineFrame::Reflow(nsPresContext* aPresContext,
                          const nsHTMLReflowState& aReflowState,
                          nsReflowStatus& aStatus)
 {
+  MarkInReflow();
   if (nullptr == aReflowState.mLineLayout) {
     return;  // XXX does this happen? why?
   }

@@ -21,10 +21,16 @@ XPCOMUtils.defineLazyModuleGetter(this, "LoopStorage",
                                         "resource:///modules/loop/LoopStorage.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "hookWindowCloseForPanelClose",
                                         "resource://gre/modules/MozSocialAPI.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PageMetadata",
+                                        "resource://gre/modules/PageMetadata.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
                                         "resource://gre/modules/PluralForm.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
+                                        "resource://gre/modules/UpdateChannel.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "UITour",
                                         "resource:///modules/UITour.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Social",
+                                        "resource:///modules/Social.jsm");
 XPCOMUtils.defineLazyGetter(this, "appInfo", function() {
   return Cc["@mozilla.org/xre/app-info;1"]
            .getService(Ci.nsIXULAppInfo)
@@ -118,6 +124,15 @@ const cloneValueInto = function(value, targetWindow) {
 };
 
 /**
+ * Get the two-digit hexadecimal code for a byte
+ *
+ * @param {byte} charCode
+ */
+const toHexString = function(charCode) {
+  return ("0" + charCode.toString(16)).slice(-2);
+};
+
+/**
  * Inject any API containing _only_ function properties into the given window.
  *
  * @param {Object}       api          Object containing functions that need to
@@ -138,11 +153,16 @@ const injectObjectAPI = function(api, targetWindow) {
       // If the last parameter is a function, assume its a callback
       // and wrap it differently.
       if (callbackIsFunction) {
-        api[func](...params, function(...results) {
+        api[func](...params, function callback(...results) {
           // When the function was garbage collected due to async events, like
           // closing a window, we want to circumvent a JS error.
           if (callbackIsFunction && typeof lastParam != "function") {
             MozLoopService.log.debug(func + ": callback function was lost.");
+            // Clean up event listeners.
+            if (func == "on" && api.off) {
+              api.off(results[0], callback);
+              return;
+            }
             // Assume the presence of a first result argument to be an error.
             if (results[0]) {
               MozLoopService.log.error(func + " error:", results[0]);
@@ -156,6 +176,7 @@ const injectObjectAPI = function(api, targetWindow) {
           lastParam = cloneValueInto(lastParam, api);
           return cloneValueInto(api[func](...params, lastParam), targetWindow);
         } catch (ex) {
+          MozLoopService.log.error(func + " error: ", ex, params, lastParam);
           return cloneValueInto(ex, targetWindow);
         }
       }
@@ -187,6 +208,11 @@ function injectLoopAPI(targetWindow) {
   let contactsAPI;
   let roomsAPI;
   let callsAPI;
+  let savedWindowListeners = new Map();
+  let socialProviders;
+  const kShareWidgetId = "social-share-button";
+  let socialShareButtonListenersAdded = false;
+
 
   let api = {
     /**
@@ -257,27 +283,70 @@ function injectLoopAPI(targetWindow) {
       }
     },
 
-    getActiveTabWindowId: {
+    /**
+     * Adds a listener to the most recent window for browser/tab sharing. The
+     * listener will be notified straight away of the current tab id, then every
+     * time there is a change of tab.
+     *
+     * Listener parameters:
+     * - {Object}  err      If there is a error this will be defined, null otherwise.
+     * - {Number} windowId The new windowId after a change of tab.
+     *
+     * @param {Function} listener The listener to handle the windowId changes.
+     */
+    addBrowserSharingListener: {
       enumerable: true,
       writable: true,
-      value: function(callback) {
+      value: function(listener) {
         let win = Services.wm.getMostRecentWindow("navigator:browser");
-        let browser = win && win.gBrowser.selectedTab.linkedBrowser;
+        let browser = win && win.gBrowser.selectedBrowser;
         if (!win || !browser) {
           // This may happen when an undocked conversation window is the only
           // window left.
           let err = new Error("No tabs available to share.");
           MozLoopService.log.error(err);
-          callback(cloneValueInto(err, targetWindow));
+          listener(cloneValueInto(err, targetWindow));
+          return;
+        }
+        if (browser.getAttribute("remote") == "true") {
+          // Tab sharing is not supported yet for e10s-enabled browsers. This will
+          // be fixed in bug 1137634.
+          let err = new Error("Tab sharing is not supported for e10s-enabled browsers");
+          MozLoopService.log.error(err);
+          listener(cloneValueInto(err, targetWindow));
           return;
         }
 
-        let mm = browser.messageManager;
-        mm.addMessageListener("webrtc:response:StartBrowserSharing", function listener(message) {
-          mm.removeMessageListener("webrtc:response:StartBrowserSharing", listener);
-          callback(null, message.data.windowID);
-        });
-        mm.sendAsyncMessage("webrtc:StartBrowserSharing");
+        win.LoopUI.addBrowserSharingListener(listener);
+
+        savedWindowListeners.set(listener, Cu.getWeakReference(win));
+      }
+    },
+
+    /**
+     * Removes a listener that was previously added.
+     *
+     * @param {Function} listener The listener to handle the windowId changes.
+     */
+    removeBrowserSharingListener: {
+      enumerable: true,
+      writable: true,
+      value: function(listener) {
+        if (!savedWindowListeners.has(listener)) {
+          return;
+        }
+
+        let win = savedWindowListeners.get(listener).get();
+
+        // Remove the element, regardless of if the window exists or not so
+        // that we clean the map.
+        savedWindowListeners.delete(listener);
+
+        if (!win) {
+          return;
+        }
+
+        win.LoopUI.removeBrowserSharingListener(listener);
       }
     },
 
@@ -579,6 +648,20 @@ function injectLoopAPI(targetWindow) {
       }
     },
 
+    TWO_WAY_MEDIA_CONN_LENGTH: {
+      enumerable: true,
+      get: function() {
+        return Cu.cloneInto(TWO_WAY_MEDIA_CONN_LENGTH, targetWindow);
+      }
+    },
+
+    SHARING_STATE_CHANGE: {
+      enumerable: true,
+      get: function() {
+        return Cu.cloneInto(SHARING_STATE_CHANGE, targetWindow);
+      }
+    },
+
     fxAEnabled: {
       enumerable: true,
       get: function() {
@@ -649,13 +732,11 @@ function injectLoopAPI(targetWindow) {
       enumerable: true,
       get: function() {
         if (!appVersionInfo) {
-          let defaults = Services.prefs.getDefaultBranch(null);
-
           // If the lazy getter explodes, we're probably loaded in xpcshell,
           // which doesn't have what we need, so log an error.
           try {
             appVersionInfo = Cu.cloneInto({
-              channel: defaults.getCharPref("app.update.channel"),
+              channel: UpdateChannel.get(),
               version: appInfo.version,
               OS: appInfo.OS
             }, targetWindow);
@@ -693,14 +774,14 @@ function injectLoopAPI(targetWindow) {
     /**
      * Adds a value to a telemetry histogram.
      *
-     * @param  {string}  histogramId Name of the telemetry histogram to update.
-     * @param  {integer} value       Value to add to the histogram.
+     * @param  {string} histogramId Name of the telemetry histogram to update.
+     * @param  {string} value       Label of bucket to increment in the histogram.
      */
-    telemetryAdd: {
+    telemetryAddKeyedValue: {
       enumerable: true,
       writable: true,
       value: function(histogramId, value) {
-        Services.telemetry.getHistogramById(histogramId).add(value);
+        Services.telemetry.getKeyedHistogramById(histogramId).add(value);
       }
     },
 
@@ -737,6 +818,61 @@ function injectLoopAPI(targetWindow) {
         };
 
         request.send();
+      }
+    },
+
+    /**
+     * Compose a URL pointing to the location of an avatar by email address.
+     * At the moment we use the Gravatar service to match email addresses with
+     * avatars. This might change in the future as avatars might come from another
+     * source.
+     *
+     * @param {String} emailAddress Users' email address
+     * @param {Number} size         Size of the avatar image to return in pixels.
+     *                              Optional. Default value: 40.
+     * @return the URL pointing to an avatar matching the provided email address.
+     */
+    getUserAvatar: {
+      enumerable: true,
+      writable: true,
+      value: function(emailAddress, size = 40) {
+        const kEmptyGif = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+        if (!emailAddress || !MozLoopService.getLoopPref("contacts.gravatars.show")) {
+          return kEmptyGif;
+        }
+
+        // Do the MD5 dance.
+        let hasher = Cc["@mozilla.org/security/hash;1"]
+                       .createInstance(Ci.nsICryptoHash);
+        hasher.init(Ci.nsICryptoHash.MD5);
+        let stringStream = Cc["@mozilla.org/io/string-input-stream;1"]
+                             .createInstance(Ci.nsIStringInputStream);
+        stringStream.data = emailAddress.trim().toLowerCase();
+        hasher.updateFromStream(stringStream, -1);
+        let hash = hasher.finish(false);
+        // Convert the binary hash data to a hex string.
+        let md5Email = [toHexString(hash.charCodeAt(i)) for (i in hash)].join("");
+
+        // Compose the Gravatar URL.
+        return "https://www.gravatar.com/avatar/" + md5Email + ".jpg?default=blank&s=" + size;
+      }
+    },
+
+    /**
+     * Gets the metadata related to the currently selected tab in
+     * the most recent window.
+     *
+     * @param {Function} A callback that is passed the metadata.
+     */
+    getSelectedTabMetadata: {
+      value: function(callback) {
+        let win = Services.wm.getMostRecentWindow("navigator:browser");
+        win.messageManager.addMessageListener("PageMetadata:PageDataResult", function onPageDataResult(msg) {
+          win.messageManager.removeMessageListener("PageMetadata:PageDataResult", onPageDataResult);
+          let pageData = msg.json;
+          callback(cloneValueInto(pageData, targetWindow));
+        });
+        win.gBrowser.selectedBrowser.messageManager.sendAsyncMessage("PageMetadata:GetPageData");
       }
     },
 
@@ -788,20 +924,212 @@ function injectLoopAPI(targetWindow) {
       value: function(windowId, active) {
         MozLoopService.setScreenShareState(windowId, active);
       }
+    },
+
+    /**
+     * Checks if the Social Share widget is available in any of the registered
+     * widget areas (navbar, MenuPanel, etc).
+     *
+     * @return {Boolean} `true` if the widget is available and `false` when it's
+     *                   still in the Customization palette.
+     */
+    isSocialShareButtonAvailable: {
+      enumerable: true,
+      writable: true,
+      value: function() {
+        let win = Services.wm.getMostRecentWindow("navigator:browser");
+        if (!win || !win.CustomizableUI) {
+          return false;
+        }
+
+        let widget = win.CustomizableUI.getWidget(kShareWidgetId);
+        if (widget) {
+          if (!socialShareButtonListenersAdded) {
+            let eventName = "social:" + kShareWidgetId;
+            Services.obs.addObserver(onShareWidgetChanged, eventName + "-added", false);
+            Services.obs.addObserver(onShareWidgetChanged, eventName + "-removed", false);
+            socialShareButtonListenersAdded = true;
+          }
+          return !!widget.areaType;
+        }
+
+        return false;
+      }
+    },
+
+    /**
+     * Add the Social Share widget to the navbar area, but only when it's not
+     * located anywhere else than the Customization palette.
+     */
+    addSocialShareButton: {
+      enumerable: true,
+      writable: true,
+      value: function() {
+        // Don't do anything if the button is already available.
+        if (api.isSocialShareButtonAvailable.value()) {
+          return;
+        }
+
+        let win = Services.wm.getMostRecentWindow("navigator:browser");
+        if (!win || !win.CustomizableUI) {
+          return;
+        }
+        win.CustomizableUI.addWidgetToArea(kShareWidgetId, win.CustomizableUI.AREA_NAVBAR);
+      }
+    },
+
+    /**
+     * Activates the Social Share panel with the Social Provider panel opened
+     * when the popup open.
+     */
+    addSocialShareProvider: {
+      enumerable: true,
+      writable: true,
+      value: function() {
+        // Don't do anything if the button is _not_ available.
+        if (!api.isSocialShareButtonAvailable.value()) {
+          return;
+        }
+
+        let win = Services.wm.getMostRecentWindow("navigator:browser");
+        if (!win || !win.SocialShare) {
+          return;
+        }
+        win.SocialShare.showDirectory();
+      }
+    },
+
+    /**
+     * Returns a sorted list of Social Providers that can share URLs. See
+     * `updateSocialProvidersCache()` for more information.
+     * 
+     * @return {Array} Sorted list of share-capable Social Providers.
+     */
+    getSocialShareProviders: {
+      enumerable: true,
+      writable: true,
+      value: function() {
+        if (socialProviders) {
+          return socialProviders;
+        }
+        return updateSocialProvidersCache();
+      }
+    },
+
+    /**
+     * Share a room URL through a Social Provider with the provided title message.
+     * This action will open the share panel, which is anchored to the Social
+     * Share widget.
+     *
+     * @param {String} providerOrigin Identifier of the targeted Social Provider
+     * @param {String} roomURL        URL that points to the standalone client
+     * @param {String} title          Message that augments the URL inside the
+     *                                share message
+     * @param {String} [body]         Optional longer message to be displayed
+     *                                similar to the body of an email 
+     */
+    socialShareRoom: {
+      enumerable: true,
+      writable: true,
+      value: function(providerOrigin, roomURL, title, body = null) {
+        let win = Services.wm.getMostRecentWindow("navigator:browser");
+        if (!win || !win.SocialShare) {
+          return;
+        }
+
+        let graphData = {
+          url: roomURL,
+          title: title
+        };
+        if (body) {
+          graphData.body = body;
+        }
+        win.SocialShare.sharePage(providerOrigin, graphData);
+      }
     }
   };
 
-  function onStatusChanged(aSubject, aTopic, aData) {
-    let event = new targetWindow.CustomEvent("LoopStatusChanged");
+  /**
+   * Send an event to the content window to indicate that the state on the chrome
+   * side was updated.
+   *
+   * @param  {name} name Name of the event, defaults to 'LoopStatusChanged'
+   */
+  function sendEvent(name = "LoopStatusChanged") {
+    if (typeof targetWindow.CustomEvent != "function") {
+      MozLoopService.log.debug("Could not send event to content document, " +
+        "because it's being destroyed or we're in a unit test where " +
+        "`targetWindow` is mocked.");
+      return;
+    }
+
+    let event = new targetWindow.CustomEvent(name);
     targetWindow.dispatchEvent(event);
-  };
+  }
+
+  function onStatusChanged(aSubject, aTopic, aData) {
+    sendEvent();
+  }
 
   function onDOMWindowDestroyed(aSubject, aTopic, aData) {
     if (targetWindow && aSubject != targetWindow)
       return;
     Services.obs.removeObserver(onDOMWindowDestroyed, "dom-window-destroyed");
     Services.obs.removeObserver(onStatusChanged, "loop-status-changed");
-  };
+    // Stop listening for changes in the social provider list, if necessary.
+    if (socialProviders)
+      Services.obs.removeObserver(updateSocialProvidersCache, "social:providers-changed");
+    if (socialShareButtonListenersAdded) {
+      let eventName = "social:" + kShareWidgetId;
+      Services.obs.removeObserver(onShareWidgetChanged, eventName + "-added");
+      Services.obs.removeObserver(onShareWidgetChanged, eventName + "-removed");
+    }
+  }
+
+  function onShareWidgetChanged(aSubject, aTopic, aData) {
+    sendEvent("LoopShareWidgetChanged");
+  }
+
+  /**
+   * Retrieves a list of Social Providers from the Social API that are explicitly
+   * capable of sharing URLs.
+   * It also adds a listener that is fired whenever a new Provider is added or
+   * removed.
+   *
+   * @return {Array} Sorted list of share-capable Social Providers.
+   */
+  function updateSocialProvidersCache() {
+    let providers = [];
+
+    for (let provider of Social.providers) {
+      if (!provider.shareURL) {
+        continue;
+      }
+
+      // Only pass the relevant data on to content.
+      providers.push({
+        iconURL: provider.iconURL,
+        name: provider.name,
+        origin: provider.origin
+      });
+    }
+
+    let providersWasSet = !!socialProviders;
+    // Replace old with new.
+    socialProviders = cloneValueInto(providers.sort((a, b) =>
+      a.name.toLowerCase().localeCompare(b.name.toLowerCase())), targetWindow);
+
+    // Start listening for changes in the social provider list, if we're not
+    // doing that yet.
+    if (!providersWasSet) {
+      Services.obs.addObserver(updateSocialProvidersCache, "social:providers-changed", false);
+    } else {
+      // Dispatch an event to content to let stores freshen-up.
+      sendEvent("LoopSocialProvidersChanged");
+    }
+
+    return socialProviders;
+  }
 
   let contentObj = Cu.createObjectIn(targetWindow);
   Object.defineProperties(contentObj, api);

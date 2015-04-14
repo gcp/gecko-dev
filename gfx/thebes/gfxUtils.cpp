@@ -14,6 +14,7 @@
 #include "mozilla/Base64.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
+#include "mozilla/gfx/Logging.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/Vector.h"
@@ -440,8 +441,7 @@ CreateSamplingRestrictedDrawable(gfxDrawable* aDrawable,
     gfxIntSize size(int32_t(needed.Width()), int32_t(needed.Height()));
 
     RefPtr<DrawTarget> target =
-      gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(ToIntSize(size),
-                                                                   aFormat);
+      gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(size, aFormat);
     if (!target) {
       return nullptr;
     }
@@ -868,7 +868,7 @@ gfxUtils::GetYCbCrToRGBDestFormatAndSize(const PlanarYCbCrData& aData,
   // 'prescale' is true if the scaling is to be done as part of the
   // YCbCr to RGB conversion rather than on the RGB data when rendered.
   bool prescale = aSuggestedSize.width > 0 && aSuggestedSize.height > 0 &&
-                    ToIntSize(aSuggestedSize) != aData.mPicSize;
+                    aSuggestedSize != aData.mPicSize;
 
   if (aSuggestedFormat == gfxImageFormat::RGB16_565) {
 #if defined(HAVE_YCBCR_TO_RGB565)
@@ -904,7 +904,7 @@ gfxUtils::GetYCbCrToRGBDestFormatAndSize(const PlanarYCbCrData& aData,
       prescale = false;
   }
   if (!prescale) {
-    ToIntSize(aSuggestedSize) = aData.mPicSize;
+    aSuggestedSize = aData.mPicSize;
   }
 }
 
@@ -928,7 +928,7 @@ gfxUtils::ConvertYCbCrToRGB(const PlanarYCbCrData& aData,
                       aData.mCbCrSize.height);
 
   // Convert from YCbCr to RGB now, scaling the image if needed.
-  if (ToIntSize(aDestSize) != aData.mPicSize) {
+  if (aDestSize != aData.mPicSize) {
 #if defined(HAVE_YCBCR_TO_RGB565)
     if (aDestFormat == gfxImageFormat::RGB16_565) {
       ScaleYCbCrToRGB565(aData.mYChannel,
@@ -1037,6 +1037,11 @@ gfxUtils::CopySurfaceToDataSourceSurfaceWithFormat(SourceSurface* aSurface,
     // GPU.
     RefPtr<DrawTarget> dt = gfxPlatform::GetPlatform()->
       CreateOffscreenContentDrawTarget(aSurface->GetSize(), aFormat);
+    if (!dt) {
+      gfxWarning() << "gfxUtils::CopySurfaceToDataSourceSurfaceWithFormat failed in CreateOffscreenContentDrawTarget";
+      return nullptr;
+    }
+
     // Using DrawSurface() here rather than CopySurface() because CopySurface
     // is optimized for memcpy and therefore isn't good for format conversion.
     // Using OP_OVER since in our case it's equivalent to OP_SOURCE and

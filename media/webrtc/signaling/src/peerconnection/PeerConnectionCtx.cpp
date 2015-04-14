@@ -12,7 +12,7 @@
 
 #include "mozilla/Telemetry.h"
 
-#ifdef MOZILLA_INTERNAL_API
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
 #include "mozilla/dom/RTCPeerConnectionBinding.h"
 #include "mozilla/Preferences.h"
 #include <mozilla/Types.h>
@@ -60,7 +60,7 @@ public:
     }
 
   NS_IMETHODIMP Observe(nsISupports* aSubject, const char* aTopic,
-                        const char16_t* aData) MOZ_OVERRIDE {
+                        const char16_t* aData) override {
     if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
       CSFLogDebug(logTag, "Shutting down PeerConnectionCtx");
       PeerConnectionCtx::Destroy();
@@ -151,7 +151,7 @@ void PeerConnectionCtx::Destroy() {
   }
 }
 
-#ifdef MOZILLA_INTERNAL_API
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
 typedef Vector<nsAutoPtr<RTCStatsQuery>> RTCStatsQueries;
 
 // Telemetry reporting every second after start of first call.
@@ -289,21 +289,27 @@ PeerConnectionCtx::EverySecondTelemetryCallback_m(nsITimer* timer, void *closure
         p != ctx->mPeerConnections.end(); ++p) {
     if (p->second->HasMedia()) {
       queries->append(nsAutoPtr<RTCStatsQuery>(new RTCStatsQuery(true)));
-      p->second->BuildStatsQuery_m(nullptr, // all tracks
-                                   queries->back());
+      if (NS_WARN_IF(NS_FAILED(p->second->BuildStatsQuery_m(nullptr, // all tracks
+                                                            queries->back())))) {
+        queries->popBack();
+      } else {
+        MOZ_ASSERT(queries->back()->report);
+      }
     }
   }
-  rv = RUN_ON_THREAD(stsThread,
-                     WrapRunnableNM(&EverySecondTelemetryCallback_s, queries),
-                     NS_DISPATCH_NORMAL);
-  NS_ENSURE_SUCCESS_VOID(rv);
+  if (!queries->empty()) {
+    rv = RUN_ON_THREAD(stsThread,
+                       WrapRunnableNM(&EverySecondTelemetryCallback_s, queries),
+                       NS_DISPATCH_NORMAL);
+    NS_ENSURE_SUCCESS_VOID(rv);
+  }
 }
 #endif
 
 nsresult PeerConnectionCtx::Initialize() {
   initGMP();
 
-#ifdef MOZILLA_INTERNAL_API
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
   mConnectionCounter = 0;
   Telemetry::GetHistogramById(Telemetry::WEBRTC_CALL_COUNT)->Add(0);
 
@@ -366,14 +372,14 @@ nsresult PeerConnectionCtx::Cleanup() {
 PeerConnectionCtx::~PeerConnectionCtx() {
     // ensure mTelemetryTimer ends on main thread
   MOZ_ASSERT(NS_IsMainThread());
-#ifdef MOZILLA_INTERNAL_API
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
   if (mTelemetryTimer) {
     mTelemetryTimer->Cancel();
   }
 #endif
 };
 
-void PeerConnectionCtx::queueJSEPOperation(nsRefPtr<nsIRunnable> aOperation) {
+void PeerConnectionCtx::queueJSEPOperation(nsIRunnable* aOperation) {
   mQueuedJSEPOperations.AppendElement(aOperation);
 }
 

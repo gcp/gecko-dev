@@ -4,6 +4,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+with Files('apz/**'):
+    BUG_COMPONENT = ('Core', 'Panning and Zooming')
+
 EXPORTS += [
     'basic/BasicCanvasLayer.h',
     'basic/BasicImplData.h',
@@ -26,6 +29,7 @@ EXPORTS += [
     'ImageContainer.h',
     'ImageLayers.h',
     'ImageTypes.h',
+    'IMFYCbCrImage.h',
     'ipc/ThreadSafeRefcountingWithMainThreadDestruction.h',
     'Layers.h',
     'LayerScope.h',
@@ -44,6 +48,7 @@ EXPORTS += [
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     UNIFIED_SOURCES += [
         'D3D9SurfaceImage.cpp',
+        'IMFYCbCrImage.cpp',
         'TextureDIB.cpp',
     ]
     EXPORTS.mozilla.layers += [
@@ -89,6 +94,7 @@ EXPORTS.mozilla.layers += [
     # proper interface for the code there
     'apz/src/APZCTreeManager.h',
     'apz/src/APZUtils.h',
+    'apz/src/AsyncPanZoomAnimation.h',
     'apz/testutil/APZTestData.h',
     'apz/util/ActiveElementManager.h',
     'apz/util/APZCCallbackHelper.h',
@@ -225,6 +231,7 @@ UNIFIED_SOURCES += [
     'apz/src/InputQueue.cpp',
     'apz/src/OverscrollHandoffState.cpp',
     'apz/src/TaskThrottler.cpp',
+    'apz/src/WheelScrollAnimation.cpp',
     'apz/testutil/APZTestData.cpp',
     'apz/util/ActiveElementManager.cpp',
     'apz/util/APZCCallbackHelper.cpp',
@@ -359,6 +366,7 @@ include('/ipc/chromium/chromium-config.mozbuild')
 
 LOCAL_INCLUDES += [
     '/docshell/base',  # for nsDocShell.h
+    '/layout/base',    # for TouchManager.h
 ]
 
 FINAL_LIBRARY = 'xul'

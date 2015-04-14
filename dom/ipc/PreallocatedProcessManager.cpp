@@ -34,7 +34,7 @@ namespace {
  * This singleton class implements the static methods on
  * PreallocatedProcessManager.
  */
-class PreallocatedProcessManagerImpl MOZ_FINAL
+class PreallocatedProcessManagerImpl final
   : public nsIObserver
 {
 public:
@@ -291,7 +291,7 @@ PreallocatedProcessManagerImpl::PublishSpareProcess(ContentParent* aContent)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (Preferences::GetBool("dom.ipc.processPriorityManager.testMode")) {
+  if (Preferences::GetBool("dom.ipc.preallocatedProcessManager.testMode")) {
     AutoJSContext cx;
     nsCOMPtr<nsIMessageBroadcaster> ppmm =
       do_GetService("@mozilla.org/parentprocessmessagemanager;1");
@@ -337,7 +337,7 @@ PreallocatedProcessManagerImpl::OnNuwaReady()
   ProcessPriorityManager::SetProcessPriority(mPreallocatedAppProcess,
                                              hal::PROCESS_PRIORITY_MASTER);
   mIsNuwaReady = true;
-  if (Preferences::GetBool("dom.ipc.processPriorityManager.testMode")) {
+  if (Preferences::GetBool("dom.ipc.preallocatedProcessManager.testMode")) {
     AutoJSContext cx;
     nsCOMPtr<nsIMessageBroadcaster> ppmm =
       do_GetService("@mozilla.org/parentprocessmessagemanager;1");

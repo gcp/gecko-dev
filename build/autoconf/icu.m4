@@ -79,6 +79,10 @@ if test -n "$USE_ICU"; then
     fi
     MOZ_ICU_VERSION="$version"
 
+    if test "$OS_TARGET" = WINNT; then
+        MOZ_SHARED_ICU=1
+    fi
+
     if test -z "${JS_STANDALONE}" -a -n "${JS_SHARED_LIBRARY}${MOZ_NATIVE_ICU}"; then
         MOZ_SHARED_ICU=1
     fi
@@ -95,7 +99,7 @@ if test -n "$USE_ICU"; then
                     MOZ_ICU_DBG_SUFFIX=d
                 fi
                 ;;
-            Darwin|Linux|DragonFly|FreeBSD|NetBSD|OpenBSD|GNU/kFreeBSD)
+            Darwin|Linux|DragonFly|FreeBSD|NetBSD|OpenBSD|GNU/kFreeBSD|SunOS)
                 ICU_LIB_NAMES="icui18n icuuc icudata"
                 ;;
             *)
@@ -286,7 +290,7 @@ if test -z "$BUILDING_JS" -o -n "$JS_STANDALONE"; then
          export CXXFLAGS="$ICU_CXXFLAGS"
          export LDFLAGS="$ICU_LDFLAGS $LDFLAGS"
          ac_configure_args="$ICU_BUILD_OPTS $ICU_CROSS_BUILD_OPT $ICU_LINK_OPTS $ICU_TARGET_OPT"
-         ac_configure_args="$ac_configure_args --disable-extras --disable-icuio --disable-layout --disable-tests --disable-samples"
+         ac_configure_args="$ac_configure_args --disable-extras --disable-icuio --disable-layout --disable-tests --disable-samples --disable-strict"
          AC_OUTPUT_SUBDIRS(intl/icu/source:intl/icu/target)
         ) || exit 1
     fi

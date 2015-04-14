@@ -91,6 +91,13 @@
 #endif
 #endif // XP_WIN
 
+#ifdef XP_MACOSX
+// HandlePluginCrashed() and HandlePluginInstantiated() needed from here to
+// fix bug 1147521.  Should later be replaced by proper interface methods,
+// maybe on nsIObjectLoadingContext.
+#include "mozilla/dom/HTMLObjectElement.h"
+#endif
+
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 static const char *kPrefJavaMIME = "plugin.java.mime";
@@ -368,10 +375,10 @@ public:
   }
 
   // nsRunnable
-  NS_IMETHOD Run() MOZ_OVERRIDE;
+  NS_IMETHOD Run() override;
 
   // nsITimerCallback
-  NS_IMETHOD Notify(nsITimer* timer) MOZ_OVERRIDE;
+  NS_IMETHOD Notify(nsITimer* timer) override;
 
 protected:
   virtual ~nsStopPluginRunnable() {}
@@ -694,6 +701,8 @@ nsObjectLoadingContent::UnbindFromTree(bool aDeep, bool aNullParent)
 nsObjectLoadingContent::nsObjectLoadingContent()
   : mType(eType_Loading)
   , mFallbackType(eFallbackAlternate)
+  , mRunID(0)
+  , mHasRunID(false)
   , mChannelLoaded(false)
   , mInstantiating(false)
   , mNetworkCreated(true)
@@ -808,6 +817,17 @@ nsObjectLoadingContent::InstantiatePluginInstance(bool aIsLoading)
 
   mInstanceOwner = newOwner;
 
+  if (mInstanceOwner) {
+    nsRefPtr<nsNPAPIPluginInstance> inst;
+    rv = mInstanceOwner->GetInstance(getter_AddRefs(inst));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    rv = inst->GetRunID(&mRunID);
+    mHasRunID = NS_SUCCEEDED(rv);
+  }
+
   // Ensure the frame did not change during instantiation re-entry (common).
   // HasNewFrame would not have mInstanceOwner yet, so the new frame would be
   // dangling. (Bug 854082)
@@ -866,6 +886,10 @@ nsObjectLoadingContent::InstantiatePluginInstance(bool aIsLoading)
                             doc,
                             NS_LITERAL_STRING("PluginInstantiated"));
   NS_DispatchToCurrentThread(ev);
+
+#ifdef XP_MACOSX
+  HTMLObjectElement::HandlePluginInstantiated(thisContent->AsElement());
+#endif
 
   return NS_OK;
 }
@@ -965,7 +989,7 @@ nsObjectLoadingContent::BuildParametersArray()
 
   int32_t start = 0, end = content->GetAttrCount(), step = 1;
   // HTML attributes are stored in reverse order.
-  if (content->IsHTML() && content->IsInHTMLDocument()) {
+  if (content->IsHTMLElement() && content->IsInHTMLDocument()) {
     start = end - 1;
     end = -1;
     step = -1;
@@ -1017,7 +1041,7 @@ nsObjectLoadingContent::BuildParametersArray()
   // Nav 4.x would simply replace the "data" with "src". Because some plugins correctly
   // look for "data", lets instead copy the "data" attribute and add another entry
   // to the bottom of the array if there isn't already a "src" specified.
-  if (content->Tag() == nsGkAtoms::object &&
+  if (content->IsHTMLElement(nsGkAtoms::object) &&
       !content->HasAttr(kNameSpaceID_None, nsGkAtoms::src)) {
     MozPluginParameter param;
     content->GetAttr(kNameSpaceID_None, nsGkAtoms::data, param.mValue);
@@ -1281,9 +1305,9 @@ nsObjectLoadingContent::GetBaseURI(nsIURI **aResult)
 // We use a shim class to implement this so that JS consumers still
 // see an interface requestor even though WebIDL bindings don't expose
 // that stuff.
-class ObjectInterfaceRequestorShim MOZ_FINAL : public nsIInterfaceRequestor,
-                                               public nsIChannelEventSink,
-                                               public nsIStreamListener
+class ObjectInterfaceRequestorShim final : public nsIInterfaceRequestor,
+                                           public nsIChannelEventSink,
+                                           public nsIStreamListener
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -2723,14 +2747,19 @@ nsObjectLoadingContent::PluginCrashed(nsIPluginTag* aPluginTag,
   LOG(("OBJLC [%p]: Plugin Crashed, queuing crash event", this));
   NS_ASSERTION(mType == eType_Plugin, "PluginCrashed at non-plugin type");
 
+  nsCOMPtr<nsIContent> thisContent =
+    do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
+
+#ifdef XP_MACOSX
+  HTMLObjectElement::HandlePluginCrashed(thisContent->AsElement());
+#endif
+
   PluginDestroyed();
 
   // Switch to fallback/crashed state, notify
   LoadFallback(eFallbackCrashed, true);
 
   // send nsPluginCrashedEvent
-  nsCOMPtr<nsIContent> thisContent =
-    do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
 
   // Note that aPluginTag in invalidated after we're called, so copy 
   // out any data we need now.
@@ -2895,13 +2924,13 @@ nsObjectLoadingContent::LoadFallback(FallbackType aType, bool aNotify) {
   do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
   NS_ASSERTION(thisContent, "must be a content");
 
-  if (!thisContent->IsHTML() || mContentType.IsEmpty()) {
+  if (!thisContent->IsHTMLElement() || mContentType.IsEmpty()) {
     // Don't let custom fallback handlers run outside HTML, tags without a
     // determined type should always just be alternate content
     aType = eFallbackAlternate;
   }
 
-  if (thisContent->Tag() == nsGkAtoms::object &&
+  if (thisContent->IsHTMLElement(nsGkAtoms::object) &&
       (aType == eFallbackUnsupported ||
        aType == eFallbackDisabled ||
        aType == eFallbackBlocklisted))
@@ -2909,7 +2938,7 @@ nsObjectLoadingContent::LoadFallback(FallbackType aType, bool aNotify) {
     // Show alternate content instead, if it exists
     for (nsIContent* child = thisContent->GetFirstChild();
          child; child = child->GetNextSibling()) {
-      if (!child->IsHTML(nsGkAtoms::param) &&
+      if (!child->IsHTMLElement(nsGkAtoms::param) &&
           nsStyleUtil::IsSignificantChild(child, true, false)) {
         aType = eFallbackAlternate;
         break;
@@ -3126,6 +3155,24 @@ nsObjectLoadingContent::CancelPlayPreview()
     return LoadObject(true, true);
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsObjectLoadingContent::GetRunID(uint32_t* aRunID)
+{
+  if (NS_WARN_IF(!nsContentUtils::IsCallerChrome())) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  if (NS_WARN_IF(!aRunID)) {
+    return NS_ERROR_INVALID_POINTER;
+  }
+  if (!mHasRunID) {
+    // The plugin instance must not have a run ID, so we must
+    // be running the plugin in-process.
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+  *aRunID = mRunID;
   return NS_OK;
 }
 

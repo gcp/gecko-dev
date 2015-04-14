@@ -413,6 +413,31 @@ const CustomizableWidgets = [
       node.setAttribute("removable", "true");
       node.setAttribute("observes", "Social:PageShareOrMark");
       node.setAttribute("command", "Social:SharePage");
+
+      let listener = {
+        onWidgetAdded: (aWidgetId) => {
+          if (aWidgetId != this.id)
+            return;
+
+          Services.obs.notifyObservers(null, "social:" + this.id + "-added", null);
+        },
+
+        onWidgetRemoved: aWidgetId => {
+          if (aWidgetId != this.id)
+            return;
+
+          Services.obs.notifyObservers(null, "social:" + this.id + "-removed", null);
+        },
+
+        onWidgetInstanceRemoved: (aWidgetId, aDoc) => {
+          if (aWidgetId != this.id || aDoc != aDocument)
+            return;
+
+          CustomizableUI.removeListener(listener);
+        }
+      };
+      CustomizableUI.addListener(listener);
+
       return node;
     }
   }, {
@@ -756,9 +781,10 @@ const CustomizableWidgets = [
     }
   }, {
     id: "characterencoding-button",
+    label: "characterencoding-button2.label",
     type: "view",
     viewId: "PanelUI-characterEncodingView",
-    tooltiptext: "characterencoding-button.tooltiptext2",
+    tooltiptext: "characterencoding-button2.tooltiptext",
     defaultArea: CustomizableUI.AREA_PANEL,
     maybeDisableMenu: function(aDocument) {
       let window = aDocument.defaultView;
@@ -930,6 +956,8 @@ const CustomizableWidgets = [
     label: "loop-call-button3.label",
     tooltiptext: "loop-call-button3.tooltiptext",
     defaultArea: CustomizableUI.AREA_NAVBAR,
+    // Not in private browsing, see bug 1108187.
+    showInPrivateBrowsing: false,
     introducedInVersion: 4,
     onBuild: function(aDocument) {
       // If we're not supposed to see the button, return zip.
@@ -1075,11 +1103,18 @@ let openRemote = !Services.appinfo.browserTabsRemoteAutostart;
 let buttonLabel = openRemote ? "New e10s Window"
                               : "New Non-e10s Window";
 
+let e10sDisabled = Services.appinfo.inSafeMode;
+#ifdef XP_MACOSX
+// On OS X, "Disable Hardware Acceleration" also disables OMTC and forces
+// a fallback to Basic Layers. This is incompatible with e10s.
+e10sDisabled |= Services.prefs.getBoolPref("layers.acceleration.disabled");
+#endif
+
 CustomizableWidgets.push({
   id: "e10s-button",
   label: buttonLabel,
   tooltiptext: buttonLabel,
-  disabled: Services.appinfo.inSafeMode,
+  disabled: e10sDisabled,
   defaultArea: CustomizableUI.AREA_PANEL,
   onCommand: getCommandFunction(openRemote),
 });

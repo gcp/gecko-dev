@@ -68,9 +68,9 @@ class CamerasChild :
 public:
   virtual bool RecvDeliverFrame(const int&, const int&, mozilla::ipc::Shmem&&,
                                 const int&, const uint32_t&, const int64_t&,
-                                const int64_t&) MOZ_OVERRIDE;
+                                const int64_t&) override;
   virtual bool RecvFrameSizeChange(const int&, const int&,
-                                   const int& w, const int& h) MOZ_OVERRIDE;
+                                   const int& w, const int& h) override;
 
   webrtc::ExternalRenderer* Callback(CaptureEngine aCapEngine, int capture_id);
   void AddCallback(const CaptureEngine aCapEngine, const int capture_id,

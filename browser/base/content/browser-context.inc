@@ -312,7 +312,7 @@
       <menuitem id="context-shareselect"
                 label="&shareSelect.label;"
                 accesskey="&shareSelect.accesskey;"
-                oncommand="gContextMenu.shareSelect(getBrowserSelection());"/>
+                oncommand="gContextMenu.shareSelect();"/>
       <menuseparator id="frame-sep"/>
       <menu id="frame" label="&thisFrameMenu.label;" accesskey="&thisFrameMenu.accesskey;">
         <menupopup>
@@ -421,4 +421,5 @@
                 hidden="true"
                 label="&emeLearnMoreContextMenu.label;"
                 accesskey="&emeLearnMoreContextMenu.accesskey;"
-                onclick="gContextMenu.drmLearnMore(event);"/>
+                oncommand="gContextMenu.drmLearnMore(event);"
+                onclick="checkForMiddleClick(this, event);"/>

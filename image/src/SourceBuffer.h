@@ -8,8 +8,8 @@
  * storing image source (compressed) data.
  */
 
-#ifndef MOZILLA_IMAGELIB_SOURCEBUFFER_H_
-#define MOZILLA_IMAGELIB_SOURCEBUFFER_H_
+#ifndef mozilla_image_src_sourcebuffer_h
+#define mozilla_image_src_sourcebuffer_h
 
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
@@ -64,7 +64,7 @@ protected:
  * Finally, in the COMPLETE state the consumer can call CompletionStatus() to
  * get the status passed to SourceBuffer::Complete().
  */
-class SourceBufferIterator MOZ_FINAL
+class SourceBufferIterator final
 {
 public:
   enum State {
@@ -117,7 +117,8 @@ public:
   /// If at the end, returns the status passed to SourceBuffer::Complete().
   nsresult CompletionStatus() const
   {
-    MOZ_ASSERT(mState == COMPLETE, "Calling CompletionStatus() in the wrong state");
+    MOZ_ASSERT(mState == COMPLETE,
+               "Calling CompletionStatus() in the wrong state");
     return mState == COMPLETE ? mData.mAtEnd.mStatus : NS_OK;
   }
 
@@ -213,7 +214,7 @@ private:
  * live SourceBufferIterator's for it remain, we can compact its contents into a
  * single chunk.
  */
-class SourceBuffer MOZ_FINAL
+class SourceBuffer final
 {
 public:
   MOZ_DECLARE_REFCOUNTED_TYPENAME(image::SourceBuffer)
@@ -378,4 +379,4 @@ private:
 } // namespace image
 } // namespace mozilla
 
-#endif // MOZILLA_IMAGELIB_SOURCEBUFFER_H_
+#endif // mozilla_image_src_sourcebuffer_h

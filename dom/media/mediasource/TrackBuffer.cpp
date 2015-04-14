@@ -47,11 +47,12 @@ TrackBuffer::TrackBuffer(MediaSourceDecoder* aParentDecoder, const nsACString& a
   , mLastStartTimestamp(0)
   , mLastTimestampOffset(0)
   , mAdjustedTimestamp(0)
+  , mIsWaitingOnCDM(false)
   , mShutdown(false)
 {
   MOZ_COUNT_CTOR(TrackBuffer);
   mParser = ContainerParser::CreateForMIMEType(aType);
-  mTaskQueue = new MediaTaskQueue(GetMediaDecodeThreadPool());
+  mTaskQueue = new MediaTaskQueue(GetMediaThreadPool());
   aParentDecoder->AddTrackBuffer(this);
   mDecoderPerSegment = Preferences::GetBool("media.mediasource.decoder-per-segment", false);
   MSE_DEBUG("TrackBuffer created for parent decoder %p", aParentDecoder);
@@ -62,7 +63,7 @@ TrackBuffer::~TrackBuffer()
   MOZ_COUNT_DTOR(TrackBuffer);
 }
 
-class MOZ_STACK_CLASS DecodersToInitialize MOZ_FINAL {
+class MOZ_STACK_CLASS DecodersToInitialize final {
 public:
   explicit DecodersToInitialize(TrackBuffer* aOwner)
     : mOwner(aOwner)
@@ -588,6 +589,7 @@ TrackBuffer::InitializeDecoder(SourceBufferDecoder* aDecoder)
 
   if (mCurrentDecoder != aDecoder) {
     MSE_DEBUG("append was cancelled. Aborting initialization.");
+    RemoveDecoder(aDecoder);
     // If we reached this point, the SourceBuffer would have disconnected
     // the promise. So no need to reject it.
     return;
@@ -641,12 +643,12 @@ TrackBuffer::InitializeDecoder(SourceBufferDecoder* aDecoder)
   }
   if (mCurrentDecoder != aDecoder) {
     MSE_DEBUG("append was cancelled. Aborting initialization.");
+    RemoveDecoder(aDecoder);
     return;
   }
 
   if (NS_SUCCEEDED(rv) && reader->IsWaitingOnCDMResource()) {
-    mWaitingDecoders.AppendElement(aDecoder);
-    return;
+    mIsWaitingOnCDM = true;
   }
 
   aDecoder->SetTaskQueue(nullptr);
@@ -693,6 +695,7 @@ TrackBuffer::CompleteInitializeDecoder(SourceBufferDecoder* aDecoder)
     MSE_DEBUG("append was cancelled. Aborting initialization.");
     // If we reached this point, the SourceBuffer would have disconnected
     // the promise. So no need to reject it.
+    RemoveDecoder(aDecoder);
     return;
   }
 
@@ -808,6 +811,12 @@ TrackBuffer::IsReady()
 }
 
 bool
+TrackBuffer::IsWaitingOnCDMResource()
+{
+  return mIsWaitingOnCDM;
+}
+
+bool
 TrackBuffer::ContainsTime(int64_t aTime, int64_t aTolerance)
 {
   ReentrantMonitorAutoEnter mon(mParentDecoder->GetReentrantMonitor());
@@ -840,14 +849,6 @@ TrackBuffer::BreakCycles()
 }
 
 void
-TrackBuffer::ResetDecode()
-{
-  for (uint32_t i = 0; i < mDecoders.Length(); ++i) {
-    mDecoders[i]->GetReader()->ResetDecode();
-  }
-}
-
-void
 TrackBuffer::ResetParserState()
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -873,7 +874,7 @@ TrackBuffer::AbortAppendData()
 const nsTArray<nsRefPtr<SourceBufferDecoder>>&
 TrackBuffer::Decoders()
 {
-  // XXX assert OnDecodeThread
+  // XXX assert OnDecodeTaskQueue
   return mInitializedDecoders;
 }
 
@@ -883,21 +884,12 @@ TrackBuffer::SetCDMProxy(CDMProxy* aProxy)
 {
   ReentrantMonitorAutoEnter mon(mParentDecoder->GetReentrantMonitor());
 
-  for (uint32_t i = 0; i < mDecoders.Length(); ++i) {
-    nsresult rv = mDecoders[i]->SetCDMProxy(aProxy);
-    NS_ENSURE_SUCCESS(rv, rv);
+  for (auto& decoder : mDecoders) {
+    decoder->SetCDMProxy(aProxy);
   }
 
-  for (uint32_t i = 0; i < mWaitingDecoders.Length(); ++i) {
-    CDMCaps::AutoLock caps(aProxy->Capabilites());
-    caps.CallOnMainThreadWhenCapsAvailable(
-      NS_NewRunnableMethodWithArg<SourceBufferDecoder*>(this,
-                                                        &TrackBuffer::QueueInitializeDecoder,
-                                                        mWaitingDecoders[i]));
-  }
-
-  mWaitingDecoders.Clear();
-
+  mIsWaitingOnCDM = false;
+  mParentDecoder->NotifyWaitingForResourcesStatusChanged();
   return NS_OK;
 }
 #endif
@@ -927,7 +919,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() MOZ_OVERRIDE MOZ_FINAL {
+  NS_IMETHOD Run() override final {
     mDecoder->GetReader()->BreakCycles();
     mDecoder = nullptr;
     return NS_OK;
@@ -945,7 +937,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() MOZ_OVERRIDE MOZ_FINAL {
+  NS_IMETHOD Run() override final {
     // Shutdown the reader, and remove its reference to the decoder
     // so that it can't accidentally read it after the decoder
     // is destroyed.
@@ -979,16 +971,17 @@ TrackBuffer::RemoveDecoder(SourceBufferDecoder* aDecoder)
 }
 
 bool
-TrackBuffer::RangeRemoval(int64_t aStart, int64_t aEnd)
+TrackBuffer::RangeRemoval(media::Microseconds aStart,
+                          media::Microseconds aEnd)
 {
   MOZ_ASSERT(NS_IsMainThread());
   ReentrantMonitorAutoEnter mon(mParentDecoder->GetReentrantMonitor());
 
   nsRefPtr<dom::TimeRanges> buffered = new dom::TimeRanges();
-  int64_t bufferedEnd = Buffered(buffered) * USECS_PER_S;
-  int64_t bufferedStart = buffered->GetStartTime() * USECS_PER_S;
+  media::Microseconds bufferedEnd = media::Microseconds::FromSeconds(Buffered(buffered));
+  media::Microseconds bufferedStart = media::Microseconds::FromSeconds(buffered->GetStartTime());
 
-  if (bufferedStart < 0 || aStart > bufferedEnd || aEnd < bufferedStart) {
+  if (bufferedStart < media::Microseconds(0) || aStart > bufferedEnd || aEnd < bufferedStart) {
     // Nothing to remove.
     return false;
   }
@@ -1008,14 +1001,14 @@ TrackBuffer::RangeRemoval(int64_t aStart, int64_t aEnd)
     for (size_t i = 0; i < decoders.Length(); ++i) {
       nsRefPtr<dom::TimeRanges> buffered = new dom::TimeRanges();
       decoders[i]->GetBuffered(buffered);
-      if (buffered->GetEndTime() < aEnd) {
+      if (media::Microseconds::FromSeconds(buffered->GetEndTime()) < aEnd) {
         // Can be fully removed.
-        MSE_DEBUG("remove all bufferedEnd=%f time=%f, size=%lld",
-                  buffered->GetEndTime(), time,
+        MSE_DEBUG("remove all bufferedEnd=%f size=%lld",
+                  buffered->GetEndTime(),
                   decoders[i]->GetResource()->GetSize());
         decoders[i]->GetResource()->EvictAll();
       } else {
-        int64_t offset = decoders[i]->ConvertToByteOffset(aEnd);
+        int64_t offset = decoders[i]->ConvertToByteOffset(aEnd.ToSeconds());
         MSE_DEBUG("removing some bufferedEnd=%f offset=%lld size=%lld",
                   buffered->GetEndTime(), offset,
                   decoders[i]->GetResource()->GetSize());
@@ -1027,11 +1020,11 @@ TrackBuffer::RangeRemoval(int64_t aStart, int64_t aEnd)
   } else {
     // Only trimming existing buffers.
     for (size_t i = 0; i < decoders.Length(); ++i) {
-      if (aStart <= buffered->GetStartTime()) {
+      if (aStart <= media::Microseconds::FromSeconds(buffered->GetStartTime())) {
         // It will be entirely emptied, can clear all data.
         decoders[i]->GetResource()->EvictAll();
       } else {
-        decoders[i]->Trim(aStart);
+        decoders[i]->Trim(aStart.mValue);
       }
     }
   }

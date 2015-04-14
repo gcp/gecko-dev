@@ -16,6 +16,7 @@ DIRS += [
     'webrtc',
     'webspeech',
     'webvtt',
+    'standalone',
 ]
 
 if CONFIG['MOZ_RAW']:
@@ -81,6 +82,7 @@ XPIDL_MODULE = 'dom_media'
 
 EXPORTS += [
     'AbstractMediaDecoder.h',
+    'AbstractThread.h',
     'AudioBufferUtils.h',
     'AudioChannelFormat.h',
     'AudioCompactor.h',
@@ -102,7 +104,6 @@ EXPORTS += [
     'MediaDecoderOwner.h',
     'MediaDecoderReader.h',
     'MediaDecoderStateMachine.h',
-    'MediaDecoderStateMachineScheduler.h',
     'MediaInfo.h',
     'MediaMetadataManager.h',
     'MediaPromise.h',
@@ -112,6 +113,7 @@ EXPORTS += [
     'MediaSegment.h',
     'MediaStreamGraph.h',
     'MediaTaskQueue.h',
+    'MediaTimer.h',
     'MediaTrack.h',
     'MediaTrackList.h',
     'MP3FrameParser.h',
@@ -121,7 +123,9 @@ EXPORTS += [
     'SharedBuffer.h',
     'SharedThreadPool.h',
     'StreamBuffer.h',
+    'TaskDispatcher.h',
     'ThreadPoolCOMListener.h',
+    'TimeUnits.h',
     'TimeVarying.h',
     'TrackUnionStream.h',
     'VideoFrameContainer.h',
@@ -144,6 +148,7 @@ EXPORTS.mozilla.dom += [
     'AudioTrack.h',
     'AudioTrackList.h',
     'GetUserMediaRequest.h',
+    'MediaDeviceInfo.h',
     'MediaDevices.h',
     'MediaStreamError.h',
     'MediaStreamTrack.h',
@@ -160,6 +165,7 @@ EXPORTS.mozilla.dom += [
 ]
 
 UNIFIED_SOURCES += [
+    'AbstractThread.cpp',
     'AudioChannelFormat.cpp',
     'AudioCompactor.cpp',
     'AudioSegment.cpp',
@@ -180,10 +186,9 @@ UNIFIED_SOURCES += [
     'MediaDecoder.cpp',
     'MediaDecoderReader.cpp',
     'MediaDecoderStateMachine.cpp',
-    'MediaDecoderStateMachineScheduler.cpp',
+    'MediaDeviceInfo.cpp',
     'MediaDevices.cpp',
     'MediaManager.cpp',
-    'MediaPromise.cpp',
     'MediaRecorder.cpp',
     'MediaResource.cpp',
     'MediaShutdownManager.cpp',
@@ -191,6 +196,7 @@ UNIFIED_SOURCES += [
     'MediaStreamGraph.cpp',
     'MediaStreamTrack.cpp',
     'MediaTaskQueue.cpp',
+    'MediaTimer.cpp',
     'MediaTrack.cpp',
     'MediaTrackList.cpp',
     'MP3FrameParser.cpp',

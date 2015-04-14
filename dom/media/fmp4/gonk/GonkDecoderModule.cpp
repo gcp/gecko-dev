@@ -26,12 +26,6 @@ GonkDecoderModule::Init()
   MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
 }
 
-nsresult
-GonkDecoderModule::Shutdown()
-{
-  return NS_OK;
-}
-
 already_AddRefed<MediaDataDecoder>
 GonkDecoderModule::CreateVideoDecoder(const mp4_demuxer::VideoDecoderConfig& aConfig,
                                      mozilla::layers::LayersBackend aLayersBackend,
@@ -55,6 +49,16 @@ GonkDecoderModule::CreateAudioDecoder(const mp4_demuxer::AudioDecoderConfig& aCo
   new GonkMediaDataDecoder(new GonkAudioDecoderManager(aAudioTaskQueue, aConfig),
                            aAudioTaskQueue, aCallback);
   return decoder.forget();
+}
+
+PlatformDecoderModule::ConversionRequired
+GonkDecoderModule::DecoderNeedsConversion(const mp4_demuxer::TrackConfig& aConfig) const
+{
+  if (aConfig.IsVideoConfig()) {
+    return kNeedAnnexB;
+  } else {
+    return kNeedNone;
+  }
 }
 
 } // namespace mozilla

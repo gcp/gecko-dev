@@ -43,7 +43,10 @@ static RedirEntry kRedirMap[] = {
     "mozilla", "chrome://global/content/mozilla.xhtml",
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
   },
-  { "plugins", "chrome://global/content/plugins.html", 0 },
+  {
+    "plugins", "chrome://global/content/plugins.html",
+    nsIAboutModule::URI_MUST_LOAD_IN_CHILD
+  },
   { "config", "chrome://global/content/config.xul", 0 },
 #ifdef MOZ_CRASHREPORTER
   { "crashes", "chrome://global/content/crashes.xhtml", 0 },
@@ -72,7 +75,7 @@ static RedirEntry kRedirMap[] = {
     nsIAboutModule::ALLOW_SCRIPT
   },
   {
-    "compartments", "chrome://global/content/aboutCompartments.xhtml",
+    "performance", "chrome://global/content/aboutPerformance.xhtml",
     nsIAboutModule::ALLOW_SCRIPT
   },
   {
@@ -98,6 +101,10 @@ static RedirEntry kRedirMap[] = {
   },
   {
     "webrtc", "chrome://global/content/aboutwebrtc/aboutWebrtc.xhtml",
+    nsIAboutModule::ALLOW_SCRIPT
+  },
+  {
+    "serviceworkers", "chrome://global/content/aboutServiceWorkers.xhtml",
     nsIAboutModule::ALLOW_SCRIPT
   },
   // about:srcdoc is unresolvable by specification.  It is included here

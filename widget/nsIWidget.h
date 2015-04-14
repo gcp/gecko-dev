@@ -22,6 +22,7 @@
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/gfx/Point.h"
 #include "Units.h"
 
 // forward declarations
@@ -544,15 +545,15 @@ struct SizeConstraints {
   {
   }
 
-  SizeConstraints(nsIntSize aMinSize,
-                  nsIntSize aMaxSize)
+  SizeConstraints(mozilla::LayoutDeviceIntSize aMinSize,
+                  mozilla::LayoutDeviceIntSize aMaxSize)
   : mMinSize(aMinSize),
     mMaxSize(aMaxSize)
   {
   }
 
-  nsIntSize mMinSize;
-  nsIntSize mMaxSize;
+  mozilla::LayoutDeviceIntSize mMinSize;
+  mozilla::LayoutDeviceIntSize mMaxSize;
 };
 
 // IMEMessage is shared by IMEStateManager and TextComposition.
@@ -876,9 +877,6 @@ class nsIWidget : public nsISupports {
      * @param     aNewParent   new parent 
      */
     NS_IMETHOD SetParent(nsIWidget* aNewParent) = 0;
-
-    NS_IMETHOD RegisterTouchWindow() = 0;
-    NS_IMETHOD UnregisterTouchWindow() = 0;
 
     /**
      * Return the parent Widget of this Widget or nullptr if this is a 
@@ -1275,6 +1273,18 @@ class nsIWidget : public nsISupports {
      *
      */
     virtual nsIntPoint GetClientOffset() = 0;
+
+
+    /**
+     * Equivalent to GetClientBounds but only returns the size.
+     */
+    virtual mozilla::gfx::IntSize GetClientSize() {
+      // Dependeing on the backend, overloading this method may be useful if
+      // if requesting the client offset is expensive.
+      nsIntRect rect;
+      GetClientBounds(rect);
+      return mozilla::gfx::IntSize(rect.width, rect.height);
+    }
 
     /**
      * Set the background color for this widget
@@ -1678,7 +1688,8 @@ class nsIWidget : public nsISupports {
      * which includes the area for the borders and titlebar. This method
      * should work even when the window is not yet visible.
      */
-    virtual nsIntSize ClientToWindowSize(const nsIntSize& aClientSize) = 0;
+    virtual mozilla::LayoutDeviceIntSize ClientToWindowSize(
+                const mozilla::LayoutDeviceIntSize& aClientSize) = 0;
 
     /**
      * Dispatches an event to the widget
@@ -1686,6 +1697,20 @@ class nsIWidget : public nsISupports {
      */
     NS_IMETHOD DispatchEvent(mozilla::WidgetGUIEvent* event,
                              nsEventStatus & aStatus) = 0;
+
+    /**
+     * Dispatches an event that must be handled by APZ first, when APZ is
+     * enabled. If invoked in the child process, it is forwarded to the
+     * parent process synchronously.
+     */
+    virtual nsEventStatus DispatchAPZAwareEvent(mozilla::WidgetInputEvent* aEvent) = 0;
+
+    /**
+     * Dispatches an event that must be transformed by APZ first, but is not
+     * actually handled by APZ. If invoked in the child process, it is
+     * forwarded to the parent process synchronously.
+     */
+    virtual nsEventStatus DispatchInputEvent(mozilla::WidgetInputEvent* aEvent) = 0;
 
     /**
      * Enables the dropping of files to a widget (XXX this is temporary)
@@ -2064,11 +2089,6 @@ public:
                         const mozilla::WidgetKeyboardEvent& aEvent,
                         DoCommandCallback aCallback,
                         void* aCallbackData) = 0;
-
-    /**
-     * Set layers acceleration to 'True' or 'False'
-     */
-    NS_IMETHOD SetLayersAcceleration(bool aEnabled) = 0;
 
     /*
      * Get toggled key states.

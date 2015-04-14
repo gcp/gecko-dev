@@ -73,9 +73,9 @@ public:
   NS_DISPLAY_DECL_NAME("nsDisplaySVGPathGeometry", TYPE_SVG_PATH_GEOMETRY)
 
   virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
-                       HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames) MOZ_OVERRIDE;
+                       HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames) override;
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
+                     nsRenderingContext* aCtx) override;
 };
 
 void
@@ -168,7 +168,7 @@ nsSVGPathGeometryFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
     if (aOldStyleContext->PeekStyleSVG()) {
       if ((StyleSVG()->mStrokeLinecap !=
              aOldStyleContext->PeekStyleSVG()->mStrokeLinecap) &&
-          element->Tag() == nsGkAtoms::path) {
+          element->IsSVGElement(nsGkAtoms::path)) {
         // If the stroke-linecap changes to or from "butt" then our element
         // needs to update its cached Moz2D Path, since SVGPathData::BuildPath
         // decides whether or not to insert little lines into the path for zero

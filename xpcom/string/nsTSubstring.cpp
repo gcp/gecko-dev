@@ -18,9 +18,7 @@ nsTSubstring_CharT::nsTSubstring_CharT(char_type* aData, size_type aLength,
 {
   if (aFlags & F_OWNED) {
     STRING_STAT_INCREMENT(Adopt);
-#ifdef NS_BUILD_REFCNT_LOGGING
-    NS_LogCtor(mData, "StringAdopt", 1);
-#endif
+    MOZ_LOG_CTOR(mData, "StringAdopt", 1);
   }
 }
 #endif /* XPCOM_STRING_CONSTRUCTOR_OUT_OF_LINE */
@@ -460,11 +458,9 @@ nsTSubstring_CharT::Adopt(char_type* aData, size_type aLength)
     SetDataFlags(F_TERMINATED | F_OWNED);
 
     STRING_STAT_INCREMENT(Adopt);
-#ifdef NS_BUILD_REFCNT_LOGGING
     // Treat this as construction of a "StringAdopt" object for leak
     // tracking purposes.
-    NS_LogCtor(mData, "StringAdopt", 1);
-#endif // NS_BUILD_REFCNT_LOGGING
+    MOZ_LOG_CTOR(mData, "StringAdopt", 1);
   } else {
     SetIsVoid(true);
   }
@@ -546,6 +542,16 @@ void
 nsTSubstring_CharT::ReplaceASCII(index_type aCutStart, size_type aCutLength,
                                  const char* aData, size_type aLength)
 {
+  if (!ReplaceASCII(aCutStart, aCutLength, aData, aLength, mozilla::fallible)) {
+    AllocFailed(Length() - aCutLength + 1);
+  }
+}
+
+bool
+nsTSubstring_CharT::ReplaceASCII(index_type aCutStart, size_type aCutLength,
+                                 const char* aData, size_type aLength,
+                                 const fallible_t& aFallible)
+{
   if (aLength == size_type(-1)) {
     aLength = strlen(aData);
   }
@@ -555,16 +561,22 @@ nsTSubstring_CharT::ReplaceASCII(index_type aCutStart, size_type aCutLength,
 #ifdef CharT_is_char
   if (IsDependentOn(aData, aData + aLength)) {
     nsTAutoString_CharT temp(aData, aLength);
-    Replace(aCutStart, aCutLength, temp);
-    return;
+    return Replace(aCutStart, aCutLength, temp, aFallible);
   }
 #endif
 
   aCutStart = XPCOM_MIN(aCutStart, Length());
 
-  if (ReplacePrep(aCutStart, aCutLength, aLength) && aLength > 0) {
+  bool ok = ReplacePrep(aCutStart, aCutLength, aLength);
+  if (!ok) {
+    return false;
+  }
+
+  if (aLength > 0) {
     char_traits::copyASCII(mData + aCutStart, aData, aLength);
   }
+
+  return true;
 }
 
 void

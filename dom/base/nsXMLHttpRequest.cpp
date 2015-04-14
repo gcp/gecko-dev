@@ -275,9 +275,9 @@ NS_IMPL_ADDREF_INHERITED(nsXMLHttpRequestUpload, nsXHREventTarget)
 NS_IMPL_RELEASE_INHERITED(nsXMLHttpRequestUpload, nsXHREventTarget)
 
 /* virtual */ JSObject*
-nsXMLHttpRequestUpload::WrapObject(JSContext* aCx)
+nsXMLHttpRequestUpload::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return XMLHttpRequestUploadBinding::Wrap(aCx, this);
+  return XMLHttpRequestUploadBinding::Wrap(aCx, this, aGivenProto);
 }
 
 /////////////////////////////////////////////
@@ -1795,6 +1795,19 @@ nsXMLHttpRequest::Open(const nsACString& inMethod, const nsACString& url,
   return rv;
 }
 
+void
+nsXMLHttpRequest::PopulateNetworkInterfaceId()
+{
+  if (mNetworkInterfaceId.IsEmpty()) {
+    return;
+  }
+  nsCOMPtr<nsIHttpChannelInternal> channel(do_QueryInterface(mChannel));
+  if (!channel) {
+    return;
+  }
+  channel->SetNetworkInterfaceId(mNetworkInterfaceId);
+}
+
 /*
  * "Copy" from a stream.
  */
@@ -2044,11 +2057,15 @@ nsXMLHttpRequest::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
           }
           nsCOMPtr<nsIFile> jarFile;
           jarChannel->GetJarFile(getter_AddRefs(jarFile));
-          rv = mArrayBufferBuilder.mapToFileInPackage(file, jarFile);
-          if (NS_WARN_IF(NS_FAILED(rv))) {
+          if (!jarFile) {
             mIsMappedArrayBuffer = false;
           } else {
-            channel->SetContentType(NS_LITERAL_CSTRING("application/mem-mapped"));
+            rv = mArrayBufferBuilder.mapToFileInPackage(file, jarFile);
+            if (NS_WARN_IF(NS_FAILED(rv))) {
+              mIsMappedArrayBuffer = false;
+            } else {
+              channel->SetContentType(NS_LITERAL_CSTRING("application/mem-mapped"));
+            }
           }
         }
       }
@@ -2462,7 +2479,7 @@ GetRequestBody(nsIVariant* aBody, nsIInputStream** aResult, uint64_t* aContentLe
     rv = aBody->GetAsInterface(&iid, getter_AddRefs(supports));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsMemory::Free(iid);
+    free(iid);
 
     // document?
     nsCOMPtr<nsIDOMDocument> doc = do_QueryInterface(supports);
@@ -2607,6 +2624,8 @@ nsresult
 nsXMLHttpRequest::Send(nsIVariant* aVariant, const Nullable<RequestBody>& aBody)
 {
   NS_ENSURE_TRUE(mPrincipal, NS_ERROR_NOT_INITIALIZED);
+
+  PopulateNetworkInterfaceId();
 
   nsresult rv = CheckInnerWindowCorrectness();
   NS_ENSURE_SUCCESS(rv, rv);
@@ -3381,7 +3400,7 @@ nsXMLHttpRequest::ChangeState(uint32_t aState, bool aBroadcast)
  * Simple helper class that just forwards the redirect callback back
  * to the nsXMLHttpRequest.
  */
-class AsyncVerifyRedirectCallbackForwarder MOZ_FINAL : public nsIAsyncVerifyRedirectCallback
+class AsyncVerifyRedirectCallbackForwarder final : public nsIAsyncVerifyRedirectCallback
 {
 public:
   explicit AsyncVerifyRedirectCallbackForwarder(nsXMLHttpRequest* xhr)
@@ -3393,7 +3412,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS(AsyncVerifyRedirectCallbackForwarder)
 
   // nsIAsyncVerifyRedirectCallback implementation
-  NS_IMETHOD OnRedirectVerifyCallback(nsresult result) MOZ_OVERRIDE
+  NS_IMETHOD OnRedirectVerifyCallback(nsresult result) override
   {
     mXHR->OnRedirectVerifyCallback(result);
 

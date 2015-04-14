@@ -115,6 +115,7 @@ OnSharedPreferenceChangeListener
     private static final String PREFS_CRASHREPORTER_ENABLED = "datareporting.crashreporter.submitEnabled";
     private static final String PREFS_MENU_CHAR_ENCODING = "browser.menu.showCharacterEncoding";
     private static final String PREFS_MP_ENABLED = "privacy.masterpassword.enabled";
+    private static final String PREFS_LOGIN_MANAGE = NON_PREF_PREFIX + "signon.manage";
     private static final String PREFS_UPDATER_AUTODOWNLOAD = "app.update.autodownload";
     private static final String PREFS_UPDATER_URL = "app.update.url.android";
     private static final String PREFS_GEO_REPORTING = NON_PREF_PREFIX + "app.geo.reportdata";
@@ -134,6 +135,8 @@ OnSharedPreferenceChangeListener
 
     public static final String PREFS_RESTORE_SESSION = NON_PREF_PREFIX + "restoreSession3";
     public static final String PREFS_SUGGESTED_SITES = NON_PREF_PREFIX + "home_suggested_sites";
+    public static final String PREFS_TAB_QUEUE = NON_PREF_PREFIX + "tab_queue";
+    public static final String PREFS_CUSTOMIZE_SCREEN = NON_PREF_PREFIX + "customize_screen";
 
     // These values are chosen to be distinct from other Activity constants.
     private static final int REQUEST_CODE_PREF_SCREEN = 5;
@@ -398,13 +401,6 @@ OnSharedPreferenceChangeListener
             }
         });
 
-        if (Versions.feature14Plus) {
-            final ActionBar actionBar = getActionBar();
-            if (actionBar != null) {
-                actionBar.setHomeButtonEnabled(true);
-            }
-        }
-
         // N.B., if we ever need to redisplay the locale selection UI without
         // just finishing and recreating the activity, right here we'll need to
         // capture EXTRA_SHOW_FRAGMENT_TITLE from the intent and store the title ID.
@@ -660,6 +656,10 @@ OnSharedPreferenceChangeListener
                 } else if (pref instanceof PanelsPreferenceCategory) {
                     mPanelsPreferenceCategory = (PanelsPreferenceCategory) pref;
                 }
+                if((AppConstants.MOZ_ANDROID_TAB_QUEUE && AppConstants.NIGHTLY_BUILD) && (PREFS_CUSTOMIZE_SCREEN.equals(key))) {
+                    // Only change the customize pref screen summary on nightly builds with the tab queue build flag.
+                    pref.setSummary(getString(R.string.pref_category_customize_alt_summary));
+                }
                 setupPreferences((PreferenceGroup) pref, prefs);
             } else {
                 pref.setOnPreferenceChangeListener(this);
@@ -668,6 +668,10 @@ OnSharedPreferenceChangeListener
                     preferences.removePreference(pref);
                     i--;
                     continue;
+                } else if (!AppConstants.NIGHTLY_BUILD &&
+                           PREFS_LOGIN_MANAGE.equals(key)) {
+                    preferences.removePreference(pref);
+                    i--;
                 } else if (AppConstants.RELEASE_BUILD &&
                            PREFS_DISPLAY_REFLOW_ON_ZOOM.equals(key)) {
                     // Remove UI for reflow on release builds.
@@ -747,6 +751,11 @@ OnSharedPreferenceChangeListener
                         i--;
                         continue;
                     }
+                } else if (!(AppConstants.MOZ_ANDROID_TAB_QUEUE && AppConstants.NIGHTLY_BUILD) && PREFS_TAB_QUEUE.equals(key)) {
+                    // Only show tab queue pref on nightly builds with the tab queue build flag.
+                    preferences.removePreference(pref);
+                    i--;
+                    continue;
                 }
 
                 // Some Preference UI elements are not actually preferences,
@@ -1079,7 +1088,7 @@ OnSharedPreferenceChangeListener
 
         // Send Gecko-side pref changes to Gecko
         if (isGeckoPref(prefName)) {
-            PrefsHelper.setPref(prefName, newValue);
+            PrefsHelper.setPref(prefName, newValue, true /* flush */);
         }
 
         if (preference instanceof ListPreference) {
@@ -1182,6 +1191,7 @@ OnSharedPreferenceChangeListener
                                 JSONObject jsonPref = new JSONObject();
                                 try {
                                     jsonPref.put("name", PREFS_MP_ENABLED);
+                                    jsonPref.put("flush", true);
                                     jsonPref.put("type", "string");
                                     jsonPref.put("value", input1.getText().toString());
 

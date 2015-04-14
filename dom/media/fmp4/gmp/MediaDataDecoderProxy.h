@@ -8,8 +8,6 @@
 #define MediaDataDecoderProxy_h_
 
 #include "PlatformDecoderModule.h"
-#include "mp4_demuxer/DecoderData.h"
-#include "nsAutoPtr.h"
 #include "nsRefPtr.h"
 #include "nsThreadUtils.h"
 #include "nscore.h"
@@ -19,19 +17,19 @@ namespace mozilla {
 class InputTask : public nsRunnable {
 public:
   InputTask(MediaDataDecoder* aDecoder,
-            mp4_demuxer::MP4Sample* aSample)
+            MediaRawData* aSample)
    : mDecoder(aDecoder)
    , mSample(aSample)
   {}
 
   NS_IMETHOD Run() {
-    mDecoder->Input(mSample.forget());
+    mDecoder->Input(mSample);
     return NS_OK;
   }
 
 private:
   nsRefPtr<MediaDataDecoder> mDecoder;
-  nsAutoPtr<mp4_demuxer::MP4Sample> mSample;
+  nsRefPtr<MediaRawData> mSample;
 };
 
 class InitTask : public nsRunnable {
@@ -88,31 +86,31 @@ class MediaDataDecoderProxy;
 
 class MediaDataDecoderCallbackProxy : public MediaDataDecoderCallback {
 public:
-  explicit MediaDataDecoderCallbackProxy(MediaDataDecoderProxy* aProxyDecoder, MediaDataDecoderCallback* aCallback)
+  MediaDataDecoderCallbackProxy(MediaDataDecoderProxy* aProxyDecoder, MediaDataDecoderCallback* aCallback)
    : mProxyDecoder(aProxyDecoder)
    , mProxyCallback(aCallback)
   {
   }
 
-  virtual void Output(MediaData* aData) MOZ_OVERRIDE {
+  virtual void Output(MediaData* aData) override {
     mProxyCallback->Output(aData);
   }
 
-  virtual void Error() MOZ_OVERRIDE;
+  virtual void Error() override;
 
-  virtual void InputExhausted() MOZ_OVERRIDE {
+  virtual void InputExhausted() override {
     mProxyCallback->InputExhausted();
   }
 
-  virtual void DrainComplete() MOZ_OVERRIDE {
+  virtual void DrainComplete() override {
     mProxyCallback->DrainComplete();
   }
 
-  virtual void NotifyResourcesStatusChanged() MOZ_OVERRIDE {
+  virtual void NotifyResourcesStatusChanged() override {
     mProxyCallback->NotifyResourcesStatusChanged();
   }
 
-  virtual void ReleaseMediaResources() MOZ_OVERRIDE {
+  virtual void ReleaseMediaResources() override {
     mProxyCallback->ReleaseMediaResources();
   }
 
@@ -156,11 +154,11 @@ public:
   // Init and Shutdown run synchronously on the proxy thread, all others are
   // asynchronously and responded to via the MediaDataDecoderCallback.
   // Note: the nsresults returned by the proxied decoder are lost.
-  virtual nsresult Init() MOZ_OVERRIDE;
-  virtual nsresult Input(mp4_demuxer::MP4Sample* aSample) MOZ_OVERRIDE;
-  virtual nsresult Flush() MOZ_OVERRIDE;
-  virtual nsresult Drain() MOZ_OVERRIDE;
-  virtual nsresult Shutdown() MOZ_OVERRIDE;
+  virtual nsresult Init() override;
+  virtual nsresult Input(MediaRawData* aSample) override;
+  virtual nsresult Flush() override;
+  virtual nsresult Drain() override;
+  virtual nsresult Shutdown() override;
 
   // Called by MediaDataDecoderCallbackProxy.
   void FlushComplete();

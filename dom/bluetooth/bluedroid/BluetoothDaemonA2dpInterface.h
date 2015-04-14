@@ -130,7 +130,7 @@ protected:
   static BluetoothA2dpNotificationHandler* sNotificationHandler;
 };
 
-class BluetoothDaemonA2dpInterface MOZ_FINAL
+class BluetoothDaemonA2dpInterface final
   : public BluetoothA2dpInterface
 {
   class CleanupResultHandler;
@@ -155,6 +155,7 @@ public:
 private:
   void DispatchError(BluetoothA2dpResultHandler* aRes,
                      BluetoothStatus aStatus);
+  void DispatchError(BluetoothA2dpResultHandler* aRes, nsresult aRv);
 
   BluetoothDaemonA2dpModule* mModule;
 };

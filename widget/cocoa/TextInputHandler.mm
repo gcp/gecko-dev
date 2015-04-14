@@ -21,6 +21,9 @@
 #include "nsCocoaUtils.h"
 #include "WidgetUtils.h"
 #include "nsPrintfCString.h"
+#include "mozilla/unused.h"
+#include "mozilla/dom/ContentParent.h"
+#include "ComplexTextInputPanel.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -2226,6 +2229,7 @@ TextInputHandler::DoCommandBySelector(const char* aSelector)
  ******************************************************************************/
 
 bool IMEInputHandler::sStaticMembersInitialized = false;
+bool IMEInputHandler::sCachedIsForRTLLangage = false;
 CFStringRef IMEInputHandler::sLatestIMEOpenedModeInputSourceID = nullptr;
 IMEInputHandler* IMEInputHandler::sFocusedIMEHandler = nullptr;
 
@@ -2314,6 +2318,20 @@ IMEInputHandler::OnCurrentTextInputSourceChange(CFNotificationCenterRef aCenter,
     sLastTIS = newTIS;
   }
 #endif // #ifdef PR_LOGGING
+
+  /**
+   * When the direction is changed, all the children are notified.
+   * No need to treat the initial case separately because it is covered
+   * by the general case (sCachedIsForRTLLangage is initially false)
+   */
+  if (sCachedIsForRTLLangage != tis.IsForRTLLanguage()) {
+    nsTArray<dom::ContentParent*> children;
+    dom::ContentParent::GetAll(children);
+    for (uint32_t i = 0; i < children.Length(); i++) {
+      unused << children[i]->SendBidiKeyboardNotify(tis.IsForRTLLanguage());
+    }
+    sCachedIsForRTLLangage = tis.IsForRTLLanguage();
+  }
 }
 
 // static
@@ -3364,6 +3382,10 @@ IMEInputHandler::OnDestroyWidget(nsChildView* aDestroyingWidget)
   // created by another widget/nsChildView.
   if (sFocusedIMEHandler && sFocusedIMEHandler != this) {
     sFocusedIMEHandler->OnDestroyWidget(aDestroyingWidget);
+  }
+
+  if (!TextInputHandlerBase::OnDestroyWidget(aDestroyingWidget)) {
+    return false;
   }
 
   if (IsIMEComposing()) {

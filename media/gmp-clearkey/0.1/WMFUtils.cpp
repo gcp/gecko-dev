@@ -40,6 +40,8 @@ void LOG(const char* format, ...)
 DEFINE_GUID(CLSID_CMSAACDecMFT, 0x32D186A7, 0x218F, 0x4C75, 0x88, 0x76, 0xDD, 0x77, 0x27, 0x3A, 0x89, 0x99);
 #endif
 
+DEFINE_GUID(CLSID_CMSH264DecMFT, 0x62CE7E72, 0x4C71, 0x4d20, 0xB1, 0x5D, 0x45, 0x28, 0x31, 0xA8, 0x7D, 0x9D);
+
 namespace wmf {
 
 
@@ -55,7 +57,7 @@ LinkMfplat()
   static bool sInitOk = false;
   if (!sInitDone) {
     sInitDone = true;
-    auto handle = GetModuleHandle("mfplat.dll");
+    auto handle = GetModuleHandleA("mfplat.dll");
 #define MFPLAT_FUNC(_func) \
     if (!(_func = (decltype(_func))(GetProcAddress(handle, #_func)))) { \
       return false; \
@@ -73,10 +75,12 @@ EnsureLibs()
   static bool sInitDone = false;
   static bool sInitOk = false;
   if (!sInitDone) {
+    // Note: For AAC decoding, we need to use msauddecmft.dll on Win8,
+    // and msmpeg2adec.dll on earlier Windows. So if we have at least
+    // one of these, assume we can decode.
     sInitOk = LinkMfplat() &&
-      !!GetModuleHandle("msauddecmft.dll") &&
-      !!GetModuleHandle("msmpeg2adec.dll") &&
-      !!GetModuleHandle("msmpeg2vdec.dll");
+      (!!GetModuleHandleA("msauddecmft.dll") || !!GetModuleHandleA("msmpeg2adec.dll")) &&
+      !!GetModuleHandleA("msmpeg2vdec.dll");
     sInitDone = true;
   }
   return sInitOk;
@@ -183,7 +187,7 @@ CreateMFT(const CLSID& clsid,
           const char* aDllName,
           CComPtr<IMFTransform>& aOutMFT)
 {
-  HMODULE module = ::GetModuleHandle(aDllName);
+  HMODULE module = ::GetModuleHandleA(aDllName);
   if (!module) {
     LOG("Failed to get %S\n", aDllName);
     return E_FAIL;

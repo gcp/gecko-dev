@@ -369,6 +369,42 @@ void TableTicker::StreamJSObject(JSStreamWriter& b)
   b.EndObject();
 }
 
+void TableTicker::FlushOnJSShutdown(JSRuntime* aRuntime)
+{
+  SetPaused(true);
+
+  {
+    mozilla::MutexAutoLock lock(*sRegisteredThreadsMutex);
+
+    for (size_t i = 0; i < sRegisteredThreads->size(); i++) {
+      // Thread not being profiled, skip it.
+      if (!sRegisteredThreads->at(i)->Profile() ||
+          sRegisteredThreads->at(i)->IsPendingDelete()) {
+        continue;
+      }
+
+      // Thread not profiling the runtime that's going away, skip it.
+      if (sRegisteredThreads->at(i)->Profile()->GetPseudoStack()->mRuntime != aRuntime) {
+        continue;
+      }
+
+      MutexAutoLock lock(*sRegisteredThreads->at(i)->Profile()->GetMutex());
+      sRegisteredThreads->at(i)->Profile()->FlushSamplesAndMarkers();
+    }
+  }
+
+  SetPaused(false);
+}
+
+void PseudoStack::flushSamplerOnJSShutdown()
+{
+  MOZ_ASSERT(mRuntime);
+  TableTicker* t = tlsTicker.get();
+  if (t) {
+    t->FlushOnJSShutdown(mRuntime);
+  }
+}
+
 // END SaveProfileTask et al
 ////////////////////////////////////////////////////////////////////////
 
@@ -486,14 +522,24 @@ void mergeStacksIntoProfile(ThreadProfile& aProfile, TickSample* aSample, Native
   // like the native stack, the JS stack is iterated youngest-to-oldest and we
   // need to iterate oldest-to-youngest when adding entries to aProfile.
 
-  uint32_t startBufferGen = aProfile.bufferGeneration();
+  // Synchronous sampling reports an invalid buffer generation to
+  // ProfilingFrameIterator to avoid incorrectly resetting the generation of
+  // sampled JIT entries inside the JS engine. See note below concerning 'J'
+  // entries.
+  uint32_t startBufferGen;
+  if (aSample->isSamplingCurrentThread) {
+    startBufferGen = UINT32_MAX;
+  } else {
+    startBufferGen = aProfile.bufferGeneration();
+  }
   uint32_t jsCount = 0;
   JS::ProfilingFrameIterator::Frame jsFrames[1000];
-  {
+  // Only walk jit stack if profiling frame iterator is turned on.
+  if (pseudoStack->mRuntime && JS::IsProfilingEnabledForRuntime(pseudoStack->mRuntime)) {
     AutoWalkJSStack autoWalkJSStack;
     const uint32_t maxFrames = mozilla::ArrayLength(jsFrames);
 
-    if (aSample && pseudoStack->mRuntime && autoWalkJSStack.walkAllowed) {
+    if (aSample && autoWalkJSStack.walkAllowed) {
       JS::ProfilingFrameIterator::RegisterState registerState;
       registerState.pc = aSample->pc;
       registerState.sp = aSample->sp;
@@ -505,11 +551,18 @@ void mergeStacksIntoProfile(ThreadProfile& aProfile, TickSample* aSample, Native
                                         registerState,
                                         startBufferGen);
       for (; jsCount < maxFrames && !jsIter.done(); ++jsIter) {
-        uint32_t extracted = jsIter.extractStack(jsFrames, jsCount, maxFrames);
-        MOZ_ASSERT(extracted <= (maxFrames - jsCount));
-        jsCount += extracted;
-        if (jsCount == maxFrames)
-          break;
+        // See note below regarding 'J' entries.
+        if (aSample->isSamplingCurrentThread || jsIter.isAsmJS()) {
+          uint32_t extracted = jsIter.extractStack(jsFrames, jsCount, maxFrames);
+          jsCount += extracted;
+          if (jsCount == maxFrames)
+            break;
+        } else {
+          mozilla::Maybe<JS::ProfilingFrameIterator::Frame> frame =
+            jsIter.getPhysicalFrameWithoutLabel();
+          if (frame.isSome())
+            jsFrames[jsCount++] = frame.value();
+        }
       }
     }
   }
@@ -564,6 +617,17 @@ void mergeStacksIntoProfile(ThreadProfile& aProfile, TickSample* aSample, Native
     if (nativeIndex >= 0)
       nativeStackAddr = (uint8_t *) aNativeStack.sp_array[nativeIndex];
 
+    // If there's a native stack entry which has the same SP as a
+    // pseudo stack entry, pretend we didn't see the native stack
+    // entry.  Ditto for a native stack entry which has the same SP as
+    // a JS stack entry.  In effect this means pseudo or JS entries
+    // trump conflicting native entries.
+    if (nativeStackAddr && (pseudoStackAddr == nativeStackAddr || jsStackAddr == nativeStackAddr)) {
+      nativeStackAddr = nullptr;
+      nativeIndex--;
+      MOZ_ASSERT(pseudoStackAddr || jsStackAddr);
+    }
+
     // Sanity checks.
     MOZ_ASSERT_IF(pseudoStackAddr, pseudoStackAddr != jsStackAddr &&
                                    pseudoStackAddr != nativeStackAddr);
@@ -584,12 +648,27 @@ void mergeStacksIntoProfile(ThreadProfile& aProfile, TickSample* aSample, Native
     // Check to see if JS jit stack frame is top-most
     if (jsStackAddr > nativeStackAddr) {
       MOZ_ASSERT(jsIndex >= 0);
-      addDynamicTag(aProfile, 'c', jsFrames[jsIndex].label);
+      const JS::ProfilingFrameIterator::Frame& jsFrame = jsFrames[jsIndex];
 
-      // Stringifying optimization information is delayed until streaming
+      // Stringifying non-asm.js JIT frames is delayed until streaming
       // time. To re-lookup the entry in the JitcodeGlobalTable, we need to
       // store the JIT code address ('J') in the circular buffer.
-      if (jsFrames[jsIndex].hasTrackedOptimizations) {
+      //
+      // Note that we cannot do this when we are sychronously sampling the
+      // current thread; that is, when called from profiler_get_backtrace. The
+      // captured backtrace is usually externally stored for an indeterminate
+      // amount of time, such as in nsRefreshDriver. Problematically, the
+      // stored backtrace may be alive across a GC during which the profiler
+      // itself is disabled. In that case, the JS engine is free to discard
+      // its JIT code. This means that if we inserted such 'J' entries into
+      // the buffer, nsRefreshDriver would now be holding on to a backtrace
+      // with stale JIT code return addresses.
+      if (aSample->isSamplingCurrentThread ||
+          jsFrame.kind == JS::ProfilingFrameIterator::Frame_AsmJS) {
+        addDynamicTag(aProfile, 'c', jsFrame.label);
+      } else {
+        MOZ_ASSERT(jsFrame.kind == JS::ProfilingFrameIterator::Frame_Ion ||
+                   jsFrame.kind == JS::ProfilingFrameIterator::Frame_Baseline);
         aProfile.addTag(ProfileEntry('J', jsFrames[jsIndex].returnAddress));
       }
 
@@ -605,11 +684,13 @@ void mergeStacksIntoProfile(ThreadProfile& aProfile, TickSample* aSample, Native
     nativeIndex--;
   }
 
-  MOZ_ASSERT(aProfile.bufferGeneration() >= startBufferGen);
-  uint32_t lapCount = aProfile.bufferGeneration() - startBufferGen;
-
   // Update the JS runtime with the current profile sample buffer generation.
-  if (pseudoStack->mRuntime) {
+  //
+  // Do not do this for synchronous sampling, which create their own
+  // ProfileBuffers.
+  if (!aSample->isSamplingCurrentThread && pseudoStack->mRuntime) {
+    MOZ_ASSERT(aProfile.bufferGeneration() >= startBufferGen);
+    uint32_t lapCount = aProfile.bufferGeneration() - startBufferGen;
     JS::UpdateJSRuntimeProfilerSampleBufferGen(pseudoStack->mRuntime,
                                                aProfile.bufferGeneration(),
                                                lapCount);
@@ -884,33 +965,3 @@ SyncProfile* TableTicker::GetBacktrace()
 
   return profile;
 }
-
-static void print_callback(const ProfileEntry& entry, const char* tagStringData)
-{
-  switch (entry.getTagName()) {
-    case 's':
-    case 'c':
-      printf_stderr("  %s\n", tagStringData);
-  }
-}
-
-void mozilla_sampler_print_location1()
-{
-  if (!stack_key_initialized)
-    profiler_init(nullptr);
-
-  SyncProfile* syncProfile = NewSyncProfile();
-  if (!syncProfile) {
-    return;
-  }
-
-  syncProfile->BeginUnwind();
-  doSampleStackTrace(*syncProfile, nullptr, false);
-  syncProfile->EndUnwind();
-
-  printf_stderr("Backtrace:\n");
-  syncProfile->IterateTags(print_callback);
-  delete syncProfile;
-}
-
-

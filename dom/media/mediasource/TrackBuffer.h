@@ -16,6 +16,7 @@
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "nscore.h"
+#include "TimeUnits.h"
 
 namespace mozilla {
 
@@ -29,7 +30,7 @@ class TimeRanges;
 
 } // namespace dom
 
-class TrackBuffer MOZ_FINAL {
+class TrackBuffer final {
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TrackBuffer);
 
@@ -75,14 +76,13 @@ public:
   // segment has successfully initialized by setting mHas{Audio,Video}..
   bool IsReady();
 
+  bool IsWaitingOnCDMResource();
+
   // Returns true if any of the decoders managed by this track buffer
   // contain aTime in their buffered ranges.
   bool ContainsTime(int64_t aTime, int64_t aTolerance);
 
   void BreakCycles();
-
-  // Call ResetDecode() on each decoder in mDecoders.
-  void ResetDecode();
 
   // Run MSE Reset Parser State Algorithm.
   // 3.5.2 Reset Parser State
@@ -99,7 +99,8 @@ public:
   // Implementation is only partial, we can only trim a buffer.
   // Returns true if data was evicted.
   // Times are in microseconds.
-  bool RangeRemoval(int64_t aStart, int64_t aEnd);
+  bool RangeRemoval(mozilla::media::Microseconds aStart,
+                    mozilla::media::Microseconds aEnd);
 
   // Abort any pending appendBuffer by rejecting any pending promises.
   void AbortAppendData();
@@ -186,10 +187,6 @@ private:
   // Access protected by mParentDecoder's monitor.
   nsTArray<nsRefPtr<SourceBufferDecoder>> mInitializedDecoders;
 
-  // Decoders which are waiting on a Content Decryption Module to be able to
-  // finish ReadMetadata.
-  nsTArray<nsRefPtr<SourceBufferDecoder>> mWaitingDecoders;
-
   // The decoder that the owning SourceBuffer is currently appending data to.
   // Modified on the main thread only.
   nsRefPtr<SourceBufferDecoder> mCurrentDecoder;
@@ -206,6 +203,9 @@ private:
   // The timestamp offset used by our current decoder, in microseconds.
   int64_t mLastTimestampOffset;
   int64_t mAdjustedTimestamp;
+
+  // True if at least one of our decoders has encrypted content.
+  bool mIsWaitingOnCDM;
 
   // Set when the first decoder used by this TrackBuffer is initialized.
   // Protected by mParentDecoder's monitor.

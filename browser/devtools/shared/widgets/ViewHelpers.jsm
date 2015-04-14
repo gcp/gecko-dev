@@ -369,10 +369,6 @@ ViewHelpers.L10N.prototype = {
     if (isNaN(aNumber) || aNumber == null) {
       return "0";
     }
-    // Remove {n} trailing decimals. Can't use toFixed(n) because
-    // toLocaleString converts the number to a string. Also can't use
-    // toLocaleString(, { maximumFractionDigits: n }) because it's not
-    // implemented on OS X (bug 368838). Gross.
     let localized = aNumber.toLocaleString(); // localize
 
     // If no grouping or decimal separators are available, bail out, because
@@ -381,9 +377,10 @@ ViewHelpers.L10N.prototype = {
       return localized;
     }
 
-    let padded = localized + new Array(aDecimals).join("0"); // pad with zeros
-    let match = padded.match("([^]*?\\d{" + aDecimals + "})\\d*$");
-    return match.pop();
+    return aNumber.toLocaleString(undefined, {
+      maximumFractionDigits: aDecimals,
+      minimumFractionDigits: aDecimals
+    });
   }
 };
 
@@ -393,7 +390,8 @@ ViewHelpers.L10N.prototype = {
  *   let prefs = new ViewHelpers.Prefs("root.path.to.branch", {
  *     myIntPref: ["Int", "leaf.path.to.my-int-pref"],
  *     myCharPref: ["Char", "leaf.path.to.my-char-pref"],
- *     myJsonPref: ["Json", "leaf.path.to.my-json-pref"]
+ *     myJsonPref: ["Json", "leaf.path.to.my-json-pref"],
+ *     myFloatPref: ["Float", "leaf.path.to.my-float-pref"]
  *     ...
  *   });
  *
@@ -480,8 +478,8 @@ ViewHelpers.Prefs.prototype = {
 
   /**
    * Maps a property name to a pref, defining lazy getters and setters.
-   * Supported types are "Bool", "Char", "Int" and "Json" (which is basically
-   * just sugar for "Char" using the standard JSON serializer).
+   * Supported types are "Bool", "Char", "Int", "Float" (sugar around "Char" type and casting),
+   * and "Json" (which is basically just sugar for "Char" using the standard JSON serializer).
    *
    * @param string aAccessorName
    * @param string aType
@@ -495,6 +493,10 @@ ViewHelpers.Prefs.prototype = {
     }
     if (aType == "Json") {
       this._map(aAccessorName, "Char", aPrefsRoot, aPrefName, { in: JSON.parse, out: JSON.stringify });
+      return;
+    }
+    if (aType == "Float") {
+      this._map(aAccessorName, "Char", aPrefsRoot, aPrefName, { in: Number.parseFloat, out: (n) => n + ""});
       return;
     }
 

@@ -19,6 +19,7 @@
 #include <stagefright/foundation/AMessage.h>
 #include <stagefright/foundation/ALooper.h>
 #include "media/openmax/OMX_Audio.h"
+#include "MediaData.h"
 
 #include <android/log.h>
 #define GADM_LOG(...) __android_log_print(ANDROID_LOG_DEBUG, "GonkAudioDecoderManager", __VA_ARGS__)
@@ -51,7 +52,7 @@ GonkAudioDecoderManager::GonkAudioDecoderManager(
   mUserData.AppendElements(aConfig.audio_specific_config->Elements(),
                            aConfig.audio_specific_config->Length());
   // Pass through mp3 without applying an ADTS header.
-  if (strcmp(aConfig.mime_type, "audio/mp4a-latm") != 0) {
+  if (!aConfig.mime_type.EqualsLiteral("audio/mp4a-latm")) {
       mUseAdts = false;
   }
 }
@@ -72,8 +73,13 @@ GonkAudioDecoderManager::Init(MediaDataDecoderCallback* aCallback)
   mLooper->setName("GonkAudioDecoderManager");
   mLooper->start();
 
-  mDecoder = MediaCodecProxy::CreateByType(mLooper, "audio/mp4a-latm", false, false, nullptr);
+  mDecoder = MediaCodecProxy::CreateByType(mLooper, "audio/mp4a-latm", false, nullptr);
   if (!mDecoder.get()) {
+    return nullptr;
+  }
+  if (!mDecoder->AskMediaCodecAndWait())
+  {
+    mDecoder = nullptr;
     return nullptr;
   }
   sp<AMessage> format = new AMessage;
@@ -100,16 +106,16 @@ GonkAudioDecoderManager::Init(MediaDataDecoderCallback* aCallback)
 }
 
 status_t
-GonkAudioDecoderManager::SendSampleToOMX(mp4_demuxer::MP4Sample* aSample)
+GonkAudioDecoderManager::SendSampleToOMX(MediaRawData* aSample)
 {
-  return mDecoder->Input(reinterpret_cast<const uint8_t*>(aSample->data),
-                         aSample->size,
-                         aSample->composition_timestamp,
+  return mDecoder->Input(reinterpret_cast<const uint8_t*>(aSample->mData),
+                         aSample->mSize,
+                         aSample->mTime,
                          0);
 }
 
 bool
-GonkAudioDecoderManager::PerformFormatSpecificProcess(mp4_demuxer::MP4Sample* aSample)
+GonkAudioDecoderManager::PerformFormatSpecificProcess(MediaRawData* aSample)
 {
   if (aSample && mUseAdts) {
     int8_t frequency_index =

@@ -199,9 +199,10 @@ SharedFrameMetricsHelper::UpdateFromCompositorFrameMetrics(
 
   // Always abort updates if the resolution has changed. There's no use
   // in drawing at the incorrect resolution.
-  if (!FuzzyEquals(compositorMetrics.GetZoom().scale, contentMetrics.GetZoom().scale)) {
-    TILING_LOG("TILING: Aborting because resolution changed from %f to %f\n",
-        contentMetrics.GetZoom().scale, compositorMetrics.GetZoom().scale);
+  if (!FuzzyEquals(compositorMetrics.GetZoom().xScale, contentMetrics.GetZoom().xScale) ||
+      !FuzzyEquals(compositorMetrics.GetZoom().yScale, contentMetrics.GetZoom().yScale)) {
+    TILING_LOG("TILING: Aborting because resolution changed from %s to %s\n",
+        ToString(contentMetrics.GetZoom()).c_str(), ToString(compositorMetrics.GetZoom()).c_str());
     return true;
   }
 
@@ -317,23 +318,31 @@ ClientTiledLayerBuffer::GetContentType(SurfaceMode* aMode) const
 
   if (mode == SurfaceMode::SURFACE_COMPONENT_ALPHA) {
 #if defined(MOZ_GFX_OPTIMIZE_MOBILE) || defined(MOZ_WIDGET_GONK)
-     mode = SurfaceMode::SURFACE_SINGLE_CHANNEL_ALPHA;
-  }
+    mode = SurfaceMode::SURFACE_SINGLE_CHANNEL_ALPHA;
 #else
-      if (!mPaintedLayer->GetParent() ||
-          !mPaintedLayer->GetParent()->SupportsComponentAlphaChildren() ||
-          !gfxPrefs::TiledDrawTargetEnabled()) {
-        mode = SurfaceMode::SURFACE_SINGLE_CHANNEL_ALPHA;
-      } else {
-        content = gfxContentType::COLOR;
-      }
+    if (!mPaintedLayer->GetParent() ||
+        !mPaintedLayer->GetParent()->SupportsComponentAlphaChildren() ||
+        !gfxPrefs::TiledDrawTargetEnabled()) {
+      mode = SurfaceMode::SURFACE_SINGLE_CHANNEL_ALPHA;
+    } else {
+      content = gfxContentType::COLOR;
+    }
+#endif
   } else if (mode == SurfaceMode::SURFACE_OPAQUE) {
+#if defined(MOZ_GFX_OPTIMIZE_MOBILE) || defined(MOZ_WIDGET_GONK)
+    if (mResolution != 1) {
+      // If we're in low-res mode, drawing can sample from outside the visible
+      // region. Make sure that we only sample transparency if that happens.
+      mode = SurfaceMode::SURFACE_SINGLE_CHANNEL_ALPHA;
+      content = gfxContentType::COLOR_ALPHA;
+    }
+#else
     if (mPaintedLayer->MayResample()) {
       mode = SurfaceMode::SURFACE_SINGLE_CHANNEL_ALPHA;
       content = gfxContentType::COLOR_ALPHA;
     }
-  }
 #endif
+  }
 
   if (aMode) {
     *aMode = mode;
@@ -432,7 +441,7 @@ gfxShmSharedReadLock::GetReadCount() {
   return info->readCount;
 }
 
-class TileExpiry MOZ_FINAL : public nsExpirationTracker<TileClient, 3>
+class TileExpiry final : public nsExpirationTracker<TileClient, 3>
 {
   public:
     TileExpiry() : nsExpirationTracker<TileClient, 3>(1000) {}
@@ -456,7 +465,7 @@ class TileExpiry MOZ_FINAL : public nsExpirationTracker<TileClient, 3>
       sTileExpiry = nullptr;
     }
   private:
-    virtual void NotifyExpired(TileClient* aTile) MOZ_OVERRIDE
+    virtual void NotifyExpired(TileClient* aTile) override
     {
       aTile->DiscardBackBuffer();
     }
@@ -539,6 +548,18 @@ TileClient::operator=(const TileClient& o)
   return *this;
 }
 
+void
+TileClient::Dump(std::stringstream& aStream)
+{
+  aStream << "TileClient(bb=" << (TextureClient*)mBackBuffer << " fb=" << mFrontBuffer.get();
+  if (mBackBufferOnWhite) {
+    aStream << " bbow=" << mBackBufferOnWhite.get();
+  }
+  if (mFrontBufferOnWhite) {
+    aStream << " fbow=" << mFrontBufferOnWhite.get();
+  }
+  aStream << ")";
+}
 
 void
 TileClient::Flip()
@@ -855,7 +876,8 @@ ClientTiledLayerBuffer::GetSurfaceDescriptorTiles()
   }
   return SurfaceDescriptorTiles(mValidRegion, mPaintedRegion,
                                 tiles, mRetainedWidth, mRetainedHeight,
-                                mResolution, mFrameResolution.scale);
+                                mResolution, mFrameResolution.xScale,
+                                mFrameResolution.yScale);
 }
 
 void
@@ -1360,7 +1382,7 @@ ClientTiledLayerBuffer::ComputeProgressiveUpdateRegion(const nsIntRegion& aInval
   TILING_LOG("TILING %p: Progressive update stale region %s\n", mPaintedLayer, Stringify(staleRegion).c_str());
 
   LayerMetricsWrapper scrollAncestor;
-  mPaintedLayer->GetAncestorLayers(&scrollAncestor, nullptr);
+  mPaintedLayer->GetAncestorLayers(&scrollAncestor, nullptr, nullptr);
 
   // Find out the current view transform to determine which tiles to draw
   // first, and see if we should just abort this paint. Aborting is usually

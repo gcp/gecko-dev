@@ -46,6 +46,12 @@ searchbar {
   -moz-binding: url("chrome://browser/content/search/search.xml#searchbar");
 }
 
+/* Prevent shrinking the page content to 0 height and width */
+.browserStack > browser {
+  min-height: 25px;
+  min-width: 25px;
+}
+
 .browserStack > browser {
   -moz-binding: url("chrome://browser/content/tabbrowser.xml#tabbrowser-browser");
 }
@@ -881,14 +887,6 @@ toolbarbutton[type="socialmark"] {
   -moz-binding: url("chrome://browser/content/socialmarks.xml#toolbarbutton-marks");
 }
 
-toolbarbutton.badged-button > .toolbarbutton-badge-container > .toolbarbutton-icon,
-toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
-  max-width: 18px;
-}
-toolbarpaletteitem[place="palette"] > toolbarbutton.badged-button > .toolbarbutton-badge-container > .toolbarbutton-icon {
-  max-width: 32px;
-}
-
 panelview > .social-panel-frame {
   width: auto;
   height: auto;
@@ -897,6 +895,11 @@ panelview > .social-panel-frame {
 /* Translation */
 notification[value="translation"] {
   -moz-binding: url("chrome://browser/content/translation-infobar.xml#translationbar");
+}
+
+/* Loop/ Hello */
+notification[value="loop-sharing-notification"] .close-icon {
+  display: none;
 }
 
 /* Social */
@@ -910,7 +913,6 @@ chatbox {
 
 chatbox[large="true"] {
   width: 300px;
-  heigth: 272px;
 }
 
 chatbox[minimized="true"] {

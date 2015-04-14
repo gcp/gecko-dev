@@ -19,6 +19,7 @@ import org.mozilla.gecko.sync.NonObjectJSONException;
 import ch.boye.httpclientandroidlib.Header;
 import ch.boye.httpclientandroidlib.HttpEntity;
 import ch.boye.httpclientandroidlib.HttpResponse;
+import ch.boye.httpclientandroidlib.HttpStatus;
 import ch.boye.httpclientandroidlib.impl.cookie.DateParseException;
 import ch.boye.httpclientandroidlib.impl.cookie.DateUtils;
 
@@ -40,6 +41,10 @@ public class MozResponse {
 
   public boolean wasSuccessful() {
     return this.getStatusCode() == 200;
+  }
+
+  public boolean isInvalidAuthentication() {
+    return this.getStatusCode() == HttpStatus.SC_UNAUTHORIZED;
   }
 
   /**
@@ -65,7 +70,13 @@ public class MozResponse {
     if (body != null) {
       return body;
     }
-    InputStreamReader is = new InputStreamReader(this.response.getEntity().getContent());
+    final HttpEntity entity = this.response.getEntity();
+    if (entity == null) {
+      body = null;
+      return null;
+    }
+
+    InputStreamReader is = new InputStreamReader(entity.getContent());
     // Oh, Java, you are so evil.
     body = new Scanner(is).useDelimiter("\\A").next();
     return body;
@@ -166,10 +177,21 @@ public class MozResponse {
   }
 
   /**
-   * @return A number of seconds, or -1 if the 'X-Backoff' header was not
+   * @return A number of seconds, or -1 if the 'Backoff' header was not
    *         present.
    */
   public int backoffInSeconds() throws NumberFormatException {
-    return this.getIntegerHeader("x-backoff");
+    return this.getIntegerHeader("backoff");
+  }
+
+  public void logResponseBody(final String logTag) {
+    if (!Logger.LOG_PERSONAL_INFORMATION) {
+      return;
+    }
+    try {
+      Logger.pii(logTag, "Response body: " + body());
+    } catch (Throwable e) {
+      Logger.debug(logTag, "No response body.");
+    }
   }
 }

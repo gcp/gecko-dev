@@ -4,8 +4,10 @@
 
 "use strict";
 
-let Cu = Components.utils;
+const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+
 Cu.import("resource://gre/modules/Task.jsm", this);
+Cu.import("resource://testing-common/ContentTaskUtils.jsm", this);
 
 addMessageListener("content-task:spawn", function (msg) {
   let id = msg.data.id;

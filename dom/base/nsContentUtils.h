@@ -87,6 +87,7 @@ class nsIScriptGlobalObject;
 class nsIScriptSecurityManager;
 class nsIStringBundle;
 class nsIStringBundleService;
+class nsISupportsArray;
 class nsISupportsHashKey;
 class nsIURI;
 class nsIWidget;
@@ -120,7 +121,10 @@ namespace dom {
 class DocumentFragment;
 class Element;
 class EventTarget;
+class IPCDataTransfer;
 class NodeInfo;
+class nsIContentChild;
+class nsIContentParent;
 class Selection;
 class TabParent;
 } // namespace dom
@@ -361,11 +365,13 @@ public:
   /**
    * Is the HTML local name a block element?
    */
-  static bool IsHTMLBlock(nsIAtom* aLocalName);
+  static bool IsHTMLBlock(nsIContent* aContent);
 
   enum ParseHTMLIntegerResultFlags {
     eParseHTMLInteger_NoFlags               = 0,
     eParseHTMLInteger_IsPercent             = 1 << 0,
+    // eParseHTMLInteger_NonStandard is set if the string representation of the
+    // integer was not the canonical one (e.g. had extra leading '+' or '0').
     eParseHTMLInteger_NonStandard           = 1 << 1,
     eParseHTMLInteger_DidNotConsumeAllInput = 1 << 2,
     // Set if one or more error flags were set.
@@ -1657,11 +1663,11 @@ public:
    * @note this should be used for HTML5 origin determination.
    */
   static nsresult GetASCIIOrigin(nsIPrincipal* aPrincipal,
-                                 nsCString& aOrigin);
-  static nsresult GetASCIIOrigin(nsIURI* aURI, nsCString& aOrigin);
+                                 nsACString& aOrigin);
+  static nsresult GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin);
   static nsresult GetUTFOrigin(nsIPrincipal* aPrincipal,
-                               nsString& aOrigin);
-  static nsresult GetUTFOrigin(nsIURI* aURI, nsString& aOrigin);
+                               nsAString& aOrigin);
+  static nsresult GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin);
 
   /**
    * This method creates and dispatches "command" event, which implements
@@ -2285,6 +2291,10 @@ public:
                                       CallOnRemoteChildFunction aCallback,
                                       void* aArg);
 
+  static void TransferablesToIPCTransferables(nsISupportsArray* aTransferables,
+                                              nsTArray<mozilla::dom::IPCDataTransfer>& aIPC,
+                                              mozilla::dom::nsIContentChild* aChild,
+                                              mozilla::dom::nsIContentParent* aParent);
 private:
   static bool InitializeEventTable();
 

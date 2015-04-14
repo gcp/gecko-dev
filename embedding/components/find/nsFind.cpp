@@ -79,7 +79,7 @@ PR_STATIC_ASSERT(CH_SHY <= 255);
 // 5) The implementation assumes that First() and Next() are only called
 // in find-forward mode, while Last() and Prev() are used in find-backward.
 
-class nsFindContentIterator MOZ_FINAL : public nsIContentIterator
+class nsFindContentIterator final : public nsIContentIterator
 {
 public:
   explicit nsFindContentIterator(bool aFindBackward)
@@ -94,12 +94,12 @@ public:
     NS_DECL_CYCLE_COLLECTION_CLASS(nsFindContentIterator)
 
   // nsIContentIterator
-  virtual nsresult Init(nsINode* aRoot) MOZ_OVERRIDE
+  virtual nsresult Init(nsINode* aRoot) override
   {
     NS_NOTREACHED("internal error");
     return NS_ERROR_NOT_IMPLEMENTED;
   }
-  virtual nsresult Init(nsIDOMRange* aRange) MOZ_OVERRIDE
+  virtual nsresult Init(nsIDOMRange* aRange) override
   {
     NS_NOTREACHED("internal error");
     return NS_ERROR_NOT_IMPLEMENTED;
@@ -107,13 +107,13 @@ public:
   // Not a range because one of the endpoints may be anonymous.
   nsresult Init(nsIDOMNode* aStartNode, int32_t aStartOffset,
                 nsIDOMNode* aEndNode, int32_t aEndOffset);
-  virtual void First() MOZ_OVERRIDE;
-  virtual void Last() MOZ_OVERRIDE;
-  virtual void Next() MOZ_OVERRIDE;
-  virtual void Prev() MOZ_OVERRIDE;
-  virtual nsINode* GetCurrentNode() MOZ_OVERRIDE;
-  virtual bool IsDone() MOZ_OVERRIDE;
-  virtual nsresult PositionAt(nsINode* aCurNode) MOZ_OVERRIDE;
+  virtual void First() override;
+  virtual void Last() override;
+  virtual void Next() override;
+  virtual void Prev() override;
+  virtual nsINode* GetCurrentNode() override;
+  virtual bool IsDone() override;
+  virtual nsresult PositionAt(nsINode* aCurNode) override;
 
 protected:
   virtual ~nsFindContentIterator()
@@ -737,19 +737,14 @@ nsFind::NextNode(nsIDOMRange* aSearchRange,
 
 bool nsFind::IsBlockNode(nsIContent* aContent)
 {
-  if (!aContent->IsHTML()) {
-    return false;
+  if (aContent->IsAnyOfHTMLElements(nsGkAtoms::img,
+                                    nsGkAtoms::hr,
+                                    nsGkAtoms::th,
+                                    nsGkAtoms::td)) {
+    return true;
   }
 
-  nsIAtom *atom = aContent->Tag();
-
-  if (atom == nsGkAtoms::img ||
-      atom == nsGkAtoms::hr ||
-      atom == nsGkAtoms::th ||
-      atom == nsGkAtoms::td)
-    return true;
-
-  return nsContentUtils::IsHTMLBlock(atom);
+  return nsContentUtils::IsHTMLBlock(aContent);
 }
 
 bool nsFind::IsTextNode(nsIDOMNode* aNode)
@@ -778,18 +773,13 @@ bool nsFind::IsVisibleNode(nsIDOMNode *aDOMNode)
 
 bool nsFind::SkipNode(nsIContent* aContent)
 {
-  nsIAtom *atom;
-
 #ifdef HAVE_BIDI_ITERATOR
-  atom = aContent->Tag();
-
   // We may not need to skip comment nodes,
   // now that IsTextNode distinguishes them from real text nodes.
   return (aContent->IsNodeOfType(nsINode::eCOMMENT) ||
-          (aContent->IsHTML() &&
-           (atom == sScriptAtom ||
-            atom == sNoframesAtom ||
-            atom == sSelectAtom)));
+          aContent->IsAnyOfHTMLElements(sScriptAtom,
+                                        sNoframesAtom,
+                                        sSelectAtom));
 
 #else /* HAVE_BIDI_ITERATOR */
   // Temporary: eventually we will have an iterator to do this,
@@ -800,13 +790,10 @@ bool nsFind::SkipNode(nsIContent* aContent)
   nsIContent *content = aContent;
   while (content)
   {
-    atom = content->Tag();
-
     if (aContent->IsNodeOfType(nsINode::eCOMMENT) ||
-        (content->IsHTML() &&
-         (atom == nsGkAtoms::script ||
-          atom == nsGkAtoms::noframes ||
-          atom == nsGkAtoms::select)))
+        content->IsAnyOfHTMLElements(nsGkAtoms::script,
+                                     nsGkAtoms::noframes,
+                                     nsGkAtoms::select))
     {
 #ifdef DEBUG_FIND
       printf("Skipping node: ");

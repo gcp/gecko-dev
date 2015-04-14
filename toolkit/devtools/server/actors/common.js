@@ -356,6 +356,22 @@ OriginalLocation.prototype = {
 
   get generatedColumn() {
     throw new Error("Shouldn't access generatedColumn from an Originallocation");
+  },
+
+  equals: function (other) {
+    return this.originalSourceActor.url == other.originalSourceActor.url &&
+           this.originalLine === other.originalLine &&
+           (this.originalColumn === undefined ||
+            other.originalColumn === undefined ||
+            this.originalColumn === other.originalColumn);
+  },
+
+  toJSON: function () {
+    return {
+      source: this.originalSourceActor.form(),
+      line: this.originalLine,
+      column: this.originalColumn
+    };
   }
 };
 
@@ -371,11 +387,12 @@ exports.OriginalLocation = OriginalLocation;
  * @param Number column
  *        A column within the given line.
  */
-function GeneratedLocation(actor, line, column) {
+function GeneratedLocation(actor, line, column, lastColumn) {
   this._connection = actor ? actor.conn : null;
   this._actorID = actor ? actor.actorID : undefined;
   this._line = line;
   this._column = column;
+  this._lastColumn = (lastColumn !== undefined) ? lastColumn : column + 1;
 }
 
 GeneratedLocation.fromOriginalLocation = function (originalLocation) {
@@ -417,6 +434,27 @@ GeneratedLocation.prototype = {
 
   get generatedColumn() {
     return this._column;
+  },
+
+  get generatedLastColumn() {
+    return this._lastColumn;
+  },
+
+  equals: function (other) {
+    return this.generatedSourceActor.url == other.generatedSourceActor.url &&
+           this.generatedLine === other.generatedLine &&
+           (this.generatedColumn === undefined ||
+            other.generatedColumn === undefined ||
+            this.generatedColumn === other.generatedColumn);
+  },
+
+  toJSON: function () {
+    return {
+      source: this.generatedSourceActor.form(),
+      line: this.generatedLine,
+      column: this.generatedColumn,
+      lastColumn: this.generatedLastColumn
+    };
   }
 };
 

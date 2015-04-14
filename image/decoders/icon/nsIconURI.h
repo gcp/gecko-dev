@@ -4,16 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsMozIconURI_h__
-#define nsMozIconURI_h__
+#ifndef mozilla_image_decoders_icon_nsIconURI_h
+#define mozilla_image_decoders_icon_nsIconURI_h
 
 #include "nsIIconURI.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "nsIIPCSerializableURI.h"
 
-class nsMozIconURI MOZ_FINAL : public nsIMozIconURI
-                             , public nsIIPCSerializableURI
+class nsMozIconURI final : public nsIMozIconURI
+                         , public nsIIPCSerializableURI
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -40,4 +40,4 @@ protected:
                        // kStateStrings
 };
 
-#endif // nsMozIconURI_h__
+#endif // mozilla_image_decoders_icon_nsIconURI_h

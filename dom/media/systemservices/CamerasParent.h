@@ -33,14 +33,14 @@ public:
 
   //ViEExternalRenderer.
   virtual int FrameSizeChange(unsigned int w, unsigned int h,
-                              unsigned int streams) MOZ_OVERRIDE;
+                              unsigned int streams) override;
   virtual int DeliverFrame(unsigned char* buffer,
                            int size,
                            uint32_t time_stamp,
                            int64_t ntp_time,
                            int64_t render_time,
-                           void *handle) MOZ_OVERRIDE;
-  virtual bool IsTextureSupported() MOZ_OVERRIDE { return false; };
+                           void *handle) override;
+  virtual bool IsTextureSupported() override { return false; };
 
   friend CamerasParent;
 
@@ -53,17 +53,17 @@ class CamerasParent :  public PCamerasParent
 {
 public:
   //
-  virtual bool RecvAllocateCaptureDevice(const int&, const nsCString&, int *) MOZ_OVERRIDE;
-  virtual bool RecvReleaseCaptureDevice(const int&, const int &) MOZ_OVERRIDE;
-  virtual bool RecvNumberOfCaptureDevices(const int&, int* numdev) MOZ_OVERRIDE;
-  virtual bool RecvNumberOfCapabilities(const int&, const nsCString&, int*) MOZ_OVERRIDE;
+  virtual bool RecvAllocateCaptureDevice(const int&, const nsCString&, int *) override;
+  virtual bool RecvReleaseCaptureDevice(const int&, const int &) override;
+  virtual bool RecvNumberOfCaptureDevices(const int&, int* numdev) override;
+  virtual bool RecvNumberOfCapabilities(const int&, const nsCString&, int*) override;
   virtual bool RecvGetCaptureCapability(const int&, const nsCString&, const int&,
-                                        CaptureCapability*) MOZ_OVERRIDE;
-  virtual bool RecvGetCaptureDevice(const int&, const int&, nsCString*, nsCString*) MOZ_OVERRIDE;
-  virtual bool RecvStartCapture(const int&, const int&, const CaptureCapability&) MOZ_OVERRIDE;
-  virtual bool RecvStopCapture(const int&, const int&) MOZ_OVERRIDE;
-  virtual bool RecvReleaseFrame(mozilla::ipc::Shmem&&) MOZ_OVERRIDE;
-  virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+                                        CaptureCapability*) override;
+  virtual bool RecvGetCaptureDevice(const int&, const int&, nsCString*, nsCString*) override;
+  virtual bool RecvStartCapture(const int&, const int&, const CaptureCapability&) override;
+  virtual bool RecvStopCapture(const int&, const int&) override;
+  virtual bool RecvReleaseFrame(mozilla::ipc::Shmem&&) override;
+  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
   nsCOMPtr<nsIThread> GetBackgroundThread() { return mPBackgroundThread; };
 

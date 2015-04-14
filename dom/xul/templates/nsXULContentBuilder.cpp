@@ -72,14 +72,14 @@ class nsXULContentBuilder : public nsXULTemplateBuilder
 {
 public:
     // nsIXULTemplateBuilder interface
-    NS_IMETHOD CreateContents(nsIContent* aElement, bool aForceCreation) MOZ_OVERRIDE;
+    NS_IMETHOD CreateContents(nsIContent* aElement, bool aForceCreation) override;
 
     NS_IMETHOD HasGeneratedContent(nsIRDFResource* aResource,
                                    nsIAtom* aTag,
-                                   bool* aGenerated) MOZ_OVERRIDE;
+                                   bool* aGenerated) override;
 
     NS_IMETHOD GetResultForContent(nsIDOMElement* aContent,
-                                   nsIXULTemplateResult** aResult) MOZ_OVERRIDE;
+                                   nsIXULTemplateResult** aResult) override;
 
     // nsIMutationObserver interface
     NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
@@ -91,12 +91,12 @@ protected:
 
     nsXULContentBuilder();
 
-    void Traverse(nsCycleCollectionTraversalCallback& aCb) const MOZ_OVERRIDE
+    void Traverse(nsCycleCollectionTraversalCallback& aCb) const override
     {
         mSortState.Traverse(aCb);
     }
 
-    virtual void Uninit(bool aIsFinal) MOZ_OVERRIDE;
+    virtual void Uninit(bool aIsFinal) override;
 
     // Implementation methods
     nsresult
@@ -269,7 +269,7 @@ protected:
                       bool aNotify);
 
     virtual nsresult
-    RebuildAll() MOZ_OVERRIDE;
+    RebuildAll() override;
 
     // GetInsertionLocations, ReplaceMatch and SynchronizeResult are inherited
     // from nsXULTemplateBuilder
@@ -281,7 +281,7 @@ protected:
      */
     virtual bool
     GetInsertionLocations(nsIXULTemplateResult* aOldResult,
-                          nsCOMArray<nsIContent>** aLocations) MOZ_OVERRIDE;
+                          nsCOMArray<nsIContent>** aLocations) override;
 
     /**
      * Remove the content associated with aOldResult which no longer matches,
@@ -291,7 +291,7 @@ protected:
     ReplaceMatch(nsIXULTemplateResult* aOldResult,
                  nsTemplateMatch* aNewMatch,
                  nsTemplateRule* aNewMatchRule,
-                 void *aContext) MOZ_OVERRIDE;
+                 void *aContext) override;
 
     /**
      * Synchronize a result bindings with the generated content for that
@@ -299,7 +299,7 @@ protected:
      * ResultBindingChanged method.
      */
     virtual nsresult
-    SynchronizeResult(nsIXULTemplateResult* aResult) MOZ_OVERRIDE;
+    SynchronizeResult(nsIXULTemplateResult* aResult) override;
 
     /**
      * Compare a result to a content node. If the generated content for the
@@ -457,9 +457,9 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
 
         PR_LOG(gXULTemplateLog, PR_LOG_ALWAYS,
                ("Tags: [Template: %s  Resource: %s  Real: %s] for id %s",
-                nsAtomCString(aTemplateNode->Tag()).get(), 
-                nsAtomCString(aResourceNode->Tag()).get(),
-                nsAtomCString(aRealNode->Tag()).get(), NS_ConvertUTF16toUTF8(id).get()));
+                nsAtomCString(aTemplateNode->NodeInfo()->NameAtom()).get(),
+                nsAtomCString(aResourceNode->NodeInfo()->NameAtom()).get(),
+                nsAtomCString(aRealNode->NodeInfo()->NameAtom()).get(), NS_ConvertUTF16toUTF8(id).get()));
     }
 #endif
 
@@ -523,7 +523,7 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
 
         MOZ_ASSERT_IF(isGenerationElement, tmplKid->IsElement());
 
-        nsIAtom *tag = tmplKid->Tag();
+        nsIAtom *tag = tmplKid->NodeInfo()->NameAtom();
 
 #ifdef PR_LOGGING
         if (PR_LOG_TEST(gXULTemplateLog, PR_LOG_DEBUG)) {
@@ -1049,7 +1049,7 @@ nsXULContentBuilder::CreateContainerContents(nsIContent* aElement,
         nsTemplateQuerySet* queryset = mQuerySets[r];
 
         nsIAtom* tag = queryset->GetTag();
-        if (tag && tag != aElement->Tag())
+        if (tag && tag != aElement->NodeInfo()->NameAtom())
             continue;
 
         CreateContainerContentsForQuerySet(aElement, aResult, aNotify, queryset,
@@ -1263,16 +1263,13 @@ bool
 nsXULContentBuilder::IsOpen(nsIContent* aElement)
 {
     // Determine if this is a <treeitem> or <menu> element
-    if (!aElement->IsXUL())
-        return true;
 
     // XXXhyatt Use the XBL service to obtain a base tag.
-    nsIAtom *tag = aElement->Tag();
-    if (tag == nsGkAtoms::menu ||
-        tag == nsGkAtoms::menubutton ||
-        tag == nsGkAtoms::toolbarbutton ||
-        tag == nsGkAtoms::button ||
-        tag == nsGkAtoms::treeitem)
+    if (aElement->IsAnyOfXULElements(nsGkAtoms::menu,
+                                     nsGkAtoms::menubutton,
+                                     nsGkAtoms::toolbarbutton,
+                                     nsGkAtoms::button,
+                                     nsGkAtoms::treeitem))
         return aElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::open,
                                      nsGkAtoms::_true, eCaseMatters);
     return true;
@@ -1447,7 +1444,7 @@ nsXULContentBuilder::HasGeneratedContent(nsIRDFResource* aResource,
 
     // the root resource is always acceptable
     if (aResource == rootresource) {
-        if (!aTag || mRoot->Tag() == aTag)
+        if (!aTag || mRoot->NodeInfo()->NameAtom() == aTag)
             *aGenerated = true;
     }
     else {
@@ -1473,7 +1470,7 @@ nsXULContentBuilder::HasGeneratedContent(nsIRDFResource* aResource,
                 nsTemplateMatch* match;
                 if (content == mRoot || mContentSupportMap.Get(content, &match)) {
                     // If we've got a tag, check it to ensure we're consistent.
-                    if (!aTag || content->Tag() == aTag) {
+                    if (!aTag || content->NodeInfo()->NameAtom() == aTag) {
                         *aGenerated = true;
                         return NS_OK;
                     }
