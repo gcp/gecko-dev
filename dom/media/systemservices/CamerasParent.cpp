@@ -4,18 +4,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Assertions.h"
 #include "CamerasParent.h"
 #include "CamerasUtils.h"
 #include "MediaEngine.h"
+
+#include "mozilla/Assertions.h"
 #include "nsThreadUtils.h"
 #include "prlog.h"
-
-PRLogModuleInfo *gCamerasParentLog;
 
 #undef LOG
 #undef LOG_ENABLED
 #if defined(PR_LOGGING)
+PRLogModuleInfo *gCamerasParentLog;
 #define LOG(args) PR_LOG(gCamerasParentLog, PR_LOG_DEBUG, args)
 #define LOG_ENABLED() PR_LOG_TEST(gCamerasParentLog, 5)
 #else
@@ -115,7 +115,6 @@ CamerasParent::DeliverFrameOverIPC(CaptureEngine cap_engine,
                                    int64_t ntp_time,
                                    int64_t render_time)
 {
-
   if (!mShmemInitialized) {
     AllocShmem(size, SharedMemory::TYPE_BASIC, &mShmem);
     mShmemInitialized = true;
@@ -123,11 +122,13 @@ CamerasParent::DeliverFrameOverIPC(CaptureEngine cap_engine,
 
   if (!mShmem.IsWritable()) {
     LOG(("Video shmem is not writeable in DeliverFrame"));
-    return -1;
+    // We can skip this frame if the buffer wasn't handed back
+    // to us yet, it's not a real error.
+    return 0;
   }
 
   // Prepare video buffer
-  if (mShmem.Size<char>() != size) {
+  if (mShmem.Size<char>() != static_cast<size_t>(size)) {
     DeallocShmem(mShmem);
     // this may fail; always check return value
     if (!AllocShmem(size, SharedMemory::TYPE_BASIC, &mShmem)) {
@@ -290,19 +291,19 @@ CamerasParent::SetupEngine(CaptureEngine aCapEngine)
 }
 
 void
-CamerasParent::CloseActiveEngine()
+CamerasParent::CloseEngines()
 {
-  if(mPtrViEBase) {
-    mPtrViEBase->Release();
-    mPtrViEBase = nullptr;
+  if (mPtrViERender) {
+    mPtrViERender->Release();
+    mPtrViERender = nullptr;
   }
   if (mPtrViECapture) {
     mPtrViECapture->Release();
     mPtrViECapture = nullptr;
   }
-  if (mPtrViERender) {
-    mPtrViERender->Release();
-    mPtrViERender = nullptr;
+  if(mPtrViEBase) {
+    mPtrViEBase->Release();
+    mPtrViEBase = nullptr;
   }
 }
 
@@ -313,7 +314,7 @@ CamerasParent::EnsureInitialized(int aEngine)
   CaptureEngine capEngine = static_cast<CaptureEngine>(aEngine);
   if (capEngine != mActiveEngine) {
     LOG(("Engine type new: %d old: %d", aEngine, mActiveEngine));
-    CloseActiveEngine();
+    CloseEngines();
     if (!SetupEngine(capEngine)) {
       return false;
     }
@@ -549,7 +550,7 @@ CamerasParent::~CamerasParent()
 
   MOZ_COUNT_DTOR(CamerasParent);
 
-  CloseActiveEngine();
+  CloseEngines();
 
   if (mCameraEngine) {
     mCameraEngine->SetTraceCallback(nullptr);

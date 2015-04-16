@@ -4,22 +4,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "CamerasChild.h"
+#include "CamerasUtils.h"
+
 #include "webrtc/video_engine/include/vie_capture.h"
 #undef FF
 
 #include "mozilla/Assertions.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
+#include "mozilla/Mutex.h"
 #include "prlog.h"
-
-#include "CamerasUtils.h"
-#include "CamerasChild.h"
-
-PRLogModuleInfo *gCamerasChildLog;
 
 #undef LOG
 #undef LOG_ENABLED
 #if defined(PR_LOGGING)
+PRLogModuleInfo *gCamerasChildLog;
 #define LOG(args) PR_LOG(gCamerasChildLog, PR_LOG_DEBUG, args)
 #define LOG_ENABLED() PR_LOG_TEST(gCamerasChildLog, 5)
 #else
@@ -147,6 +147,7 @@ void
 CamerasChild::AddCallback(const CaptureEngine aCapEngine, const int capture_id,
                           webrtc::ExternalRenderer* render)
 {
+  MutexAutoLock lock(mMutex);
   CapturerElement ce;
   ce.engine = aCapEngine;
   ce.id = capture_id;
@@ -157,6 +158,7 @@ CamerasChild::AddCallback(const CaptureEngine aCapEngine, const int capture_id,
 void
 CamerasChild::RemoveCallback(const CaptureEngine aCapEngine, const int capture_id)
 {
+  MutexAutoLock lock(mMutex);
   for (unsigned int i = 0; i < mCallbacks.Length(); i++) {
     CapturerElement ce = mCallbacks[i];
     if (ce.engine == aCapEngine && ce.id == capture_id) {
@@ -205,6 +207,7 @@ public:
 
   NS_IMETHOD Run() {
     ipc::BackgroundChild::CloseForCurrentThread();
+    sCameras = nullptr;
     return NS_OK;
   }
 };
@@ -229,6 +232,7 @@ CamerasChild::RecvDeliverFrame(const int& capEngine,
                                const int64_t& render_time)
 {
   LOG((__PRETTY_FUNCTION__));
+  MutexAutoLock lock(mMutex);
   CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
   if (Cameras()->Callback(capEng, capId)) {
     unsigned char* image = shmem.get<unsigned char>();
@@ -249,7 +253,7 @@ CamerasChild::RecvFrameSizeChange(const int& capEngine,
                                   const int& w, const int& h)
 {
   LOG((__PRETTY_FUNCTION__));
-  // XXX: Needs a lock
+  MutexAutoLock lock(mMutex);
   CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
   if (Cameras()->Callback(capEng, capId)) {
     Cameras()->Callback(capEng, capId)->FrameSizeChange(w, h, 0);
@@ -260,6 +264,7 @@ CamerasChild::RecvFrameSizeChange(const int& capEngine,
 }
 
 CamerasChild::CamerasChild()
+  : mMutex("mozilla::cameras::CamerasChild")
 {
 #if defined(PR_LOGGING)
   if (!gCamerasChildLog)

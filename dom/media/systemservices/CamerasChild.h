@@ -11,6 +11,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/camera/PCamerasChild.h"
 #include "mozilla/camera/PCamerasParent.h"
+#include "mozilla/Mutex.h"
 
 // conflicts with #include of scoped_ptr.h
 #undef FF
@@ -82,6 +83,7 @@ public:
 
 private:
   nsTArray<CapturerElement> mCallbacks;
+  Mutex mMutex;
 };
 
 PCamerasChild* CreateCamerasChild();

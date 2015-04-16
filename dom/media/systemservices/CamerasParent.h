@@ -31,7 +31,7 @@ public:
   CallbackHelper(CaptureEngine aCapEng, int aCapId)
     : mCapEngine(aCapEng), mCapturerId(aCapId) {};
 
-  //ViEExternalRenderer.
+  // ViEExternalRenderer implementation
   virtual int FrameSizeChange(unsigned int w, unsigned int h,
                               unsigned int streams) override;
   virtual int DeliverFrame(unsigned char* buffer,
@@ -52,7 +52,6 @@ private:
 class CamerasParent :  public PCamerasParent
 {
 public:
-  //
   virtual bool RecvAllocateCaptureDevice(const int&, const nsCString&, int *) override;
   virtual bool RecvReleaseCaptureDevice(const int&, const int &) override;
   virtual bool RecvNumberOfCaptureDevices(const int&, int* numdev) override;
@@ -82,7 +81,7 @@ public:
 
 protected:
   bool SetupEngine(CaptureEngine aCapEngine);
-  void CloseActiveEngine();
+  void CloseEngines();
   bool EnsureInitialized(int aEngine);
 
   // Kept active as long as the engine doesn't change

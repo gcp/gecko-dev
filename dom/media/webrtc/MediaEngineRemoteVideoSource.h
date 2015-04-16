@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef MEDIAENGINEREMOTEVIDEOSOURCE_H_
-#define MEDIAENGINEREMOTEVIDEOSOURCE_H_
+#ifndef MEDIAENGINE_REMOTE_VIDEO_SOURCE_H_
+#define MEDIAENGINE_REMOTE_VIDEO_SOURCE_H_
 
 #include "prcvar.h"
 #include "prthread.h"
@@ -94,4 +94,4 @@ private:
 
 }
 
-#endif /* NSMEDIAENGINEREMOTEVIDEOSOURCE_H_ */
+#endif /* MEDIAENGINE_REMOTE_VIDEO_SOURCE_H_ */
