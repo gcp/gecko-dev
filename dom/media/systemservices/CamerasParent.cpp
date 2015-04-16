@@ -500,7 +500,7 @@ CamerasParent::RecvStopCapture(const int& aCapEngine,
   mPtrViERender->RemoveRenderer(capnum);
   mPtrViECapture->StopCapture(capnum);
 
-  for (int i = 0; i < mCallbacks.Length(); i++) {
+  for (unsigned int i = 0; i < mCallbacks.Length(); i++) {
     if (mCallbacks[i]->mCapEngine == aCapEngine
         && mCallbacks[i]->mCapturerId == capnum) {
       delete mCallbacks[i];
@@ -580,7 +580,7 @@ CamerasParent::~CamerasParent()
   mBrowserEngine = nullptr;
   mAppEngine = nullptr;
 
-  for (int i = 0; i < mCallbacks.Length(); i++) {
+  for (unsigned int i = 0; i < mCallbacks.Length(); i++) {
     delete mCallbacks[i];
   }
 }

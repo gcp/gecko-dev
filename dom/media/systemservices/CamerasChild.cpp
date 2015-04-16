@@ -157,7 +157,7 @@ CamerasChild::AddCallback(const CaptureEngine aCapEngine, const int capture_id,
 void
 CamerasChild::RemoveCallback(const CaptureEngine aCapEngine, const int capture_id)
 {
-  for (int i = 0; i < mCallbacks.Length(); i++) {
+  for (unsigned int i = 0; i < mCallbacks.Length(); i++) {
     CapturerElement ce = mCallbacks[i];
     if (ce.engine == aCapEngine && ce.id == capture_id) {
       mCallbacks.RemoveElementAt(i);
@@ -287,7 +287,7 @@ PCamerasChild* CreateCamerasChild() {
 webrtc::ExternalRenderer* CamerasChild::Callback(CaptureEngine aCapEngine,
                                                  int capture_id)
 {
-  for (int i = 0; i < mCallbacks.Length(); i++) {
+  for (unsigned int i = 0; i < mCallbacks.Length(); i++) {
     CapturerElement ce = mCallbacks[i];
     if (ce.engine == aCapEngine && ce.id == capture_id) {
       return ce.callback;
