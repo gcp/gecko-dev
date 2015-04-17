@@ -83,6 +83,7 @@ public:
 
 private:
   nsTArray<CapturerElement> mCallbacks;
+  // Protects the callback arrays
   Mutex mMutex;
 };
 

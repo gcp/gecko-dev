@@ -30,12 +30,14 @@ PRLogModuleInfo *gCamerasChildLog;
 namespace mozilla {
 namespace camera {
 
+mozilla::Mutex sCamerasMutex("Cameras");
 static PCamerasChild* sCameras;
 nsCOMPtr<nsIThread> sCamerasChildThread;
 
 static CamerasChild*
 Cameras()
 {
+  MutexAutoLock lock(sCamerasMutex);
   if (!sCameras) {
     // Try to get the PBackground handle
     ipc::PBackgroundChild* existingBackgroundChild =
@@ -206,6 +208,7 @@ public:
   ShutdownRunnable() {};
 
   NS_IMETHOD Run() {
+    // Note this is called synchronously with the lock held
     ipc::BackgroundChild::CloseForCurrentThread();
     sCameras = nullptr;
     return NS_OK;
@@ -215,6 +218,7 @@ public:
 void Shutdown()
 {
   LOG((__PRETTY_FUNCTION__));
+  MutexAutoLock lock(sCamerasMutex);
   if (sCamerasChildThread) {
     nsRefPtr<ShutdownRunnable> runnable = new ShutdownRunnable();
     sCamerasChildThread->Dispatch(runnable, NS_DISPATCH_SYNC);
