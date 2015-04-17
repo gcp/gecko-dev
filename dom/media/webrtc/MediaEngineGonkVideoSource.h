@@ -69,6 +69,9 @@ public:
                           SourceMediaStream* aSource,
                           TrackID aId,
                           StreamTime aDesiredTime) override;
+  virtual const dom::MediaSourceEnum GetMediaSource() override {
+    return dom::MediaSourceEnum::Camera;
+  }
 
   void OnHardwareStateChange(HardwareState aState, nsresult aReason) override;
   void GetRotation();
