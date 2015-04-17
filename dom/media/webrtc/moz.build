@@ -73,9 +73,9 @@ include('/ipc/chromium/chromium-config.mozbuild')
 #    defined, which complains about important MOZ_EXPORT attributes for
 #    android API types
 if CONFIG['GNU_CC'] or CONFIG['CLANG_CL']:
-  CXXFLAGS += [
-    '-Wno-error=attributes'
-  ]
+    CXXFLAGS += [
+        '-Wno-error=attributes'
+    ]
 
 FINAL_LIBRARY = 'xul'
 if CONFIG['OS_ARCH'] == 'WINNT':
@@ -83,8 +83,9 @@ if CONFIG['OS_ARCH'] == 'WINNT':
 
 
 if CONFIG['_MSC_VER']:
-  CXXFLAGS += [
-    '-wd4275', # non dll-interface class used as base for dll-interface class
-  ]
+    CXXFLAGS += [
+        '-wd4275', # non dll-interface class used as base for dll-interface class
+    ]
+    DEFINES['__PRETTY_FUNCTION__'] = '__FUNCSIG__'
 
 FAIL_ON_WARNINGS = True
