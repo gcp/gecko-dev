@@ -324,6 +324,7 @@ MediaEngineRemoteVideoSource::NumCapabilities()
   }
 
   switch(mMediaSource) {
+  case dom::MediaSourceEnum::Camera:
 #ifdef XP_MACOSX
     // Mac doesn't support capabilities.
     //
