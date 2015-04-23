@@ -62,7 +62,7 @@ class MarionetteProtocol(Protocol):
         while True:
             success = self.marionette.wait_for_port(60)
             #When running in a debugger wait indefinitely for firefox to start
-            if success or self.executor.debug_args is None:
+            if success or self.executor.debug_info is None:
                 break
 
         session_started = False
@@ -131,7 +131,7 @@ class MarionetteProtocol(Protocol):
                 self.marionette.execute_async_script("");
             except errors.ScriptTimeoutException:
                 pass
-            except (socket.timeout, errors.InvalidResponseException, IOError):
+            except (socket.timeout, IOError):
                 break
             except Exception as e:
                 self.logger.error(traceback.format_exc(e))
@@ -227,7 +227,7 @@ class MarionetteRun(object):
                 # make that possible. It also seems to time out immediately if the
                 # timeout is set too high. This works at least.
                 self.marionette.set_script_timeout(2**31 - 1)
-        except (IOError, errors.InvalidResponseException):
+        except IOError:
             self.logger.error("Lost marionette connection before starting test")
             return Stop
 
@@ -253,7 +253,7 @@ class MarionetteRun(object):
         except errors.ScriptTimeoutException:
             self.logger.debug("Got a marionette timeout")
             self.result = False, ("EXTERNAL-TIMEOUT", None)
-        except (socket.timeout, errors.InvalidResponseException, IOError):
+        except (socket.timeout, IOError):
             # This can happen on a crash
             # Also, should check after the test if the firefox process is still running
             # and otherwise ignore any other result and set it to crash
@@ -271,11 +271,11 @@ class MarionetteRun(object):
 
 class MarionetteTestharnessExecutor(TestharnessExecutor):
     def __init__(self, browser, server_config, timeout_multiplier=1, close_after_done=True,
-                 debug_args=None):
+                 debug_info=None):
         """Marionette-based executor for testharness.js tests"""
         TestharnessExecutor.__init__(self, browser, server_config,
                                      timeout_multiplier=timeout_multiplier,
-                                     debug_args=debug_args)
+                                     debug_info=debug_info)
 
         self.protocol = MarionetteProtocol(self, browser)
         self.script = open(os.path.join(here, "testharness_marionette.js")).read()
@@ -297,7 +297,7 @@ class MarionetteTestharnessExecutor(TestharnessExecutor):
             self.protocol.load_runner(new_environment["protocol"])
 
     def do_test(self, test):
-        timeout = (test.timeout * self.timeout_multiplier if self.debug_args is None
+        timeout = (test.timeout * self.timeout_multiplier if self.debug_info is None
                    else None)
 
         success, data = MarionetteRun(self.logger,
@@ -331,14 +331,14 @@ class MarionetteTestharnessExecutor(TestharnessExecutor):
 
 class MarionetteRefTestExecutor(RefTestExecutor):
     def __init__(self, browser, server_config, timeout_multiplier=1,
-                 screenshot_cache=None, close_after_done=True, debug_args=None):
+                 screenshot_cache=None, close_after_done=True, debug_info=None):
         """Marionette-based executor for reftests"""
         RefTestExecutor.__init__(self,
                                  browser,
                                  server_config,
                                  screenshot_cache=screenshot_cache,
                                  timeout_multiplier=timeout_multiplier,
-                                 debug_args=debug_args)
+                                 debug_info=debug_info)
         self.protocol = MarionetteProtocol(self, browser)
         self.implementation = RefTestImplementation(self)
         self.close_after_done = close_after_done
@@ -373,7 +373,7 @@ class MarionetteRefTestExecutor(RefTestExecutor):
         return self.convert_result(test, result)
 
     def screenshot(self, test):
-        timeout = self.timeout_multiplier * test.timeout if self.debug_args is None else None
+        timeout =  self.timeout_multiplier * test.timeout if self.debug_info is None else None
 
         test_url = self.test_url(test)
 

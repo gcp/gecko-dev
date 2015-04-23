@@ -114,7 +114,6 @@
      to. -->
 <!ENTITY overlay_share_send_tab_btn_label "Send to another device">
 <!ENTITY overlay_share_no_url "No link found in this share">
-<!ENTITY overlay_share_retry "Try again">
 <!ENTITY overlay_share_select_device "Select device">
 <!-- Localization note (overlay_no_synced_devices) : Used when the menu option
      to send a tab to a synced device is pressed and no other synced devices
@@ -192,10 +191,10 @@
 <!ENTITY pref_donottrack_title "Do not track">
 <!ENTITY pref_donottrack_summary "&brandShortName; will tell sites that you do not want to be tracked">
 
-<!ENTITY tab_queue_toast_message "Open later">
+<!ENTITY tab_queue_toast_message2 "Tab queued in &brandShortName;">
 <!ENTITY tab_queue_toast_action "Open now">
 <!ENTITY tab_queue_prompt_title "Opening multiple links?">
-<!ENTITY tab_queue_prompt_text "Open them without switching to Firefox each time.">
+<!ENTITY tab_queue_prompt_text2 "Open them without switching to &brandShortName; each time.">
 <!ENTITY tab_queue_prompt_tip_text "you can change this later in Settings">
 <!ENTITY tab_queue_prompt_positive_action_button "Enable">
 <!ENTITY tab_queue_prompt_negative_action_button "Not now">
@@ -397,8 +396,8 @@ size. -->
 <!ENTITY pref_scroll_title_bar2 "Full-screen browsing">
 <!ENTITY pref_scroll_title_bar_summary "Hide the &brandShortName; title bar when scrolling down a page">
 
-<!ENTITY pref_tab_queue_title "Open later">
-<!ENTITY pref_tab_queue_summary "Prevent tabs from opening immediately, but open all queued tabs the next time &brandShortName; loads.">
+<!ENTITY pref_tab_queue_title2 "Open multiple links">
+<!ENTITY pref_tab_queue_summary2 "Queue links for later instead of switching to &brandShortName; each time">
 
 <!-- Localization note (page_removed): This string appears in a toast message when
      any page is removed frome about:home. This includes pages that are in history,
@@ -447,6 +446,8 @@ size. -->
 <!ENTITY button_set "Set">
 <!ENTITY button_clear "Clear">
 <!ENTITY button_remember "Remember">
+
+<!ENTITY firstrun_panel_title_welcome "Welcome">
 
 <!ENTITY home_top_sites_title "Top Sites">
 <!-- Localization note (home_top_sites_add): This string is used as placeholder

@@ -25,7 +25,6 @@ namespace js {
 
 namespace jit {
 class JitContext;
-class CompileCompartment;
 class DebugModeOSRVolatileJitFrameIterator;
 }
 
@@ -62,8 +61,6 @@ extern void
 TraceCycleDetectionSet(JSTracer* trc, ObjectSet& set);
 
 struct AutoResolving;
-class DtoaCache;
-class RegExpStatics;
 
 namespace frontend { struct CompileError; }
 
@@ -164,8 +161,8 @@ class ExclusiveContext : public ContextFriendFields,
         return thing->compartment() == compartment_;
     }
 
-    void* onOutOfMemory(void* p, size_t nbytes) {
-        return runtime_->onOutOfMemory(p, nbytes, maybeJSContext());
+    void* onOutOfMemory(js::AllocFunction allocFunc, size_t nbytes, void* reallocPtr = nullptr) {
+        return runtime_->onOutOfMemory(allocFunc, nbytes, reallocPtr, maybeJSContext());
     }
 
     /* Clear the pending exception (if any) due to OOM. */
@@ -823,7 +820,8 @@ bool intrinsic_IsObject(JSContext* cx, unsigned argc, Value* vp);
 bool intrinsic_ToInteger(JSContext* cx, unsigned argc, Value* vp);
 bool intrinsic_ToString(JSContext* cx, unsigned argc, Value* vp);
 bool intrinsic_IsCallable(JSContext* cx, unsigned argc, Value* vp);
-bool intrinsic_ThrowError(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_ThrowRangeError(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_ThrowTypeError(JSContext* cx, unsigned argc, Value* vp);
 bool intrinsic_NewDenseArray(JSContext* cx, unsigned argc, Value* vp);
 bool intrinsic_IsConstructing(JSContext* cx, unsigned argc, Value* vp);
 bool intrinsic_SubstringKernel(JSContext* cx, unsigned argc, Value* vp);

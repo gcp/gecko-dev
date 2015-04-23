@@ -94,8 +94,16 @@ loop.shared.mixins = (function() {
       return {showMenu: false};
     },
 
-    _onBodyClick: function() {
-      this.setState({showMenu: false});
+    _onBodyClick: function(event) {
+      var menuButton = this.refs["menu-button"] && this.refs["menu-button"].getDOMNode();
+      if (this.refs.anchor) {
+        menuButton = this.refs.anchor.getDOMNode();
+      }
+      // If a menu button/ anchor is defined and clicked on, it will be in charge
+      // of hiding or showing the popup.
+      if (event.target !== menuButton) {
+        this.setState({ showMenu: false });
+      }
     },
 
     _correctMenuPosition: function() {
@@ -436,35 +444,44 @@ loop.shared.mixins = (function() {
       }
 
       this._bufferedUpdateVideo = rootObject.setTimeout(function() {
-        this._bufferedUpdateVideo = null;
-        var localStreamParent = this._getElement(".local .OT_publisher");
-        var remoteStreamParent = this._getElement(".remote .OT_subscriber");
-        var screenShareStreamParent = this._getElement('.screen .OT_subscriber');
-        if (localStreamParent) {
-          localStreamParent.style.width = "100%";
-        }
-        if (remoteStreamParent) {
-          remoteStreamParent.style.height = "100%";
-        }
-        if (screenShareStreamParent) {
-          screenShareStreamParent.style.height = "100%";
-        }
+        // Since this is being called from setTimeout, any exceptions thrown
+        // will propagate upwards into nothingness, unless we go out of our
+        // way to catch and log them explicitly, so...
+        try {
+          this._bufferedUpdateVideo = null;
+          var localStreamParent = this._getElement(".local .OT_publisher");
+          var remoteStreamParent = this._getElement(".remote .OT_subscriber");
+          var screenShareStreamParent = this._getElement('.screen .OT_subscriber');
+          if (localStreamParent) {
+            localStreamParent.style.width = "100%";
+          }
+          if (remoteStreamParent) {
+            remoteStreamParent.style.height = "100%";
+          }
+          if (screenShareStreamParent) {
+            screenShareStreamParent.style.height = "100%";
+          }
 
-        // Update the position and dimensions of the containers of local and remote
-        // video streams, if necessary. The consumer of this mixin should implement
-        // the actual updating mechanism.
-        Object.keys(this._videoDimensionsCache.local).forEach(function(videoType) {
-          var ratio = this._videoDimensionsCache.local[videoType].aspectRatio;
-          if (videoType == "camera" && this.updateLocalCameraPosition) {
-            this.updateLocalCameraPosition(ratio);
-          }
-        }, this);
-        Object.keys(this._videoDimensionsCache.remote).forEach(function(videoType) {
-          var ratio = this._videoDimensionsCache.remote[videoType].aspectRatio;
-          if (videoType == "camera" && this.updateRemoteCameraPosition) {
-            this.updateRemoteCameraPosition(ratio);
-          }
-        }, this);
+          // Update the position and dimensions of the containers of local and
+          // remote video streams, if necessary. The consumer of this mixin
+          // should implement the actual updating mechanism.
+          Object.keys(this._videoDimensionsCache.local).forEach(
+            function (videoType) {
+              var ratio = this._videoDimensionsCache.local[videoType].aspectRatio;
+              if (videoType == "camera" && this.updateLocalCameraPosition) {
+                this.updateLocalCameraPosition(ratio);
+              }
+            }, this);
+          Object.keys(this._videoDimensionsCache.remote).forEach(
+            function (videoType) {
+              var ratio = this._videoDimensionsCache.remote[videoType].aspectRatio;
+              if (videoType == "camera" && this.updateRemoteCameraPosition) {
+                this.updateRemoteCameraPosition(ratio);
+              }
+            }, this);
+        } catch (ex) {
+          console.error("updateVideoContainer: _bufferedVideoUpdate exception:", ex);
+        }
       }.bind(this), 0);
     },
 

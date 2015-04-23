@@ -7,7 +7,9 @@
 
 #include <iostream>
 #include <string>
+#include <string.h>
 #include "signaling/src/sdp/SdpMediaSection.h"
+#include "nsCRT.h"
 
 namespace mozilla {
 
@@ -77,7 +79,7 @@ struct JsepCodecDescription {
     const SdpRtpmapAttributeList::Rtpmap& entry = rtpmap.GetEntry(fmt);
 
     if (mType == remoteMsection.GetMediaType()
-        && (mName == entry.name)
+        && !nsCRT::strcasecmp(mName.c_str(), entry.name.c_str())
         && (mClock == entry.clock)
         && (mChannels == entry.channels)) {
       return ParametersMatch(entry.pt, remoteMsection);
@@ -322,6 +324,8 @@ struct JsepVideoCodecDescription : public JsepCodecDescription {
         mDefaultPt, SdpRtcpFbAttributeList::kNack, SdpRtcpFbAttributeList::pli);
     rtcpfb.PushEntry(
         mDefaultPt, SdpRtcpFbAttributeList::kCcm, SdpRtcpFbAttributeList::fir);
+    rtcpfb.PushEntry(
+        mDefaultPt, SdpRtcpFbAttributeList::kCcm, SdpRtcpFbAttributeList::tmmbr);
   }
 
   SdpFmtpAttributeList::H264Parameters
@@ -708,7 +712,8 @@ struct JsepApplicationCodecDescription : public JsepCodecDescription {
 
     const SdpSctpmapAttributeList::Sctpmap& entry = sctpmap.GetEntry(fmt);
 
-    if (mType == remoteMsection.GetMediaType() && (mName == entry.name)) {
+    if (mType == remoteMsection.GetMediaType() &&
+        !nsCRT::strcasecmp(mName.c_str(), entry.name.c_str())) {
       return true;
     }
     return false;

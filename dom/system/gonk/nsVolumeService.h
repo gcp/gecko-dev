@@ -22,7 +22,6 @@ class VolumeInfo;
 
 namespace system {
 
-class WakeLockCallback;
 class Volume;
 
 /***************************************************************************
@@ -44,6 +43,8 @@ public:
   static already_AddRefed<nsVolumeService> GetSingleton();
   //static nsVolumeService* GetSingleton();
   static void Shutdown();
+
+  void DumpNoLock(const char* aLabel);
 
   void UpdateVolume(nsIVolume* aVolume, bool aNotifyObservers = true);
   void UpdateVolumeIOThread(const Volume* aVolume);

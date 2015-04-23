@@ -708,6 +708,19 @@ function injectLoopAPI(targetWindow) {
     },
 
     /**
+     * Opens a URL in a new tab in the browser.
+     *
+     * @param {String} url The new url to open
+     */
+    openURL: {
+      enumerable: true,
+      writable: true,
+      value: function(url) {
+        return MozLoopService.openURL(url);
+      }
+    },
+
+    /**
      * Copies passed string onto the system clipboard.
      *
      * @param {String} str The string to copy
@@ -774,14 +787,14 @@ function injectLoopAPI(targetWindow) {
     /**
      * Adds a value to a telemetry histogram.
      *
-     * @param  {string} histogramId Name of the telemetry histogram to update.
-     * @param  {string} value       Label of bucket to increment in the histogram.
+     * @param  {String}  histogramId Name of the telemetry histogram to update.
+     * @param  {String}  value       Label of bucket to increment in the histogram.
      */
-    telemetryAddKeyedValue: {
+    telemetryAddValue: {
       enumerable: true,
       writable: true,
       value: function(histogramId, value) {
-        Services.telemetry.getKeyedHistogramById(histogramId).add(value);
+        Services.telemetry.getHistogramById(histogramId).add(value);
       }
     },
 

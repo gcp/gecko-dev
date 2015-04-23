@@ -9,21 +9,9 @@
 
 #include "BluetoothService.h"
 
-namespace mozilla {
-namespace ipc {
-class UnixSocketConsumer;
-}
-namespace dom {
-namespace bluetooth {
+BEGIN_BLUETOOTH_NAMESPACE
 
 class BluetoothChild;
-
-} // namespace bluetooth
-} // namespace dom
-} // namespace mozilla
-
-
-BEGIN_BLUETOOTH_NAMESPACE
 
 class BluetoothServiceChildProcess : public BluetoothService
 {
@@ -240,6 +228,39 @@ public:
   GattClientReadRemoteRssiInternal(int aClientIf,
                                    const nsAString& aDeviceAddress,
                                    BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  GattClientReadCharacteristicValueInternal(
+    const nsAString& aAppUuid,
+    const BluetoothGattServiceId& aServiceId,
+    const BluetoothGattId& aCharacteristicId,
+    BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  GattClientWriteCharacteristicValueInternal(
+    const nsAString& aAppUuid,
+    const BluetoothGattServiceId& aServiceId,
+    const BluetoothGattId& aCharacteristicId,
+    const BluetoothGattWriteType& aWriteType,
+    const nsTArray<uint8_t>& aValue,
+    BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  GattClientReadDescriptorValueInternal(
+    const nsAString& aAppUuid,
+    const BluetoothGattServiceId& aServiceId,
+    const BluetoothGattId& aCharacteristicId,
+    const BluetoothGattId& aDescriptorId,
+    BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  GattClientWriteDescriptorValueInternal(
+    const nsAString& aAppUuid,
+    const BluetoothGattServiceId& aServiceId,
+    const BluetoothGattId& aCharacteristicId,
+    const BluetoothGattId& aDescriptorId,
+    const nsTArray<uint8_t>& aValue,
+    BluetoothReplyRunnable* aRunnable);
 
 protected:
   BluetoothServiceChildProcess();

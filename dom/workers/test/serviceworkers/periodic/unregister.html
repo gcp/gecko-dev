@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<script>
+  navigator.serviceWorker.getRegistration(".").then(function(registration) {
+    registration.unregister().then(function(success) {
+      if (success) {
+        parent.callback();
+      } else {
+        dump("Unregister failed\n");
+      }
+    }, function(e) {
+      dump("Unregistering the SW failed with " + e + "\n");
+    });
+  });
+</script>

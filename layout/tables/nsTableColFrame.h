@@ -11,10 +11,8 @@
 #include "nsContainerFrame.h"
 #include "nsTArray.h"
 
-class nsTableCellFrame;
-
 enum nsTableColType {
-  eColContent            = 0, // there is real col content associated   
+  eColContent            = 0, // there is real col content associated
   eColAnonymousCol       = 1, // the result of a span on a col
   eColAnonymousColGroup  = 2, // the result of a span on a col group
   eColAnonymousCell      = 3  // the result of a cell alone
@@ -41,9 +39,9 @@ public:
                                               nsStyleContext*  aContext);
   /** @see nsIFrame::DidSetStyleContext */
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
-  
+
   int32_t GetColIndex() const;
-  
+
   void SetColIndex (int32_t aColIndex);
 
   nsTableColFrame* GetNextCol() const;
@@ -66,7 +64,7 @@ public:
    * @see nsGkAtoms::tableColFrame
    */
   virtual nsIAtom* GetType() const override;
-  
+
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
@@ -254,21 +252,21 @@ public:
   }
 
   // The final width of the column.
-  void ResetFinalWidth() {
-    mFinalWidth = nscoord_MIN; // so we detect that it changed
+  void ResetFinalISize() {
+    mFinalISize = nscoord_MIN; // so we detect that it changed
   }
-  void SetFinalWidth(nscoord aFinalWidth) {
-    mFinalWidth = aFinalWidth;
+  void SetFinalISize(nscoord aFinalISize) {
+    mFinalISize = aFinalISize;
   }
-  nscoord GetFinalWidth() {
-    return mFinalWidth;
+  nscoord GetFinalISize() {
+    return mFinalISize;
   }
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
     return nsSplittableFrame::IsFrameOfType(aFlags & ~(nsIFrame::eTablePart));
   }
-  
+
   virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0) override;
   virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0) override;
   virtual void InvalidateFrameForRemoval() override { InvalidateFrameSubtree(); }
@@ -288,13 +286,13 @@ protected:
   // a separate array allocated only during
   // BasicTableLayoutStrategy::ComputeColumnIntrinsicISizes (and only
   // when colspans were present).
-  nscoord mFinalWidth;
+  nscoord mFinalISize;
 
-  // the index of the column with respect to the whole table (starting at 0) 
-  // it should never be smaller then the start column index of the parent 
+  // the index of the column with respect to the whole table (starting at 0)
+  // it should never be smaller then the start column index of the parent
   // colgroup
   uint32_t mColIndex;
-  
+
   // border width in pixels of the inner half of the border only
   BCPixelSize mLeftBorderWidth;
   BCPixelSize mRightBorderWidth;
@@ -307,12 +305,12 @@ protected:
 
 inline int32_t nsTableColFrame::GetColIndex() const
 {
-  return mColIndex; 
+  return mColIndex;
 }
 
 inline void nsTableColFrame::SetColIndex (int32_t aColIndex)
-{ 
-  mColIndex = aColIndex; 
+{
+  mColIndex = aColIndex;
 }
 
 inline nscoord nsTableColFrame::GetLeftBorderWidth()

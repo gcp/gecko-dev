@@ -34,7 +34,6 @@
 #include <limits>
 #include <algorithm>
 
-class nsIFormControlFrame;
 class nsPresContext;
 class nsIContent;
 class nsIAtom;
@@ -80,7 +79,6 @@ struct RectCornerRadii;
 } // namespace gfx
 namespace layers {
 class Layer;
-class ClientLayerManager;
 }
 }
 
@@ -2603,6 +2601,16 @@ public:
    * (see nsIDOMWindowUtils.setCSSViewport).
    */
   static void SetCSSViewport(nsIPresShell* aPresShell, CSSSize aSize);
+
+  static FrameMetrics ComputeFrameMetrics(nsIFrame* aForFrame,
+                                          nsIFrame* aScrollFrame,
+                                          nsIContent* aContent,
+                                          const nsIFrame* aReferenceFrame,
+                                          Layer* aLayer,
+                                          ViewID aScrollParentId,
+                                          const nsRect& aViewport,
+                                          bool aIsRoot,
+                                          const ContainerLayerParameters& aContainerParameters);
 
 private:
   static uint32_t sFontSizeInflationEmPerLine;

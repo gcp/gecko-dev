@@ -702,14 +702,15 @@ nsHTMLReflowState::InitResizeFlags(nsPresContext* aPresContext, nsIAtom* aFrameT
   }
 }
 
-/* static */
 nscoord
-nsHTMLReflowState::GetContainingBlockContentWidth(const nsHTMLReflowState* aReflowState)
+nsHTMLReflowState::GetContainingBlockContentISize(WritingMode aWritingMode) const
 {
-  const nsHTMLReflowState* rs = aReflowState->mCBReflowState;
-  if (!rs)
+  if (!mCBReflowState) {
     return 0;
-  return rs->ComputedWidth();
+  }
+  return mCBReflowState->GetWritingMode().IsOrthogonalTo(aWritingMode)
+    ? mCBReflowState->ComputedBSize()
+    : mCBReflowState->ComputedISize();
 }
 
 void
@@ -2164,11 +2165,14 @@ nsHTMLReflowState::InitConstraints(nsPresContext* aPresContext,
 
       // Make sure legend frames with display:block and width:auto still
       // shrink-wrap.
+      // Also shrink-wrap blocks that are orthogonal to their container.
       if (isBlock &&
           ((aFrameType == nsGkAtoms::legendFrame &&
             frame->StyleContext()->GetPseudo() != nsCSSAnonBoxes::scrolledContent) ||
            (aFrameType == nsGkAtoms::scrollFrame &&
-            frame->GetContentInsertionFrame()->GetType() == nsGkAtoms::legendFrame))) {
+            frame->GetContentInsertionFrame()->GetType() == nsGkAtoms::legendFrame) ||
+           (mCBReflowState &&
+            mCBReflowState->GetWritingMode().IsOrthogonalTo(mWritingMode)))) {
         computeSizeFlags =
           ComputeSizeFlags(computeSizeFlags | ComputeSizeFlags::eShrinkWrap);
       }

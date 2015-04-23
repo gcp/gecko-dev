@@ -85,6 +85,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.PowerManager;
+import android.os.Process;
 import android.os.StrictMode;
 import android.provider.ContactsContract;
 import android.provider.MediaStore.Images.Media;
@@ -199,12 +200,11 @@ public abstract class GeckoApp
 
     private EventListener mWebappEventListener;
 
+    private Intent mRestartIntent;
+
     abstract public int getLayout();
 
     abstract protected String getDefaultProfileName() throws NoMozillaDirectoryException;
-
-    private static final String RESTARTER_ACTION = "org.mozilla.gecko.restart";
-    private static final String RESTARTER_CLASS = "org.mozilla.gecko.Restarter";
 
     @SuppressWarnings("serial")
     class SessionRestoreException extends Exception {
@@ -454,42 +454,40 @@ public abstract class GeckoApp
             // Make sure the Guest Browsing notification goes away when we quit.
             GuestSession.hideNotification(this);
 
-            if (GeckoThread.checkAndSetLaunchState(GeckoThread.LaunchState.GeckoRunning, GeckoThread.LaunchState.GeckoExiting)) {
-                final SharedPreferences prefs = GeckoSharedPrefs.forProfile(this);
-                final Set<String> clearSet = PrefUtils.getStringSet(prefs, ClearOnShutdownPref.PREF, new HashSet<String>());
+            final SharedPreferences prefs = GeckoSharedPrefs.forProfile(this);
+            final Set<String> clearSet =
+                    PrefUtils.getStringSet(prefs, ClearOnShutdownPref.PREF, new HashSet<String>());
 
-                final JSONObject clearObj = new JSONObject();
-                for (String clear : clearSet) {
-                    try {
-                        clearObj.put(clear, true);
-                    } catch(JSONException ex) {
-                        Log.e(LOGTAG, "Error adding clear object " + clear, ex);
-                    }
-                }
-
-                final JSONObject res = new JSONObject();
+            final JSONObject clearObj = new JSONObject();
+            for (String clear : clearSet) {
                 try {
-                    res.put("sanitize", clearObj);
+                    clearObj.put(clear, true);
                 } catch(JSONException ex) {
-                    Log.e(LOGTAG, "Error adding sanitize object", ex);
+                    Log.e(LOGTAG, "Error adding clear object " + clear, ex);
                 }
-
-                // If the user has opted out of session restore, and does want to clear history
-                // we also want to prevent the current session info from being saved.
-                if (clearObj.has("private.data.history")) {
-                    final String sessionRestore = getSessionRestorePreference();
-                    try {
-                        res.put("dontSaveSession", "quit".equals(sessionRestore));
-                    } catch(JSONException ex) {
-                        Log.e(LOGTAG, "Error adding session restore data", ex);
-                    }
-                }
-
-                GeckoAppShell.notifyGeckoOfEvent(GeckoEvent.createBroadcastEvent("Browser:Quit", res.toString()));
-            } else {
-                GeckoAppShell.systemExit();
             }
 
+            final JSONObject res = new JSONObject();
+            try {
+                res.put("sanitize", clearObj);
+            } catch(JSONException ex) {
+                Log.e(LOGTAG, "Error adding sanitize object", ex);
+            }
+
+            // If the user has opted out of session restore, and does want to clear history
+            // we also want to prevent the current session info from being saved.
+            if (clearObj.has("private.data.history")) {
+                final String sessionRestore = getSessionRestorePreference();
+                try {
+                    res.put("dontSaveSession", "quit".equals(sessionRestore));
+                } catch(JSONException ex) {
+                    Log.e(LOGTAG, "Error adding session restore data", ex);
+                }
+            }
+
+            GeckoAppShell.sendEventToGeckoSync(
+                    GeckoEvent.createBroadcastEvent("Browser:Quit", res.toString()));
+            doShutdown();
             return true;
         }
 
@@ -676,6 +674,12 @@ public abstract class GeckoApp
                 if (rec != null) {
                   rec.recordGeckoStartupTime(mGeckoReadyStartupTimer.getElapsed());
                 }
+
+            } else if (event.equals("Gecko:Exited")) {
+                // Gecko thread exited first; let GeckoApp die too.
+                doShutdown();
+                return;
+
             } else if ("NativeApp:IsDebuggable".equals(event)) {
                 JSONObject ret = new JSONObject();
                 ret.put("isDebuggable", getIsDebuggable());
@@ -1190,11 +1194,10 @@ public abstract class GeckoApp
         if (BrowserLocaleManager.getInstance().systemLocaleDidChange()) {
             Log.i(LOGTAG, "System locale changed. Restarting.");
             doRestart();
-            GeckoAppShell.gracefulExit();
             return;
         }
 
-        if (GeckoThread.isCreated()) {
+        if (GeckoThread.isLaunched()) {
             // This happens when the GeckoApp activity is destroyed by Android
             // without killing the entire application (see Bug 769269).
             mIsRestoringActivity = true;
@@ -1203,27 +1206,48 @@ public abstract class GeckoApp
         } else {
             final String uri = getURIFromIntent(intent);
 
-            GeckoThread.setArgs(args);
-            GeckoThread.setAction(action);
-            GeckoThread.setUri(TextUtils.isEmpty(uri) ? null : uri);
+            GeckoThread.ensureInit(args, action,
+                    TextUtils.isEmpty(uri) ? null : uri,
+                    /* debugging */ ACTION_DEBUG.equals(action));
         }
 
-        if (!ACTION_DEBUG.equals(action) &&
-                GeckoThread.checkAndSetLaunchState(GeckoThread.LaunchState.Launching,
-                                                   GeckoThread.LaunchState.Launched)) {
-            GeckoThread.createAndStart();
+        // GeckoThread has to register for "Gecko:Ready" first, so GeckoApp registers
+        // for events after initializing GeckoThread but before launching it.
 
-        } else if (ACTION_DEBUG.equals(action) &&
-                GeckoThread.checkAndSetLaunchState(GeckoThread.LaunchState.Launching,
-                                                   GeckoThread.LaunchState.WaitForDebugger)) {
-            ThreadUtils.getUiHandler().postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    GeckoThread.setLaunchState(GeckoThread.LaunchState.Launched);
-                    GeckoThread.createAndStart();
-                }
-            }, 1000 * 5 /* 5 seconds */);
+        EventDispatcher.getInstance().registerGeckoThreadListener((GeckoEventListener)this,
+            "Gecko:Ready",
+            "Gecko:DelayedStartup",
+            "Gecko:Exited",
+            "Accessibility:Event",
+            "NativeApp:IsDebuggable");
+
+        EventDispatcher.getInstance().registerGeckoThreadListener((NativeEventListener)this,
+            "Accessibility:Ready",
+            "Bookmark:Insert",
+            "Contact:Add",
+            "DOMFullScreen:Start",
+            "DOMFullScreen:Stop",
+            "Image:SetAs",
+            "Locale:Set",
+            "Permissions:Data",
+            "PrivateBrowsing:Data",
+            "Session:StatePurged",
+            "Share:Text",
+            "SystemUI:Visibility",
+            "Toast:Show",
+            "ToggleChrome:Focus",
+            "ToggleChrome:Hide",
+            "ToggleChrome:Show",
+            "Update:Check",
+            "Update:Download",
+            "Update:Install");
+
+        if (mWebappEventListener == null) {
+            mWebappEventListener = new EventListener();
+            mWebappEventListener.registerEvents();
         }
+
+        GeckoThread.launch();
 
         Bundle stateBundle = ContextUtils.getBundleExtra(getIntent(), EXTRA_STATE_BUNDLE);
         if (stateBundle != null) {
@@ -1513,39 +1537,6 @@ public abstract class GeckoApp
         //app state callbacks
         mAppStateListeners = new LinkedList<GeckoAppShell.AppStateListener>();
 
-        //register for events
-        EventDispatcher.getInstance().registerGeckoThreadListener((GeckoEventListener)this,
-            "Gecko:Ready",
-            "Gecko:DelayedStartup",
-            "Accessibility:Event",
-            "NativeApp:IsDebuggable");
-
-        EventDispatcher.getInstance().registerGeckoThreadListener((NativeEventListener)this,
-            "Accessibility:Ready",
-            "Bookmark:Insert",
-            "Contact:Add",
-            "DOMFullScreen:Start",
-            "DOMFullScreen:Stop",
-            "Image:SetAs",
-            "Locale:Set",
-            "Permissions:Data",
-            "PrivateBrowsing:Data",
-            "Session:StatePurged",
-            "Share:Text",
-            "SystemUI:Visibility",
-            "Toast:Show",
-            "ToggleChrome:Focus",
-            "ToggleChrome:Hide",
-            "ToggleChrome:Show",
-            "Update:Check",
-            "Update:Download",
-            "Update:Install");
-
-        if (mWebappEventListener == null) {
-            mWebappEventListener = new EventListener();
-            mWebappEventListener.registerEvents();
-        }
-
         if (SmsManager.isEnabled()) {
             SmsManager.getInstance().start();
         }
@@ -1584,12 +1575,16 @@ public abstract class GeckoApp
         }, 50);
 
         if (mIsRestoringActivity) {
-            GeckoThread.setLaunchState(GeckoThread.LaunchState.GeckoRunning);
             Tab selectedTab = Tabs.getInstance().getSelectedTab();
-            if (selectedTab != null)
+            if (selectedTab != null) {
                 Tabs.getInstance().notifyListeners(selectedTab, Tabs.TabEvents.SELECTED);
-            geckoConnected();
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Viewport:Flush", null));
+            }
+
+            if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
+                geckoConnected();
+                GeckoAppShell.sendEventToGecko(
+                        GeckoEvent.createBroadcastEvent("Viewport:Flush", null));
+            }
         }
 
         if (ACTION_ALERT_CALLBACK.equals(action)) {
@@ -1789,13 +1784,6 @@ public abstract class GeckoApp
     @Override
     protected void onNewIntent(Intent externalIntent) {
         final SafeIntent intent = new SafeIntent(externalIntent);
-
-        if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoExiting)) {
-            // We're exiting and shouldn't try to do anything else. In the case
-            // where we are hung while exiting, we should force the process to exit.
-            GeckoAppShell.systemExit();
-            return;
-        }
 
         // if we were previously OOM killed, we can end up here when launching
         // from external shortcuts, so set this as the intent for initialization
@@ -2008,6 +1996,7 @@ public abstract class GeckoApp
         EventDispatcher.getInstance().unregisterGeckoThreadListener((GeckoEventListener)this,
             "Gecko:Ready",
             "Gecko:DelayedStartup",
+            "Gecko:Exited",
             "Accessibility:Event",
             "NativeApp:IsDebuggable");
 
@@ -2079,6 +2068,28 @@ public abstract class GeckoApp
         super.onDestroy();
 
         Tabs.unregisterOnTabsChangedListener(this);
+
+        if (!isFinishing()) {
+            // GeckoApp was not intentionally destroyed, so keep our process alive.
+            return;
+        }
+
+        if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
+            // Let the Gecko thread prepare for exit.
+            GeckoAppShell.sendEventToGeckoSync(GeckoEvent.createAppBackgroundingEvent());
+        }
+
+        if (mRestartIntent != null) {
+            // Restarting, so let Restarter kill us.
+            final Intent intent = new Intent();
+            intent.setClass(getApplicationContext(), Restarter.class)
+                  .putExtra("pid", Process.myPid())
+                  .putExtra(Intent.EXTRA_INTENT, mRestartIntent);
+            startService(intent);
+        } else {
+            // Exiting, so kill our own process.
+            Process.killProcess(Process.myPid());
+        }
     }
 
     // Get a temporary directory, may return null
@@ -2140,43 +2151,41 @@ public abstract class GeckoApp
 
     @Override
     public void doRestart() {
-        doRestart(RESTARTER_ACTION, null, null);
+        doRestart(null, null);
     }
 
     public void doRestart(String args) {
-        doRestart(RESTARTER_ACTION, args, null);
+        doRestart(args, null);
     }
 
     public void doRestart(Intent intent) {
-        doRestart(RESTARTER_ACTION, null, intent);
+        doRestart(null, intent);
     }
 
-    public void doRestart(String action, String args, Intent restartIntent) {
-        Log.d(LOGTAG, "doRestart(\"" + action + "\")");
-        try {
-            Intent intent = new Intent(action);
-            intent.setClassName(AppConstants.ANDROID_PACKAGE_NAME, RESTARTER_CLASS);
-
-            /* TODO: addEnvToIntent(intent); */
-            if (args != null) {
-                intent.putExtra("args", args);
-            }
-
-            if (restartIntent != null) {
-                intent.putExtra(Intent.EXTRA_INTENT, restartIntent);
-            }
-
-            intent.putExtra("didRestart", true);
-            Log.d(LOGTAG, "Restart intent: " + intent.toString());
-            GeckoAppShell.killAnyZombies();
-            startActivity(intent);
-        } catch (Exception e) {
-            Log.e(LOGTAG, "Error effecting restart.", e);
+    public void doRestart(String args, Intent restartIntent) {
+        if (restartIntent == null) {
+            restartIntent = new Intent(Intent.ACTION_MAIN);
         }
 
-        finish();
-        // Give the restart process time to start before we die
-        GeckoAppShell.waitForAnotherGeckoProc();
+        if (args != null) {
+            restartIntent.putExtra("args", args);
+        }
+
+        mRestartIntent = restartIntent;
+        Log.d(LOGTAG, "doRestart(\"" + restartIntent + "\")");
+
+        doShutdown();
+    }
+
+    private void doShutdown() {
+        // Shut down GeckoApp activity.
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                if (!isFinishing() && (Versions.preJBMR1 || !isDestroyed())) {
+                    finish();
+                }
+            }
+        });
     }
 
     public void handleNotification(String action, String alertName, String alertCookie) {
@@ -2580,7 +2589,6 @@ public abstract class GeckoApp
             @Override
             public void run() {
                 GeckoApp.this.doRestart();
-                GeckoApp.this.finish();
             }
         });
     }

@@ -79,7 +79,7 @@ class IncludeManifest(ManifestItem):
         return rv
 
     def _add_rule(self, test_manifests, url, direction):
-        maybe_path = os.path.abspath(os.path.join(os.curdir, url)[1:])
+        maybe_path = os.path.join(os.path.abspath(os.curdir), url)
         rest, last = os.path.split(maybe_path)
         variant = ""
         if "#" in last:
@@ -95,7 +95,7 @@ class IncludeManifest(ManifestItem):
             for manifest, data in test_manifests.iteritems():
                 rel_path = os.path.relpath(maybe_path, data["tests_path"])
                 if ".." not in rel_path.split(os.sep):
-                    url = "/" + rel_path.replace(os.path.sep, "/") + variant
+                    url = data["url_base"] + rel_path.replace(os.path.sep, "/") + variant
                     break
 
         assert direction in ("include", "exclude")

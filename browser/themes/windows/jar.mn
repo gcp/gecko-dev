@@ -84,9 +84,6 @@ browser.jar:
         skin/classic/browser/pointerLock-64.png
         skin/classic/browser/Privacy-16.png
         skin/classic/browser/Privacy-16-XP.png
-        skin/classic/browser/Privacy-32.png
-        skin/classic/browser/Privacy-32-XP.png
-        skin/classic/browser/Privacy-48.png
         skin/classic/browser/privatebrowsing-mask-tabstrip.png
         skin/classic/browser/privatebrowsing-mask-tabstrip-XPVista7.png
         skin/classic/browser/privatebrowsing-mask-titlebar.png
@@ -128,6 +125,7 @@ browser.jar:
         skin/classic/browser/session-restore.svg                     (../shared/incontent-icons/session-restore.svg)
         skin/classic/browser/tab-crashed.svg                         (../shared/incontent-icons/tab-crashed.svg)
         skin/classic/browser/welcome-back.svg                        (../shared/incontent-icons/welcome-back.svg)
+        skin/classic/browser/reader-tour.png                         (../shared/reader/reader-tour.png)
         skin/classic/browser/readerMode.svg                          (../shared/reader/readerMode.svg)
         skin/classic/browser/readinglist/icons.svg                   (../shared/readinglist/icons.svg)
         skin/classic/browser/readinglist/readinglist-icon.svg        (../shared/readinglist/readinglist-icon.svg)
@@ -483,7 +481,9 @@ browser.jar:
         skin/classic/browser/devtools/app-manager/rocket.svg                (../shared/devtools/app-manager/images/rocket.svg)
         skin/classic/browser/devtools/app-manager/noise.png                 (../shared/devtools/app-manager/images/noise.png)
         skin/classic/browser/devtools/app-manager/default-app-icon.png      (../shared/devtools/app-manager/images/default-app-icon.png)
-
+        skin/classic/browser/devtools/search-clear-failed.svg               (../shared/devtools/images/search-clear-failed.svg)
+        skin/classic/browser/devtools/search-clear-light.svg                (../shared/devtools/images/search-clear-light.svg)
+        skin/classic/browser/devtools/search-clear-dark.svg                 (../shared/devtools/images/search-clear-dark.svg)
 #ifdef MOZ_SERVICES_SYNC
         skin/classic/browser/sync-16.png
         skin/classic/browser/sync-32.png
@@ -538,7 +538,6 @@ browser.jar:
 % override chrome://browser/skin/menu-forward.png                     chrome://browser/skin/menu-forward-XP.png                         os=WINNT osversion<6
 % override chrome://browser/skin/pageInfo.png                         chrome://browser/skin/pageInfo-XP.png                             os=WINNT osversion<6
 % override chrome://browser/skin/Privacy-16.png                       chrome://browser/skin/Privacy-16-XP.png                           os=WINNT osversion<6
-% override chrome://browser/skin/Privacy-32.png                       chrome://browser/skin/Privacy-32-XP.png                           os=WINNT osversion<6
 % override chrome://browser/skin/searchbar-dropdown-arrow.png         chrome://browser/skin/searchbar-dropdown-arrow-XP.png             os=WINNT osversion<6
 % override chrome://browser/skin/Secure24.png                         chrome://browser/skin/Secure24-XP.png                             os=WINNT osversion<6
 % override chrome://browser/skin/downloads/buttons.png                chrome://browser/skin/downloads/buttons-XP.png                    os=WINNT osversion<6

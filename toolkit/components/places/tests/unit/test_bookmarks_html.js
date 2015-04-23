@@ -104,7 +104,7 @@ add_task(function* setup() {
 
   yield BookmarkHTMLUtils.exportToFile(gBookmarksFileNew);
   yield PlacesTestUtils.promiseAsyncUpdates();
-  remove_all_bookmarks();
+  yield PlacesUtils.bookmarks.eraseEverything();
 });
 
 add_task(function* test_import_new()
@@ -118,7 +118,7 @@ add_task(function* test_import_new()
   yield testImportedBookmarks();
   yield PlacesTestUtils.promiseAsyncUpdates();
 
-  remove_all_bookmarks();
+  yield PlacesUtils.bookmarks.eraseEverything();
 });
 
 add_task(function* test_emptytitle_export()
@@ -146,7 +146,7 @@ add_task(function* test_emptytitle_export()
 
   yield BookmarkHTMLUtils.exportToFile(gBookmarksFileNew);
   yield PlacesTestUtils.promiseAsyncUpdates();
-  remove_all_bookmarks();
+  yield PlacesUtils.bookmarks.eraseEverything();
 
   yield BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true);
   yield PlacesTestUtils.promiseAsyncUpdates();
@@ -158,7 +158,7 @@ add_task(function* test_emptytitle_export()
 
   yield BookmarkHTMLUtils.exportToFile(gBookmarksFileNew);
   yield PlacesTestUtils.promiseAsyncUpdates();
-  remove_all_bookmarks();
+  yield PlacesUtils.bookmarks.eraseEverything();
 });
 
 add_task(function* test_import_chromefavicon()
@@ -214,7 +214,7 @@ add_task(function* test_import_chromefavicon()
                                   deferred.resolve);
   yield deferred.promise;
 
-  remove_all_bookmarks();
+  yield PlacesUtils.bookmarks.eraseEverything();
 
   yield BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true);
   yield PlacesTestUtils.promiseAsyncUpdates();
@@ -226,7 +226,7 @@ add_task(function* test_import_chromefavicon()
 
   yield BookmarkHTMLUtils.exportToFile(gBookmarksFileNew);
   yield PlacesTestUtils.promiseAsyncUpdates();
-  remove_all_bookmarks();
+  yield PlacesUtils.bookmarks.eraseEverything();
 });
 
 add_task(function* test_import_ontop()
@@ -248,7 +248,7 @@ add_task(function* test_import_ontop()
   yield PlacesTestUtils.promiseAsyncUpdates();
   yield testImportedBookmarks();
   yield PlacesTestUtils.promiseAsyncUpdates();
-  remove_all_bookmarks();
+  yield PlacesUtils.bookmarks.eraseEverything();
 });
 
 function* testImportedBookmarks()
@@ -322,18 +322,21 @@ function* checkItem(aExpected, aNode)
                            base64EncodeString(String.fromCharCode.apply(String, data));
           do_check_true(base64Icon == aExpected.icon);
           break;
-        case "keyword":
+        case "keyword": {
+          let entry = yield PlacesUtils.keywords.fetch({ url: aNode.uri });
+          Assert.equal(entry.keyword, aExpected.keyword);
           break;
+        }
         case "sidebar":
           do_check_eq(PlacesUtils.annotations
                                  .itemHasAnnotation(id, LOAD_IN_SIDEBAR_ANNO),
                       aExpected.sidebar);
           break;
-        case "postData":
-          do_check_eq(PlacesUtils.annotations
-                                 .getItemAnnotation(id, PlacesUtils.POST_DATA_ANNO),
-                      aExpected.postData);
+        case "postData": {
+          let entry = yield PlacesUtils.keywords.fetch({ url: aNode.uri });
+          Assert.equal(entry.postData, aExpected.postData);
           break;
+        }
         case "charset":
           let testURI = NetUtil.newURI(aNode.uri);
           do_check_eq((yield PlacesUtils.getCharsetForURI(testURI)), aExpected.charset);

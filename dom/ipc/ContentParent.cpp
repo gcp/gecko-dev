@@ -30,6 +30,7 @@
 #include "CrashReporterParent.h"
 #include "GMPServiceParent.h"
 #include "IHistory.h"
+#include "imgIContainer.h"
 #include "mozIApplication.h"
 #ifdef ACCESSIBILITY
 #include "mozilla/a11y/DocAccessibleParent.h"
@@ -130,6 +131,8 @@
 #include "nsIURIFixup.h"
 #include "nsIWindowWatcher.h"
 #include "nsIXULRuntime.h"
+#include "gfxDrawable.h"
+#include "ImageOps.h"
 #include "nsMemoryInfoDumper.h"
 #include "nsMemoryReporterManager.h"
 #include "nsServiceManagerUtils.h"
@@ -142,6 +145,7 @@
 #include "ProcessPriorityManager.h"
 #include "SandboxHal.h"
 #include "ScreenManagerParent.h"
+#include "SourceSurfaceRawData.h"
 #include "StructuredCloneUtils.h"
 #include "TabParent.h"
 #include "URIUtils.h"
@@ -152,6 +156,7 @@
 #include "prio.h"
 #include "private/pprio.h"
 #include "ContentProcessManager.h"
+#include "mozilla/psm/PSMContentListener.h"
 
 #include "nsIBidiKeyboard.h"
 
@@ -221,7 +226,6 @@ using namespace mozilla::system;
 #endif
 
 static NS_DEFINE_CID(kCClipboardCID, NS_CLIPBOARD_CID);
-static const char* sClipboardTextFlavors[] = { kUnicodeMime };
 
 using base::ChildPrivileges;
 using base::KillProcess;
@@ -246,6 +250,7 @@ using namespace mozilla::ipc;
 using namespace mozilla::layers;
 using namespace mozilla::net;
 using namespace mozilla::jsipc;
+using namespace mozilla::psm;
 using namespace mozilla::widget;
 
 #ifdef ENABLE_TESTS
@@ -1700,7 +1705,7 @@ ContentParent::ShutDownMessageManager()
   }
 
   mMessageManager->ReceiveMessage(
-            static_cast<nsIContentFrameMessageManager*>(mMessageManager.get()),
+            static_cast<nsIContentFrameMessageManager*>(mMessageManager.get()), nullptr,
             CHILD_PROCESS_SHUTDOWN_MESSAGE, false,
             nullptr, nullptr, nullptr, nullptr);
 
@@ -1880,11 +1885,6 @@ struct DelayedDeleteContentParentTask : public nsRunnable
 void
 ContentParent::ActorDestroy(ActorDestroyReason why)
 {
-#ifdef MOZ_CRASHREPORTER
-    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ChildShutdownState"),
-                                       NS_LITERAL_CSTRING("ActorDestroy"));
-#endif
-
     if (mForceKillTimer) {
         mForceKillTimer->Cancel();
         mForceKillTimer = nullptr;
@@ -2046,12 +2046,6 @@ ContentParent::NotifyTabDestroying(PBrowserParent* aTab)
     StartForceKillTimer();
 }
 
-static int32_t
-ForceKillTimeout()
-{
-    return Preferences::GetInt("dom.ipc.tabs.shutdownTimeoutSecs", 5);
-}
-
 void
 ContentParent::StartForceKillTimer()
 {
@@ -2059,7 +2053,7 @@ ContentParent::StartForceKillTimer()
         return;
     }
 
-    int32_t timeoutSecs = ForceKillTimeout();
+    int32_t timeoutSecs = Preferences::GetInt("dom.ipc.tabs.shutdownTimeoutSecs", 5);
     if (timeoutSecs > 0) {
         mForceKillTimer = do_CreateInstance("@mozilla.org/timer;1");
         MOZ_ASSERT(mForceKillTimer);
@@ -2357,6 +2351,13 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
                             bool aSetupOffMainThreadCompositing,
                             bool aSendRegisteredChrome)
 {
+    if (aSendRegisteredChrome) {
+        nsCOMPtr<nsIChromeRegistry> registrySvc = nsChromeRegistry::GetService();
+        nsChromeRegistryChrome* chromeRegistry =
+            static_cast<nsChromeRegistryChrome*>(registrySvc.get());
+        chromeRegistry->SendRegisteredChrome(this);
+    }
+
     // Initialize the message manager (and load delayed scripts) now that we
     // have established communications with the child.
     mMessageManager->InitWithCallback(this);
@@ -2397,13 +2398,6 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
         DebugOnly<bool> opened = PSharedBufferManager::Open(this);
         MOZ_ASSERT(opened);
 #endif
-    }
-
-    if (aSendRegisteredChrome) {
-        nsCOMPtr<nsIChromeRegistry> registrySvc = nsChromeRegistry::GetService();
-        nsChromeRegistryChrome* chromeRegistry =
-            static_cast<nsChromeRegistryChrome*>(registrySvc.get());
-        chromeRegistry->SendRegisteredChrome(this);
     }
 
     if (gAppData) {
@@ -2556,42 +2550,9 @@ ContentParent::RecvReadPermissions(InfallibleTArray<IPC::Permission>* aPermissio
 }
 
 bool
-ContentParent::RecvSetClipboardText(const nsString& text,
-                                       const bool& isPrivateData,
-                                       const int32_t& whichClipboard)
-{
-    nsresult rv;
-    nsCOMPtr<nsIClipboard> clipboard(do_GetService(kCClipboardCID, &rv));
-    NS_ENSURE_SUCCESS(rv, true);
-
-    nsCOMPtr<nsISupportsString> dataWrapper =
-        do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, true);
-
-    rv = dataWrapper->SetData(text);
-    NS_ENSURE_SUCCESS(rv, true);
-
-    nsCOMPtr<nsITransferable> trans = do_CreateInstance("@mozilla.org/widget/transferable;1", &rv);
-    NS_ENSURE_SUCCESS(rv, true);
-    trans->Init(nullptr);
-
-    // If our data flavor has already been added, this will fail. But we don't care
-    trans->AddDataFlavor(kUnicodeMime);
-    trans->SetIsPrivateData(isPrivateData);
-
-    nsCOMPtr<nsISupports> nsisupportsDataWrapper =
-        do_QueryInterface(dataWrapper);
-
-    rv = trans->SetTransferData(kUnicodeMime, nsisupportsDataWrapper,
-                                text.Length() * sizeof(char16_t));
-    NS_ENSURE_SUCCESS(rv, true);
-
-    clipboard->SetData(trans, nullptr, whichClipboard);
-    return true;
-}
-
-bool
-ContentParent::RecvGetClipboardText(const int32_t& whichClipboard, nsString* text)
+ContentParent::RecvSetClipboard(const IPCDataTransfer& aDataTransfer,
+                                const bool& aIsPrivateData,
+                                const int32_t& aWhichClipboard)
 {
     nsresult rv;
     nsCOMPtr<nsIClipboard> clipboard(do_GetService(kCClipboardCID, &rv));
@@ -2600,44 +2561,116 @@ ContentParent::RecvGetClipboardText(const int32_t& whichClipboard, nsString* tex
     nsCOMPtr<nsITransferable> trans = do_CreateInstance("@mozilla.org/widget/transferable;1", &rv);
     NS_ENSURE_SUCCESS(rv, true);
     trans->Init(nullptr);
-    trans->AddDataFlavor(kUnicodeMime);
 
-    clipboard->GetData(trans, whichClipboard);
-    nsCOMPtr<nsISupports> tmp;
-    uint32_t len;
-    rv = trans->GetTransferData(kUnicodeMime, getter_AddRefs(tmp), &len);
-    if (NS_FAILED(rv))
-        return true;
+    const nsTArray<IPCDataTransferItem>& items = aDataTransfer.items();
+    for (uint32_t j = 0; j < items.Length(); ++j) {
+      const IPCDataTransferItem& item = items[j];
 
-    nsCOMPtr<nsISupportsString> supportsString = do_QueryInterface(tmp);
-    // No support for non-text data
-    if (!supportsString)
-        return true;
-    supportsString->GetData(*text);
+      trans->AddDataFlavor(item.flavor().get());
+
+      if (item.data().type() == IPCDataTransferData::TnsString) {
+        nsCOMPtr<nsISupportsString> dataWrapper =
+          do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID, &rv);
+        NS_ENSURE_SUCCESS(rv, true);
+
+        nsString text = item.data().get_nsString();
+        rv = dataWrapper->SetData(text);
+        NS_ENSURE_SUCCESS(rv, true);
+
+        rv = trans->SetTransferData(item.flavor().get(), dataWrapper,
+                                    text.Length() * sizeof(char16_t));
+
+        NS_ENSURE_SUCCESS(rv, true);
+      } else if (item.data().type() == IPCDataTransferData::TnsCString) {
+        const IPCDataTransferImage& imageDetails = item.imageDetails();
+        const gfxIntSize size(imageDetails.width(), imageDetails.height());
+        if (!size.width || !size.height) {
+          return true;
+        }
+
+        nsCString text = item.data().get_nsCString();
+        mozilla::RefPtr<gfx::DataSourceSurface> image =
+          new mozilla::gfx::SourceSurfaceRawData();
+        mozilla::gfx::SourceSurfaceRawData* raw =
+          static_cast<mozilla::gfx::SourceSurfaceRawData*>(image.get());
+        raw->InitWrappingData(
+          reinterpret_cast<uint8_t*>(const_cast<nsCString&>(text).BeginWriting()),
+          size, imageDetails.stride(),
+          static_cast<mozilla::gfx::SurfaceFormat>(imageDetails.format()), false);
+        raw->GuaranteePersistance();
+
+        nsRefPtr<gfxDrawable> drawable = new gfxSurfaceDrawable(image, size);
+        nsCOMPtr<imgIContainer> imageContainer(image::ImageOps::CreateFromDrawable(drawable)); 
+
+        nsCOMPtr<nsISupportsInterfacePointer>
+          imgPtr(do_CreateInstance(NS_SUPPORTS_INTERFACE_POINTER_CONTRACTID, &rv));
+
+        rv = imgPtr->SetData(imageContainer);
+        NS_ENSURE_SUCCESS(rv, true);
+
+        trans->SetTransferData(item.flavor().get(), imgPtr, sizeof(nsISupports*));
+      }
+    }
+
+    trans->SetIsPrivateData(aIsPrivateData);
+
+    clipboard->SetData(trans, nullptr, aWhichClipboard);
     return true;
 }
 
 bool
-ContentParent::RecvEmptyClipboard(const int32_t& whichClipboard)
+ContentParent::RecvGetClipboard(nsTArray<nsCString>&& aTypes,
+                                const int32_t& aWhichClipboard,
+                                IPCDataTransfer* aDataTransfer)
 {
     nsresult rv;
     nsCOMPtr<nsIClipboard> clipboard(do_GetService(kCClipboardCID, &rv));
     NS_ENSURE_SUCCESS(rv, true);
 
-    clipboard->EmptyClipboard(whichClipboard);
+    nsCOMPtr<nsITransferable> trans = do_CreateInstance("@mozilla.org/widget/transferable;1", &rv);
+    NS_ENSURE_SUCCESS(rv, true);
+    trans->Init(nullptr);
 
+    for (uint32_t t = 0; t < aTypes.Length(); t++) {
+      trans->AddDataFlavor(aTypes[t].get());
+    }
+
+    clipboard->GetData(trans, aWhichClipboard);
+    nsContentUtils::TransferableToIPCTransferable(trans, aDataTransfer,
+                                                  nullptr, this);
     return true;
 }
 
 bool
-ContentParent::RecvClipboardHasText(const int32_t& whichClipboard, bool* hasText)
+ContentParent::RecvEmptyClipboard(const int32_t& aWhichClipboard)
 {
     nsresult rv;
     nsCOMPtr<nsIClipboard> clipboard(do_GetService(kCClipboardCID, &rv));
     NS_ENSURE_SUCCESS(rv, true);
 
-    clipboard->HasDataMatchingFlavors(sClipboardTextFlavors, 1,
-                                      whichClipboard, hasText);
+    clipboard->EmptyClipboard(aWhichClipboard);
+
+    return true;
+}
+
+bool
+ContentParent::RecvClipboardHasType(nsTArray<nsCString>&& aTypes,
+                                    const int32_t& aWhichClipboard,
+                                    bool* aHasType)
+{
+    nsresult rv;
+    nsCOMPtr<nsIClipboard> clipboard(do_GetService(kCClipboardCID, &rv));
+    NS_ENSURE_SUCCESS(rv, true);
+
+    const char** typesChrs = new const char *[aTypes.Length()];
+    for (uint32_t t = 0; t < aTypes.Length(); t++) {
+      typesChrs[t] = aTypes[t].get();
+    }
+
+    clipboard->HasDataMatchingFlavors(typesChrs, aTypes.Length(),
+                                      aWhichClipboard, aHasType);
+
+    delete [] typesChrs;
     return true;
 }
 
@@ -2891,27 +2924,13 @@ ContentParent::Observe(nsISupports* aSubject,
 {
     if (mSubprocess && (!strcmp(aTopic, "profile-before-change") ||
                         !strcmp(aTopic, "xpcom-shutdown"))) {
-#ifdef MOZ_CRASHREPORTER
-        CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ChildShutdownState"),
-                                           NS_LITERAL_CSTRING("Begin"));
-#endif
-
         // Okay to call ShutDownProcess multiple times.
         ShutDownProcess(SEND_SHUTDOWN_MESSAGE);
-
-        int32_t timeout = ForceKillTimeout();
-
-        // Make sure we have a KillHard timer before we start waiting.
-        MOZ_RELEASE_ASSERT(!timeout || !mIPCOpen || mCalledKillHard || mForceKillTimer);
 
         // Wait for shutdown to complete, so that we receive any shutdown
         // data (e.g. telemetry) from the child before we quit.
         // This loop terminate prematurely based on mForceKillTimer.
-        while (mIPCOpen) {
-            // If we clear the KillHard timer, it should only be because we
-            // called KillHard. In that case, ActorDestroy should happen
-            // momentarily.
-            MOZ_RELEASE_ASSERT(!timeout || mCalledKillHard || mForceKillTimer);
+        while (mIPCOpen && !mCalledKillHard) {
             NS_ProcessNextEvent(nullptr, true);
         }
         NS_ASSERTION(!mSubprocess, "Close should have nulled mSubprocess");
@@ -3358,11 +3377,6 @@ ContentParent::ForceKillTimerCallback(nsITimer* aTimer, void* aClosure)
 void
 ContentParent::KillHard(const char* aReason)
 {
-#ifdef MOZ_CRASHREPORTER
-    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ChildShutdownState"),
-                                       NS_LITERAL_CSTRING("KillHard"));
-#endif
-
     // On Windows, calling KillHard multiple times causes problems - the
     // process handle becomes invalid on the first call, causing a second call
     // to crash our process - more details in bug 890840.
@@ -3650,6 +3664,22 @@ bool
 ContentParent::DeallocPScreenManagerParent(PScreenManagerParent* aActor)
 {
     delete aActor;
+    return true;
+}
+
+PPSMContentDownloaderParent*
+ContentParent::AllocPPSMContentDownloaderParent(const uint32_t& aCertType)
+{
+    nsRefPtr<PSMContentDownloaderParent> downloader =
+        new PSMContentDownloaderParent(aCertType);
+    return downloader.forget().take();
+}
+
+bool
+ContentParent::DeallocPPSMContentDownloaderParent(PPSMContentDownloaderParent* aListener)
+{
+    auto* listener = static_cast<PSMContentDownloaderParent*>(aListener);
+    nsRefPtr<PSMContentDownloaderParent> downloader = dont_AddRef(listener);
     return true;
 }
 

@@ -211,6 +211,10 @@ GetBuildConfiguration(JSContext* cx, unsigned argc, jsval* vp)
     if (!JS_SetProperty(cx, info, "moz-memory", value))
         return false;
 
+    value.setInt32(sizeof(void *));
+    if (!JS_SetProperty(cx, info, "pointer-byte-size", value))
+        return false;
+
     args.rval().setObject(*info);
     return true;
 }
@@ -1419,7 +1423,7 @@ DisplayName(JSContext* cx, unsigned argc, jsval* vp)
 }
 
 static JSObject*
-ShellObjectMetadataCallback(JSContext* cx)
+ShellObjectMetadataCallback(JSContext* cx, JSObject*)
 {
     RootedObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
     if (!obj)
@@ -2106,7 +2110,7 @@ static bool
 ReportLargeAllocationFailure(JSContext* cx, unsigned argc, jsval* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    void* buf = cx->runtime()->onOutOfMemoryCanGC(NULL, JSRuntime::LARGE_ALLOCATION);
+    void* buf = cx->runtime()->onOutOfMemoryCanGC(AllocFunction::Malloc, JSRuntime::LARGE_ALLOCATION);
     js_free(buf);
     args.rval().setUndefined();
     return true;
@@ -2473,11 +2477,18 @@ ByteSize(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     mozilla::MallocSizeOf mallocSizeOf = cx->runtime()->debuggerMallocSizeOf;
-    JS::ubi::Node node = args.get(0);
-    if (node)
-        args.rval().set(NumberValue(node.size(mallocSizeOf)));
-    else
-        args.rval().setUndefined();
+
+    {
+        // We can't tolerate the GC moving things around while we're using a
+        // ubi::Node. Check that nothing we do causes a GC.
+        JS::AutoCheckCannotGC autoCannotGC;
+
+        JS::ubi::Node node = args.get(0);
+        if (node)
+            args.rval().setNumber(uint32_t(node.size(mallocSizeOf)));
+        else
+            args.rval().setUndefined();
+    }
     return true;
 }
 

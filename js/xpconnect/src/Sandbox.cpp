@@ -885,6 +885,8 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
     JS::CompartmentOptions compartmentOptions;
     if (options.sameZoneAs)
         compartmentOptions.setSameZoneAs(js::UncheckedUnwrap(options.sameZoneAs));
+    else if (options.freshZone)
+        compartmentOptions.setZone(JS::FreshZone);
     else
         compartmentOptions.setZone(JS::SystemZone);
 
@@ -1360,18 +1362,28 @@ SandboxOptions::ParseGlobalProperties()
 bool
 SandboxOptions::Parse()
 {
-    return ParseObject("sandboxPrototype", &proto) &&
-           ParseBoolean("wantXrays", &wantXrays) &&
-           ParseBoolean("wantComponents", &wantComponents) &&
-           ParseBoolean("wantExportHelpers", &wantExportHelpers) &&
-           ParseString("sandboxName", sandboxName) &&
-           ParseObject("sameZoneAs", &sameZoneAs) &&
-           ParseBoolean("invisibleToDebugger", &invisibleToDebugger) &&
-           ParseBoolean("discardSource", &discardSource) &&
-           ParseJSString("addonId", &addonId) &&
-           ParseBoolean("writeToGlobalPrototype", &writeToGlobalPrototype) &&
-           ParseGlobalProperties() &&
-           ParseValue("metadata", &metadata);
+    bool ok = ParseObject("sandboxPrototype", &proto) &&
+              ParseBoolean("wantXrays", &wantXrays) &&
+              ParseBoolean("wantComponents", &wantComponents) &&
+              ParseBoolean("wantExportHelpers", &wantExportHelpers) &&
+              ParseString("sandboxName", sandboxName) &&
+              ParseObject("sameZoneAs", &sameZoneAs) &&
+              ParseBoolean("freshZone", &freshZone) &&
+              ParseBoolean("invisibleToDebugger", &invisibleToDebugger) &&
+              ParseBoolean("discardSource", &discardSource) &&
+              ParseJSString("addonId", &addonId) &&
+              ParseBoolean("writeToGlobalPrototype", &writeToGlobalPrototype) &&
+              ParseGlobalProperties() &&
+              ParseValue("metadata", &metadata);
+    if (!ok)
+        return false;
+
+    if (freshZone && sameZoneAs) {
+        JS_ReportError(mCx, "Cannot use both sameZoneAs and freshZone");
+        return false;
+    }
+
+    return true;
 }
 
 static nsresult
@@ -1522,7 +1534,7 @@ xpc::EvalInSandbox(JSContext* cx, HandleObject sandboxArg, const nsAString& sour
     {
         // We're about to evaluate script, so make an AutoEntryScript.
         // This is clearly Gecko-specific and not in any spec.
-        mozilla::dom::AutoEntryScript aes(priv);
+        mozilla::dom::AutoEntryScript aes(priv, "XPConnect sandbox evaluation");
         JSContext* sandcx = aes.cx();
         AutoSaveContextOptions savedOptions(sandcx);
         JS::ContextOptionsRef(sandcx).setDontReportUncaught(true);

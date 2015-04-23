@@ -372,6 +372,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     this._onContextNewTabCommand = this.openRequestInTab.bind(this);
     this._onContextCopyUrlCommand = this.copyUrl.bind(this);
     this._onContextCopyImageAsDataUriCommand = this.copyImageAsDataUri.bind(this);
+    this._onContextCopyResponseCommand = this.copyResponse.bind(this);
     this._onContextResendCommand = this.cloneSelectedRequest.bind(this);
     this._onContextToggleRawHeadersCommand = this.toggleRawHeaders.bind(this);
     this._onContextPerfCommand = () => NetMonitorView.toggleFrontendMode();
@@ -395,6 +396,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     $("#network-request-popup").addEventListener("popupshowing", this._onContextShowing, false);
     $("#request-menu-context-newtab").addEventListener("command", this._onContextNewTabCommand, false);
     $("#request-menu-context-copy-url").addEventListener("command", this._onContextCopyUrlCommand, false);
+    $("#request-menu-context-copy-response").addEventListener("command", this._onContextCopyResponseCommand, false);
     $("#request-menu-context-copy-image-as-data-uri").addEventListener("command", this._onContextCopyImageAsDataUriCommand, false);
     $("#toggle-raw-headers").addEventListener("click", this.toggleRawHeadersEvent, false);
 
@@ -455,6 +457,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     $("#network-request-popup").removeEventListener("popupshowing", this._onContextShowing, false);
     $("#request-menu-context-newtab").removeEventListener("command", this._onContextNewTabCommand, false);
     $("#request-menu-context-copy-url").removeEventListener("command", this._onContextCopyUrlCommand, false);
+    $("#request-menu-context-copy-response").removeEventListener("command", this._onContextCopyResponseCommand, false);
     $("#request-menu-context-copy-image-as-data-uri").removeEventListener("command", this._onContextCopyImageAsDataUriCommand, false);
     $("#request-menu-context-resend").removeEventListener("command", this._onContextResendCommand, false);
     $("#request-menu-context-perf").removeEventListener("command", this._onContextPerfCommand, false);
@@ -602,6 +605,18 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     gNetwork.getString(text).then(aString => {
       let data = "data:" + mimeType + ";" + encoding + "," + aString;
       clipboardHelper.copyString(data, document);
+    });
+  },
+
+  /**
+   * Copy response data as a string.
+   */
+  copyResponse: function() {
+    let selected = this.selectedItem.attachment;
+    let text = selected.responseContent.content.text;
+
+    gNetwork.getString(text).then(aString => {
+      clipboardHelper.copyString(aString, document);
     });
   },
 
@@ -1215,6 +1230,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
             break;
           case "remoteAddress":
             requestItem.attachment.remoteAddress = value;
+            this.updateMenuView(requestItem, key, value);
             break;
           case "remotePort":
             requestItem.attachment.remotePort = value;
@@ -1367,6 +1383,11 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
         domain.setAttribute("tooltiptext", hostPort);
         break;
       }
+      case "remoteAddress":
+        let domain = $(".requests-menu-domain", target);
+        let tooltip = domain.getAttribute("value") + " (" + aValue + ")";
+        domain.setAttribute("tooltiptext", tooltip);
+        break;
       case "securityState": {
         let tooltip = L10N.getStr("netmonitor.security.state." + aValue);
         let icon = $(".requests-security-state-icon", target);
@@ -1754,6 +1775,12 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 
     let copyAsCurlElement = $("#request-menu-context-copy-as-curl");
     copyAsCurlElement.hidden = !selectedItem || !selectedItem.attachment.responseContent;
+
+    let copyResponse = $("#request-menu-context-copy-response");
+    copyResponse.hidden = !selectedItem ||
+      !selectedItem.attachment.responseContent ||
+      !selectedItem.attachment.responseContent.content.text ||
+      selectedItem.attachment.responseContent.content.text.length === 0;
 
     let copyImageAsDataUriElement = $("#request-menu-context-copy-image-as-data-uri");
     copyImageAsDataUriElement.hidden = !selectedItem ||

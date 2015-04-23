@@ -511,10 +511,8 @@ namespace detail {
 template<typename T, MemoryOrdering Order>
 class AtomicBase
 {
-  // We only support 32-bit types on 32-bit Windows, which constrains our
-  // implementation elsewhere.  But we support pointer-sized types everywhere.
-  static_assert(sizeof(T) == 4 || (sizeof(uintptr_t) == 8 && sizeof(T) == 8),
-                "mozilla/Atomics.h only supports 32-bit and pointer-sized types");
+  static_assert(sizeof(T) == 4 || sizeof(T) == 8,
+                "mozilla/Atomics.h only supports 32-bit and 64-bit types");
 
 protected:
   typedef typename detail::AtomicIntrinsics<T, Order> Intrinsics;
@@ -744,7 +742,7 @@ public:
   explicit MOZ_CONSTEXPR Atomic(bool aInit) : Base(aInit) {}
 
   // We provide boolean wrappers for the underlying AtomicBase methods.
-  operator bool() const
+  MOZ_IMPLICIT operator bool() const
   {
     return Base::Intrinsics::load(Base::mValue);
   }

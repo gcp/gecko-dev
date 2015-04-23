@@ -251,6 +251,8 @@ pref("browser.uitour.loglevel", "Error");
 pref("browser.uitour.requireSecure", true);
 pref("browser.uitour.themeOrigin", "https://addons.mozilla.org/%LOCALE%/firefox/themes/");
 pref("browser.uitour.url", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/tour/");
+// This is used as a regexp match against the page's URL.
+pref("browser.uitour.readerViewTrigger", "^https:\\/\\/www\\.mozilla\\.org\\/[^\\/]+\\/firefox\\/reading\\/start");
 
 pref("browser.customizemode.tip0.shown", false);
 pref("browser.customizemode.tip0.learnMoreUrl", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/customize");
@@ -1878,10 +1880,15 @@ pref("dom.ipc.reportProcessHangs", false);
 pref("dom.ipc.reportProcessHangs", true);
 #endif
 
-// Enable ReadingList browser UI by default.
-pref("browser.readinglist.enabled", true);
+pref("browser.readinglist.enabled", false);
 pref("browser.readinglist.sidebarEverOpened", false);
-
-// Enable the readinglist engine by default.
-pref("readinglist.scheduler.enabled", true);
+pref("readinglist.scheduler.enabled", false);
 pref("readinglist.server", "https://readinglist.services.mozilla.com/v1");
+
+// Don't limit how many nodes we care about on desktop:
+pref("reader.parse-node-limit", 0);
+
+// Enable Service workers for desktop on non-release builds
+#ifdef NIGHTLY_BUILD
+pref("dom.serviceWorkers.enabled", true);
+#endif

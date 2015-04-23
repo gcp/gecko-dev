@@ -35,10 +35,7 @@ namespace js {
 
 class AutoPropertyDescriptorVector;
 class GCMarker;
-struct NativeIterator;
 class Nursery;
-class ObjectElements;
-struct StackShape;
 
 namespace gc {
 class RelocationOverlay;
@@ -75,11 +72,7 @@ extern const Class JSONClass;
 extern const Class MathClass;
 
 class GlobalObject;
-class MapObject;
 class NewObjectCache;
-class NormalArgumentsObject;
-class SetObject;
-class StrictArgumentsObject;
 
 // Forward declarations, required for later friend declarations.
 bool PreventExtensions(JSContext* cx, JS::HandleObject obj, JS::ObjectOpResult& result);
@@ -263,7 +256,7 @@ class JSObject : public js::gc::Cell
 
     /* GC support. */
 
-    void markChildren(JSTracer* trc);
+    void traceChildren(JSTracer* trc);
 
     void fixupAfterMovingGC();
 
@@ -289,12 +282,21 @@ class JSObject : public js::gc::Cell
     static MOZ_ALWAYS_INLINE void writeBarrierPostRelocate(JSObject* obj, void* cellp);
     static MOZ_ALWAYS_INLINE void writeBarrierPostRemove(JSObject* obj, void* cellp);
 
+    /* Return the allocKind we would use if we were to tenure this object. */
+    js::gc::AllocKind allocKindForTenure(const js::Nursery &nursery) const;
+
     size_t tenuredSizeOfThis() const {
         MOZ_ASSERT(isTenured());
         return js::gc::Arena::thingSize(asTenured().getAllocKind());
     }
 
     void addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::ClassInfo* info);
+
+    // We can only use addSizeOfExcludingThis on tenured objects: it assumes it
+    // can apply mallocSizeOf to bits and pieces of the object, whereas objects
+    // in the nursery may have those bits and pieces allocated in the nursery
+    // along with them, and are not each their own malloc blocks.
+    size_t sizeOfIncludingThisInNursery() const;
 
     /*
      * Marks this object as having a singleton type, and leave the group lazy.
@@ -1213,9 +1215,25 @@ GetOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
 bool
 GetOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id, MutableHandleValue vp);
 
-/* ES6 draft rev 32 (2015 Feb 2) 6.2.4.4 FromPropertyDescriptor(Desc) */
-bool
+/*
+ * ES6 draft rev 32 (2015 Feb 2) 6.2.4.4 FromPropertyDescriptor(Desc).
+ *
+ * If desc.object() is null, then vp is set to undefined.
+ */
+extern bool
 FromPropertyDescriptor(JSContext* cx, Handle<PropertyDescriptor> desc, MutableHandleValue vp);
+
+/*
+ * Like FromPropertyDescriptor, but ignore desc.object() and always set vp
+ * to an object on success.
+ *
+ * Use FromPropertyDescriptor for getOwnPropertyDescriptor, since desc.object()
+ * is used to indicate whether a result was found or not.  Use this instead for
+ * defineProperty: it would be senseless to define a "missing" property.
+ */
+extern bool
+FromPropertyDescriptorToObject(JSContext* cx, Handle<PropertyDescriptor> desc,
+                               MutableHandleValue vp);
 
 extern bool
 IsDelegate(JSContext* cx, HandleObject obj, const Value& v, bool* result);
@@ -1248,9 +1266,6 @@ XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj);
 
 extern JSObject*
 CloneObjectLiteral(JSContext* cx, HandleObject srcObj);
-
-extern void
-GetObjectSlotName(JSTracer* trc, char* buf, size_t bufsize);
 
 extern bool
 ReportGetterOnlyAssignment(JSContext* cx, bool strict);

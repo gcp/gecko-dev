@@ -46,6 +46,19 @@ fetchXHR('synthesized-headers.txt', function(xhr) {
   finish();
 });
 
+fetch('synthesized-redirect-real-file.txt', function(xhr) {
+dump("Got status AARRGH " + xhr.status + " " + xhr.responseText + "\n");
+  my_ok(xhr.status == 200, "load should be successful");
+  my_ok(xhr.responseText == "This is a real file.\n", "Redirect to real file should complete.");
+  finish();
+});
+
+fetch('synthesized-redirect-synthesized.txt', function(xhr) {
+  my_ok(xhr.status == 200, "load should be successful");
+  my_ok(xhr.responseText == "synthesized response body", "load should have synthesized response");
+  finish();
+});
+
 fetchXHR('ignored.txt', function(xhr) {
   my_ok(xhr.status == 404, "load should be uninterrupted");
   finish();
@@ -97,10 +110,10 @@ fetchXHR('hello.gz', function(xhr) {
 });
 
 fetchXHR('hello-after-extracting.gz', function(xhr) {
-  my_ok(xhr.status == 200, "gzip load should be successful");
-  my_ok(xhr.responseText == expectedUncompressedResponse, "gzip load should have synthesized response.");
-  my_ok(xhr.getResponseHeader("Content-Encoding") == "gzip", "Content-Encoding should be gzip.");
-  my_ok(xhr.getResponseHeader("Content-Length") == "35", "Content-Length should be of original gzipped file.");
+  my_ok(xhr.status == 200, "gzip load after extracting should be successful");
+  my_ok(xhr.responseText == expectedUncompressedResponse, "gzip load after extracting should have synthesized response.");
+  my_ok(xhr.getResponseHeader("Content-Encoding") == "gzip", "Content-Encoding after extracting should be gzip.");
+  my_ok(xhr.getResponseHeader("Content-Length") == "35", "Content-Length after extracting should be of original gzipped file.");
   finish();
 });
 

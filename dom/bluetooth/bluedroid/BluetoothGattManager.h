@@ -26,7 +26,6 @@ public:
   static BluetoothGattManager* Get();
   static void InitGattInterface(BluetoothProfileResultHandler* aRes);
   static void DeinitGattInterface(BluetoothProfileResultHandler* aRes);
-  virtual ~BluetoothGattManager();
 
   void Connect(const nsAString& aAppUuid,
                const nsAString& aDeviceAddr,
@@ -56,7 +55,38 @@ public:
                                const BluetoothGattId& aCharId,
                                BluetoothReplyRunnable* aRunnable);
 
+  void ReadCharacteristicValue(
+    const nsAString& aAppUuid,
+    const BluetoothGattServiceId& aServiceId,
+    const BluetoothGattId& aCharacteristicId,
+    BluetoothReplyRunnable* aRunnable);
+
+  void WriteCharacteristicValue(
+    const nsAString& aAppUuid,
+    const BluetoothGattServiceId& aServiceId,
+    const BluetoothGattId& aCharacteristicId,
+    const BluetoothGattWriteType& aWriteType,
+    const nsTArray<uint8_t>& aValue,
+    BluetoothReplyRunnable* aRunnable);
+
+  void ReadDescriptorValue(
+    const nsAString& aAppUuid,
+    const BluetoothGattServiceId& aServiceId,
+    const BluetoothGattId& aCharacteristicId,
+    const BluetoothGattId& aDescriptorId,
+    BluetoothReplyRunnable* aRunnable);
+
+  void WriteDescriptorValue(
+    const nsAString& aAppUuid,
+    const BluetoothGattServiceId& aServiceId,
+    const BluetoothGattId& aCharacteristicId,
+    const BluetoothGattId& aDescriptorId,
+    const nsTArray<uint8_t>& aValue,
+    BluetoothReplyRunnable* aRunnable);
+
 private:
+  ~BluetoothGattManager();
+
   class CleanupResultHandler;
   class CleanupResultHandlerRunnable;
   class InitGattResultHandler;
@@ -68,6 +98,10 @@ private:
   class ReadRemoteRssiResultHandler;
   class RegisterNotificationsResultHandler;
   class DeregisterNotificationsResultHandler;
+  class ReadCharacteristicValueResultHandler;
+  class WriteCharacteristicValueResultHandler;
+  class ReadDescriptorValueResultHandler;
+  class WriteDescriptorValueResultHandler;
 
   BluetoothGattManager();
 
@@ -102,7 +136,7 @@ private:
     int aConnId, BluetoothGattStatus aStatus,
     const BluetoothGattServiceId& aServiceId,
     const BluetoothGattId& aCharId,
-    int aCharProperty) override;
+    const BluetoothGattCharProp& aCharProperty) override;
 
   void GetDescriptorNotification(
     int aConnId, BluetoothGattStatus aStatus,

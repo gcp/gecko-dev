@@ -23,21 +23,7 @@
 #include "Units.h"
 
 extern nsIntRect gScreenBounds;
-
-namespace mozilla {
-namespace gl {
-class GLContext;
-}
-namespace layers {
-class LayersManager;
-}
-}
-
 class ANativeWindowBuffer;
-
-namespace android {
-class FramebufferNativeWindow;
-}
 
 namespace widget {
 struct InputContext;
@@ -82,6 +68,7 @@ public:
     NS_IMETHOD ConfigureChildren(const nsTArray<nsIWidget::Configuration>&);
     NS_IMETHOD Invalidate(const nsIntRect &aRect);
     virtual void* GetNativeData(uint32_t aDataType);
+    virtual void SetNativeData(uint32_t aDataType, uintptr_t aVal);
     NS_IMETHOD SetTitle(const nsAString& aTitle)
     {
         return NS_OK;

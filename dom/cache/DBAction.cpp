@@ -14,6 +14,7 @@
 #include "nsIFile.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
+#include "nsThreadUtils.h"
 #include "DBSchema.h"
 #include "FileUtils.h"
 
@@ -146,15 +147,16 @@ DBAction::OpenConnection(const QuotaInfo& aQuotaInfo, nsIFile* aDBDir,
   int32_t schemaVersion = 0;
   rv = conn->GetSchemaVersion(&schemaVersion);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-  if (schemaVersion > 0 && schemaVersion < DBSchema::kMaxWipeSchemaVersion) {
+  if (schemaVersion > 0 && schemaVersion < db::kMaxWipeSchemaVersion) {
     conn = nullptr;
     rv = WipeDatabase(dbFile, aDBDir);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
     rv = ss->OpenDatabaseWithFileURL(dbFileUrl, getter_AddRefs(conn));
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   }
 
-  rv = DBSchema::InitializeConnection(conn);
+  rv = db::InitializeConnection(conn);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   conn.forget(aConnOut);
@@ -169,7 +171,7 @@ DBAction::WipeDatabase(nsIFile* aDBFile, nsIFile* aDBDir)
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   // Delete the morgue as well.
-  rv = FileUtils::BodyDeleteDir(aDBDir);
+  rv = BodyDeleteDir(aDBDir);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   return rv;

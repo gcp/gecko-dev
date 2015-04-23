@@ -32,6 +32,7 @@ from ..frontend.data import (
     ContextDerived,
     ContextWrapped,
     Defines,
+    DistFiles,
     DirectoryTraversal,
     Exports,
     ExternalLibrary,
@@ -557,6 +558,15 @@ class RecursiveMakeBackend(CommonBackend):
 
         elif isinstance(obj, FinalTargetFiles):
             self._process_final_target_files(obj, obj.files, obj.target)
+
+        elif isinstance(obj, DistFiles):
+            # We'd like to install these via manifests as preprocessed files.
+            # But they currently depend on non-standard flags being added via
+            # some Makefiles, so for now we just pass them through to the
+            # underlying Makefile.in.
+            for f in obj.files:
+                backend_file.write('DIST_FILES += %s\n' % f)
+
         else:
             return
         obj.ack()
@@ -692,13 +702,17 @@ class RecursiveMakeBackend(CommonBackend):
             rule.add_dependencies(['$(CURDIR)/%: %'])
 
     def _check_blacklisted_variables(self, makefile_in, makefile_content):
+        if b'EXTERNALLY_MANAGED_MAKE_FILE' in makefile_content:
+            # Bypass the variable restrictions for externally managed makefiles.
+            return
+
         for x in MOZBUILD_VARIABLES:
-            if re.search(r'[^#]\b%s\s*[:?+]?=' % x, makefile_content, re.M):
+            if re.search(r'^[^#]*\b%s\s*[:?+]?=' % x, makefile_content, re.M):
                 raise Exception('Variable %s is defined in %s. It should '
                     'only be defined in moz.build files.' % (x, makefile_in))
 
         for x in DEPRECATED_VARIABLES:
-            if re.search(r'[^#]\b%s\s*[:?+]?=' % x, makefile_content, re.M):
+            if re.search(r'^[^#]*\b%s\s*[:?+]?=' % x, makefile_content, re.M):
                 raise Exception('Variable %s is defined in %s. This variable '
                     'has been deprecated. It does nothing. It must be removed '
                     'in order to build.' % (x, makefile_in))

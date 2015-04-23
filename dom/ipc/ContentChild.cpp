@@ -38,6 +38,7 @@
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
 #include "mozilla/dom/asmjscache/PAsmJSCacheEntryChild.h"
 #include "mozilla/dom/nsIContentChild.h"
+#include "mozilla/psm/PSMContentListener.h"
 #include "mozilla/hal_sandbox/PHalChild.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/FileDescriptorSetChild.h"
@@ -78,6 +79,7 @@
 #include "nsIMutable.h"
 #include "nsIObserverService.h"
 #include "nsIScriptSecurityManager.h"
+#include "nsIServiceWorkerManager.h"
 #include "nsScreenManagerProxy.h"
 #include "nsMemoryInfoDumper.h"
 #include "nsServiceManagerUtils.h"
@@ -202,6 +204,7 @@ using namespace mozilla::ipc;
 using namespace mozilla::layers;
 using namespace mozilla::net;
 using namespace mozilla::jsipc;
+using namespace mozilla::psm;
 using namespace mozilla::widget;
 #if defined(MOZ_WIDGET_GONK)
 using namespace mozilla::system;
@@ -1239,6 +1242,16 @@ ContentChild::RecvBidiKeyboardNotify(const bool& aIsLangRTL)
     return true;
 }
 
+bool
+ContentChild::RecvUpdateServiceWorkerRegistrations()
+{
+    nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
+    if (swm) {
+        swm->UpdateAllRegistrations();
+    }
+    return true;
+}
+
 static CancelableTask* sFirstIdleTask;
 
 static void FirstIdle(void)
@@ -1609,6 +1622,22 @@ ContentChild::DeallocPScreenManagerChild(PScreenManagerChild* aService)
     // nsScreenManagerProxy is AddRef'd in its constructor.
     nsScreenManagerProxy *child = static_cast<nsScreenManagerProxy*>(aService);
     child->Release();
+    return true;
+}
+
+PPSMContentDownloaderChild*
+ContentChild::AllocPPSMContentDownloaderChild(const uint32_t& aCertType)
+{
+    // NB: We don't need aCertType in the child actor.
+    nsRefPtr<PSMContentDownloaderChild> child = new PSMContentDownloaderChild();
+    return child.forget().take();
+}
+
+bool
+ContentChild::DeallocPPSMContentDownloaderChild(PPSMContentDownloaderChild* aListener)
+{
+    auto* listener = static_cast<PSMContentDownloaderChild*>(aListener);
+    nsRefPtr<PSMContentDownloaderChild> child = dont_AddRef(listener);
     return true;
 }
 
@@ -2008,7 +2037,7 @@ ContentChild::RecvAsyncMessage(const nsString& aMsg,
     if (cpm) {
         StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForChild(aData);
         CrossProcessCpowHolder cpows(this, aCpows);
-        cpm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(cpm.get()),
+        cpm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(cpm.get()), nullptr,
                             aMsg, false, &cloneData, &cpows, aPrincipal, nullptr);
     }
     return true;
@@ -2251,6 +2280,13 @@ ContentChild::RecvFilePathUpdate(const nsString& aStorageType,
                                  const nsString& aPath,
                                  const nsCString& aReason)
 {
+    if (nsDOMDeviceStorage::InstanceCount() == 0) {
+        // No device storage instances in this process. Don't try and
+        // and create a DeviceStorageFile since it will fail.
+
+        return true;
+    }
+
     nsRefPtr<DeviceStorageFile> dsf = new DeviceStorageFile(aStorageType, aStorageName, aPath);
 
     nsString reason;
@@ -2800,6 +2836,8 @@ ContentChild::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
             BlobChild* blob = static_cast<BlobChild*>(item.data().get_PBlobChild());
             nsRefPtr<FileImpl> fileImpl = blob->GetBlobImpl();
             variant->SetAsISupports(fileImpl);
+          } else {
+            continue;
           }
           dataTransfer->SetDataWithPrincipal(NS_ConvertUTF8toUTF16(item.flavor()),
                                              variant, i,

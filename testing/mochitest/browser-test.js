@@ -132,6 +132,9 @@ function testInit() {
     // In non-e10s, only run the ShutdownLeaksCollector in the parent process.
     Components.utils.import("chrome://mochikit/content/ShutdownLeaksCollector.jsm");
   }
+
+  let gmm = Cc["@mozilla.org/globalmessagemanager;1"].getService(Ci.nsIMessageListenerManager);
+  gmm.loadFrameScript("chrome://mochikit/content/tests/SimpleTest/AsyncUtilsContent.js", true);
 }
 
 function Tester(aTests, aDumper, aCallback) {
@@ -909,9 +912,9 @@ function testScope(aTester, aTest, expected) {
 
   var self = this;
   this.ok = function test_ok(condition, name, diag, stack) {
-    if (this.__expected == 'fail') {
+    if (self.__expected == 'fail') {
         if (!condition) {
-          this.__num_failed++;
+          self.__num_failed++;
           condition = true;
         }
     }

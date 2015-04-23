@@ -21,10 +21,6 @@
 
 namespace mozilla {
 
-namespace layers {
-class Layer;
-}
-
 typedef void * EGLDisplay;
 typedef void * EGLSurface;
 
@@ -42,6 +38,9 @@ public:
 
     virtual void* GetFBSurface() = 0;
 
+    /**
+     * Only GonkDisplayICS uses arguments.
+     */
     virtual bool SwapBuffers(EGLDisplay dpy, EGLSurface sur) = 0;
 
     virtual ANativeWindowBuffer* DequeueBuffer() = 0;

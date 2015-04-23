@@ -23,15 +23,16 @@
 #include "nsISecureBrowserUI.h"
 #include "nsITabParent.h"
 #include "nsIXULBrowserWindow.h"
+#include "nsRefreshDriver.h"
 #include "nsWeakReference.h"
 #include "Units.h"
+#include "nsIWidget.h"
 
 class nsFrameLoader;
 class nsIFrameLoader;
 class nsIContent;
 class nsIPrincipal;
 class nsIURI;
-class nsIWidget;
 class nsILoadContext;
 class nsIDocShell;
 
@@ -74,6 +75,7 @@ class TabParent final : public PBrowserParent
                       , public nsISecureBrowserUI
                       , public nsSupportsWeakReference
                       , public TabContext
+                      , public nsAPostRefreshObserver
 {
     typedef mozilla::dom::ClonedMessageData ClonedMessageData;
 
@@ -119,6 +121,8 @@ public:
     void Destroy();
 
     void RemoveWindowListeners();
+    void AddWindowListeners();
+    void DidRefresh() override;
 
     virtual bool RecvMoveFocus(const bool& aForward) override;
     virtual bool RecvEvent(const RemoteDOMEvent& aEvent) override;
@@ -479,13 +483,15 @@ protected:
     float mDPI;
     CSSToLayoutDeviceScale mDefaultScale;
     bool mUpdatedDimensions;
-    nsIntPoint mChromeOffset;
+    LayoutDeviceIntPoint mChromeOffset;
 
 private:
     already_AddRefed<nsFrameLoader> GetFrameLoader(bool aUseCachedFrameLoaderAfterDestroy = false) const;
     layout::RenderFrameParent* GetRenderFrame();
     nsRefPtr<nsIContentParent> mManager;
     void TryCacheDPIAndScale();
+
+    nsresult UpdatePosition();
 
     CSSPoint AdjustTapToChildWidget(const CSSPoint& aPoint);
 
@@ -586,6 +592,16 @@ private:
     // wasn't ready yet, we set this flag and call RequestNotifyLayerTreeReady
     // again once the RenderFrameParent arrives.
     bool mNeedLayerTreeReadyNotification;
+
+    // Cached cursor setting from TabChild.  When the cursor is over the tab,
+    // it should take this appearance.
+    nsCursor mCursor;
+
+    // True if the cursor changes from the TabChild should change the widget
+    // cursor.  This happens whenever the cursor is in the tab's region.
+    bool mTabSetsCursor;
+
+    nsRefPtr<nsIPresShell> mPresShellWithRefreshListener;
 
 private:
     // This is used when APZ needs to find the TabParent associated with a layer

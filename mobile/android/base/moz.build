@@ -595,6 +595,7 @@ moz_native_devices_sources = [
     'ChromeCast.java',
     'GeckoMediaPlayer.java',
     'MediaPlayerManager.java',
+    'PresentationMediaPlayerManager.java',
 ]
 if CONFIG['MOZ_NATIVE_DEVICES']:
     gbjar.extra_jars += moz_native_devices_jars
@@ -888,3 +889,5 @@ if CONFIG['MOZ_ANDROID_MLS_STUMBLER']:
 if CONFIG['MOZ_ANDROID_SEARCH_ACTIVITY']:
     # The Search Activity code is built as part of Fennec, so we follow suit in Eclipse.
     main.add_classpathentry('search', TOPSRCDIR + '/mobile/android/search/java', dstdir='search')
+
+DIST_FILES += ['package-name.txt.in']

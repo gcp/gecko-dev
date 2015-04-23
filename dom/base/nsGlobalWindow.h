@@ -1098,6 +1098,8 @@ public:
                     JS::MutableHandle<JS::Value> aRetval,
                     mozilla::ErrorResult& aError);
 
+  already_AddRefed<nsWindowRoot> GetWindowRoot(mozilla::ErrorResult& aError);
+
 protected:
   // Web IDL helpers
 
@@ -1623,7 +1625,7 @@ protected:
   nsRefPtr<nsDOMWindowUtils>    mWindowUtils;
   nsString                      mStatus;
   nsString                      mDefaultStatus;
-  nsGlobalWindowObserver*       mObserver; // Inner windows only.
+  nsRefPtr<nsGlobalWindowObserver> mObserver; // Inner windows only.
   nsRefPtr<mozilla::dom::Crypto>  mCrypto;
   nsRefPtr<mozilla::dom::cache::CacheStorage> mCacheStorage;
   nsRefPtr<mozilla::dom::Console> mConsole;

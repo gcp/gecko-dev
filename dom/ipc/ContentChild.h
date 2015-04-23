@@ -20,7 +20,6 @@
 
 
 struct ChromePackage;
-class nsIDOMBlob;
 class nsIObserver;
 struct ResourceMapping;
 struct OverrideMapping;
@@ -35,10 +34,6 @@ class PFileDescriptorSetChild;
 class URIParams;
 }// namespace ipc
 
-namespace jsipc {
-class JavaScriptShared;
-}
-
 namespace layers {
 class PCompositorChild;
 } // namespace layers
@@ -46,7 +41,6 @@ class PCompositorChild;
 namespace dom {
 
 class AlertObserver;
-class PrefObserver;
 class ConsoleListener;
 class PStorageChild;
 class ClonedMessageData;
@@ -238,6 +232,10 @@ public:
                              bool* aSuccess) override;
     virtual bool DeallocPScreenManagerChild(PScreenManagerChild*) override;
 
+    virtual PPSMContentDownloaderChild* AllocPPSMContentDownloaderChild(
+            const uint32_t& aCertType) override;
+    virtual bool DeallocPPSMContentDownloaderChild(PPSMContentDownloaderChild* aDownloader) override;
+
     virtual PExternalHelperAppChild *AllocPExternalHelperAppChild(
             const OptionalURIParams& uri,
             const nsCString& aMimeContentType,
@@ -300,6 +298,8 @@ public:
     virtual bool RecvSpeakerManagerNotify() override;
 
     virtual bool RecvBidiKeyboardNotify(const bool& isLangRTL) override;
+
+    virtual bool RecvUpdateServiceWorkerRegistrations() override;
 
     virtual bool RecvNotifyVisited(const URIParams& aURI) override;
     // auto remove when alertfinished is received.

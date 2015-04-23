@@ -110,7 +110,6 @@
 namespace js {
 
 class Bindings;
-class Debugger;
 class Nursery;
 class StaticBlockObject;
 
@@ -457,7 +456,7 @@ class BaseShape : public gc::TenuredCell
 
     static inline ThingRootKind rootKind() { return THING_ROOT_BASE_SHAPE; }
 
-    void markChildren(JSTracer* trc);
+    void traceChildren(JSTracer* trc);
 
     void fixupAfterMovingGC() {}
 
@@ -965,7 +964,7 @@ class Shape : public gc::TenuredCell
 
     static inline ThingRootKind rootKind() { return THING_ROOT_SHAPE; }
 
-    inline void markChildren(JSTracer* trc);
+    inline void traceChildren(JSTracer* trc);
 
     inline Shape* search(ExclusiveContext* cx, jsid id);
     inline Shape* searchLinear(jsid id);
@@ -1352,7 +1351,7 @@ Shape::searchLinear(jsid id)
 }
 
 inline void
-Shape::markChildren(JSTracer* trc)
+Shape::traceChildren(JSTracer* trc)
 {
     TraceEdge(trc, &base_, "base");
     TraceEdge(trc, &propidRef(), "propid");

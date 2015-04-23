@@ -53,12 +53,12 @@ WMFReader::WMFReader(AbstractMediaDecoder* aDecoder)
     mVideoWidth(0),
     mVideoHeight(0),
     mVideoStride(0),
-    mAudioFrameSum(0),
     mAudioFrameOffset(0),
+    mAudioFrameSum(0),
+    mMustRecaptureAudioPosition(true),
     mHasAudio(false),
     mHasVideo(false),
     mUseHwAccel(false),
-    mMustRecaptureAudioPosition(true),
     mIsMP3Enabled(WMFDecoder::IsMP3Supported()),
     mCOMInitialized(false)
 {
@@ -747,7 +747,7 @@ WMFReader::CreateBasicVideoFrame(IMFSample* aSample,
                                             b,
                                             false,
                                             -1,
-                                            ToIntRect(mPictureRegion));
+                                            mPictureRegion);
   if (twoDBuffer) {
     twoDBuffer->Unlock2D();
   } else {
@@ -789,7 +789,7 @@ WMFReader::CreateD3DVideoFrame(IMFSample* aSample,
                                                      image.forget(),
                                                      false,
                                                      -1,
-                                                     ToIntRect(mPictureRegion));
+                                                     mPictureRegion);
 
   NS_ENSURE_TRUE(v, E_FAIL);
   v.forget(aOutVideoData);

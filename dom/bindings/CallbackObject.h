@@ -177,6 +177,7 @@ protected:
     // they will only be rethrown if that compartment's principal subsumes the
     // principal of our (unwrapped) callback.
     CallSetup(CallbackObject* aCallback, ErrorResult& aRv,
+              const char* aExecutionReason,
               ExceptionHandling aExceptionHandling,
               JSCompartment* aCompartment = nullptr,
               bool aIsJSImplementedWebIDL = false);
@@ -304,7 +305,7 @@ public:
   }
 
   // Boolean conversion operator so people can use this in boolean tests
-  operator bool() const
+  explicit operator bool() const
   {
     return GetISupports();
   }

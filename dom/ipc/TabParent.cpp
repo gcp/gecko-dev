@@ -270,7 +270,6 @@ TabParent::TabParent(nsIContentParent* aManager,
   , mDPI(0)
   , mDefaultScale(0)
   , mUpdatedDimensions(false)
-  , mChromeOffset(0, 0)
   , mManager(aManager)
   , mMarkedDestroying(false)
   , mIsDestroyed(false)
@@ -283,6 +282,8 @@ TabParent::TabParent(nsIContentParent* aManager,
   , mTabId(aTabId)
   , mCreatingWindow(false)
   , mNeedLayerTreeReadyNotification(false)
+  , mCursor(nsCursor(-1))
+  , mTabSetsCursor(false)
 {
   MOZ_ASSERT(aManager);
 }
@@ -336,16 +337,27 @@ TabParent::SetOwnerElement(Element* aElement)
 
   // Update to the new content, and register to listen for events from it.
   mFrameElement = aElement;
-  if (mFrameElement && mFrameElement->OwnerDoc()->GetWindow()) {
-    nsCOMPtr<nsPIDOMWindow> window = mFrameElement->OwnerDoc()->GetWindow();
-    nsCOMPtr<EventTarget> eventTarget = window->GetTopWindowRoot();
-    if (eventTarget) {
-      eventTarget->AddEventListener(NS_LITERAL_STRING("MozUpdateWindowPos"),
-                                    this, false, false);
+
+  AddWindowListeners();
+  TryCacheDPIAndScale();
+}
+
+void
+TabParent::AddWindowListeners()
+{
+  if (mFrameElement && mFrameElement->OwnerDoc()) {
+    if (nsCOMPtr<nsPIDOMWindow> window = mFrameElement->OwnerDoc()->GetWindow()) {
+      nsCOMPtr<EventTarget> eventTarget = window->GetTopWindowRoot();
+      if (eventTarget) {
+        eventTarget->AddEventListener(NS_LITERAL_STRING("MozUpdateWindowPos"),
+                                      this, false, false);
+      }
+    }
+    if (nsIPresShell* shell = mFrameElement->OwnerDoc()->GetShell()) {
+      mPresShellWithRefreshListener = shell;
+      shell->AddPostRefreshObserver(this);
     }
   }
-
-  TryCacheDPIAndScale();
 }
 
 void
@@ -358,6 +370,18 @@ TabParent::RemoveWindowListeners()
       eventTarget->RemoveEventListener(NS_LITERAL_STRING("MozUpdateWindowPos"),
                                        this, false);
     }
+  }
+  if (mPresShellWithRefreshListener) {
+    mPresShellWithRefreshListener->RemovePostRefreshObserver(this);
+    mPresShellWithRefreshListener = nullptr;
+  }
+}
+
+void
+TabParent::DidRefresh()
+{
+  if (mChromeOffset != -GetChildProcessOffset()) {
+    UpdatePosition();
   }
 }
 
@@ -392,6 +416,8 @@ TabParent::Destroy()
   if (mIsDestroyed) {
     return;
   }
+
+  RemoveWindowListeners();
 
   // If this fails, it's most likely due to a content-process crash,
   // and auto-cleanup will kick in.  Otherwise, the child side will
@@ -902,6 +928,19 @@ TabParent::RecvSetDimensions(const uint32_t& aFlags,
   return false;
 }
 
+nsresult
+TabParent::UpdatePosition()
+{
+  nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
+  if (!frameLoader) {
+    return NS_OK;
+  }
+  nsIntRect windowDims;
+  NS_ENSURE_SUCCESS(frameLoader->GetWindowDimensions(windowDims), NS_ERROR_FAILURE);
+  UpdateDimensions(windowDims, mDimensions);
+  return NS_OK;
+}
+
 void
 TabParent::UpdateDimensions(const nsIntRect& rect, const ScreenIntSize& size)
 {
@@ -911,17 +950,18 @@ TabParent::UpdateDimensions(const nsIntRect& rect, const ScreenIntSize& size)
   hal::ScreenConfiguration config;
   hal::GetCurrentScreenConfiguration(&config);
   ScreenOrientation orientation = config.orientation();
-  nsIntPoint chromeOffset = -LayoutDevicePixel::ToUntyped(GetChildProcessOffset());
+  LayoutDeviceIntPoint chromeOffset = -GetChildProcessOffset();
+
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  nsIntRect contentRect = rect;
+  if (widget) {
+    contentRect.x += widget->GetClientOffset().x;
+    contentRect.y += widget->GetClientOffset().y;
+  }
 
   if (!mUpdatedDimensions || mOrientation != orientation ||
-      mDimensions != size || !mRect.IsEqualEdges(rect) ||
+      mDimensions != size || !mRect.IsEqualEdges(contentRect) ||
       chromeOffset != mChromeOffset) {
-    nsCOMPtr<nsIWidget> widget = GetWidget();
-    nsIntRect contentRect = rect;
-    if (widget) {
-      contentRect.x += widget->GetClientOffset().x;
-      contentRect.y += widget->GetClientOffset().y;
-    }
 
     mUpdatedDimensions = true;
     mRect = contentRect;
@@ -1168,6 +1208,25 @@ bool TabParent::SendRealMouseEvent(WidgetMouseEvent& event)
     return false;
   }
   event.refPoint += GetChildProcessOffset();
+
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (widget) {
+    // When we mouseenter the tab, the tab's cursor should become the current
+    // cursor.  When we mouseexit, we stop.
+    if (event.message == NS_MOUSE_ENTER ||
+        event.message == NS_MOUSE_ENTER_SYNTH) {
+      mTabSetsCursor = true;
+      if (mCursor != nsCursor(-1)) {
+        widget->SetCursor(mCursor);
+      }
+      // We don't actually want to forward NS_MOUSE_ENTER messages.
+      return true;
+    } else if (event.message == NS_MOUSE_EXIT ||
+               event.message == NS_MOUSE_EXIT_SYNTH) {
+      mTabSetsCursor = false;
+    }
+  }
+
   if (event.message == NS_MOUSE_MOVE) {
     return SendRealMouseMoveEvent(event);
   }
@@ -1636,12 +1695,16 @@ TabParent::RecvAsyncMessage(const nsString& aMessage,
 bool
 TabParent::RecvSetCursor(const uint32_t& aCursor, const bool& aForce)
 {
+  mCursor = static_cast<nsCursor>(aCursor);
+
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (widget) {
     if (aForce) {
       widget->ClearCachedCursor();
     }
-    widget->SetCursor((nsCursor) aCursor);
+    if (mTabSetsCursor) {
+      widget->SetCursor(mCursor);
+    }
   }
   return true;
 }
@@ -2459,6 +2522,7 @@ TabParent::ReceiveMessage(const nsString& aMessage,
       frameLoader->GetFrameMessageManager();
 
     manager->ReceiveMessage(mFrameElement,
+                            frameLoader,
                             aMessage,
                             aSync,
                             aCloneData,
@@ -2964,14 +3028,7 @@ TabParent::HandleEvent(nsIDOMEvent* aEvent)
   if (eventType.EqualsLiteral("MozUpdateWindowPos") && !mIsDestroyed) {
     // This event is sent when the widget moved.  Therefore we only update
     // the position.
-    nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
-    if (!frameLoader) {
-      return NS_OK;
-    }
-    nsIntRect windowDims;
-    NS_ENSURE_SUCCESS(frameLoader->GetWindowDimensions(windowDims), NS_ERROR_FAILURE);
-    UpdateDimensions(windowDims, mDimensions);
-    return NS_OK;
+    return UpdatePosition();
   }
   return NS_OK;
 }
@@ -3126,7 +3183,7 @@ TabParent::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
       if (item.data().type() == IPCDataTransferData::TnsString) {
         localItem->mType = DataTransferItem::DataType::eString;
         localItem->mStringData = item.data().get_nsString();
-      } else {
+      } else if (item.data().type() == IPCDataTransferData::TPBlobChild) {
         localItem->mType = DataTransferItem::DataType::eBlob;
         BlobParent* blobParent =
           static_cast<BlobParent*>(item.data().get_PBlobParent());

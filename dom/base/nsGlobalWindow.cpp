@@ -120,6 +120,7 @@
 #include "nsIControllerContext.h"
 #include "nsGlobalWindowCommands.h"
 #include "nsAutoPtr.h"
+#include "nsQueryObject.h"
 #include "nsContentUtils.h"
 #include "nsCSSProps.h"
 #include "nsIDOMFileList.h"
@@ -501,7 +502,9 @@ public:
 private:
   ~nsGlobalWindowObserver() {}
 
-  nsGlobalWindow* mWindow;
+  // This reference is non-owning and safe because it's cleared by
+  // nsGlobalWindow::CleanUp().
+  nsGlobalWindow* MOZ_NON_OWNING_REF mWindow;
 };
 
 NS_IMPL_ISUPPORTS(nsGlobalWindowObserver, nsIObserver, nsIInterfaceRequestor)
@@ -1143,7 +1146,6 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
 
     mObserver = new nsGlobalWindowObserver(this);
     if (mObserver) {
-      NS_ADDREF(mObserver);
       nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
       if (os) {
         // Watch for online/offline status changes so we can fire events. Use
@@ -1163,8 +1165,6 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
     // remain frozen until they get an inner window, so freeze this
     // outer window here.
     Freeze();
-
-    mObserver = nullptr;
   }
 
   // We could have failed the first time through trying
@@ -1462,7 +1462,6 @@ nsGlobalWindow::CleanUp()
     // Drop its reference to this dying window, in case for some bogus reason
     // the object stays around.
     mObserver->Forget();
-    NS_RELEASE(mObserver);
   }
 
   if (mNavigator) {
@@ -2703,7 +2702,7 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
   if (createdInnerWindow) {
     // AutoEntryScript required to invoke debugger hook, which is a
     // Gecko-specific concept at present.
-    AutoEntryScript aes(newInnerWindow);
+    AutoEntryScript aes(newInnerWindow, "nsGlobalWindow report new global");
     JS::Rooted<JSObject*> global(aes.cx(), newInnerWindow->GetWrapper());
     JS_FireOnNewGlobalObject(aes.cx(), global);
   }
@@ -8885,8 +8884,8 @@ nsGlobalWindow::IsInModalState()
   nsGlobalWindow *topWin = GetScriptableTop();
 
   if (!topWin) {
-    NS_ERROR("Uh, IsInModalState() called w/o a reachable top window?");
-
+    // IsInModalState() getting called w/o a reachable top window is a bit
+    // iffy, but valid enough not to make noise about it.  See bug 404828
     return false;
   }
 
@@ -12323,6 +12322,13 @@ nsGlobalWindow::RunTimeoutHandler(nsTimeout* aTimeout,
     sNestingLevel = timeout->mNestingLevel;
   }
 
+  const char *reason;
+  if (timeout->mIsInterval) {
+    reason = "setInterval handler";
+  } else {
+    reason = "setTimeout handler";
+  }
+
   nsCOMPtr<nsIScriptTimeoutHandler> handler(timeout->mScriptHandler);
   nsRefPtr<Function> callback = handler->GetCallback();
   if (!callback) {
@@ -12335,8 +12341,8 @@ nsGlobalWindow::RunTimeoutHandler(nsTimeout* aTimeout,
     handler->GetLocation(&filename, &lineNo);
 
     // New script entry point required, due to the "Create a script" sub-step of
-    // http://www.whatwg.org/specs/web-apps/current-work/#timer-initialization-steps
-    AutoEntryScript entryScript(this, true, aScx->GetNativeContext());
+    // http://www.whatwg.org/specs/web-apps/current-work/#timer-initialisation-steps
+    AutoEntryScript entryScript(this, reason, true, aScx->GetNativeContext());
     JS::CompileOptions options(entryScript.cx());
     options.setFileAndLine(filename, lineNo)
            .setVersion(JSVERSION_DEFAULT);
@@ -12348,7 +12354,7 @@ nsGlobalWindow::RunTimeoutHandler(nsTimeout* aTimeout,
     nsCOMPtr<nsISupports> me(static_cast<nsIDOMWindow *>(this));
     ErrorResult ignored;
     JS::Rooted<JS::Value> ignoredVal(CycleCollectedJSRuntime::Get()->Runtime());
-    callback->Call(me, handler->GetArgs(), &ignoredVal, ignored);
+    callback->Call(me, handler->GetArgs(), &ignoredVal, ignored, reason);
   }
 
   // We ignore any failures from calling EvaluateString() on the context or
@@ -13057,7 +13063,8 @@ nsGlobalWindow::SuspendTimeouts(uint32_t aIncrease,
 
     // Suspend all of the AudioContexts for this window
     for (uint32_t i = 0; i < mAudioContexts.Length(); ++i) {
-      mAudioContexts[i]->Suspend();
+      ErrorResult dummy;
+      nsRefPtr<Promise> d = mAudioContexts[i]->Suspend(dummy);
     }
   }
 
@@ -13117,7 +13124,8 @@ nsGlobalWindow::ResumeTimeouts(bool aThawChildren)
 
     // Resume all of the AudioContexts for this window
     for (uint32_t i = 0; i < mAudioContexts.Length(); ++i) {
-      mAudioContexts[i]->Resume();
+      ErrorResult dummy;
+      nsRefPtr<Promise> d = mAudioContexts[i]->Resume(dummy);
     }
 
     // Thaw all of the workers for this window.
@@ -13665,6 +13673,14 @@ nsGlobalWindow::BeginWindowMove(Event& aMouseDownEvent, Element* aPanel,
   }
 
   aError = widget->BeginMoveDrag(mouseEvent);
+}
+
+already_AddRefed<nsWindowRoot>
+nsGlobalWindow::GetWindowRoot(mozilla::ErrorResult& aError)
+{
+  FORWARD_TO_OUTER_OR_THROW(GetWindowRoot, (aError), aError, nullptr);
+  nsCOMPtr<nsPIWindowRoot> root = GetTopWindowRoot();
+  return root.forget().downcast<nsWindowRoot>();
 }
 
 //Note: This call will lock the cursor, it will not change as it moves.

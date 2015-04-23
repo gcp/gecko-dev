@@ -11,6 +11,7 @@
 #include "nsGkAtoms.h"              // for nsGkAtoms::baseURIProperty
 #include "nsIDOMNode.h"
 #include "mozilla/dom/NodeInfo.h"            // member (in nsCOMPtr)
+#include "nsINodeList.h"            // base class
 #include "nsIVariant.h"             // for use in GetUserData()
 #include "nsNodeInfoManager.h"      // for use in NodePrincipal()
 #include "nsPropertyTable.h"        // for typedefs
@@ -41,13 +42,12 @@ class nsIDOMNodeList;
 class nsIEditor;
 class nsIFrame;
 class nsIMutationObserver;
-class nsINodeList;
+class nsINode;
 class nsIPresShell;
 class nsIPrincipal;
 class nsIURI;
 class nsNodeSupportsWeakRefTearoff;
 class nsNodeWeakReference;
-class nsXPCClassInfo;
 class nsDOMMutationObserver;
 
 namespace mozilla {
@@ -72,7 +72,6 @@ class DOMQuad;
 class DOMRectReadOnly;
 class Element;
 class EventHandlerNonNull;
-class OnErrorEventHandlerNonNull;
 template<typename T> class Optional;
 class Text;
 class TextOrElementOrDocument;
@@ -232,6 +231,52 @@ private:
 
   // This value is incremented on every mutation, for the life of the process.
   static uint64_t sGeneration;
+};
+
+/**
+ * Class that implements the nsIDOMNodeList interface (a list of children of
+ * the content), by holding a reference to the content and delegating GetLength
+ * and Item to its existing child list.
+ * @see nsIDOMNodeList
+ */
+class nsChildContentList final : public nsINodeList
+{
+public:
+  explicit nsChildContentList(nsINode* aNode)
+    : mNode(aNode)
+  {
+  }
+
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS(nsChildContentList)
+
+  // nsWrapperCache
+  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override;
+
+  // nsIDOMNodeList interface
+  NS_DECL_NSIDOMNODELIST
+
+  // nsINodeList interface
+  virtual int32_t IndexOf(nsIContent* aContent) override;
+  virtual nsIContent* Item(uint32_t aIndex) override;
+
+  void DropReference()
+  {
+    mNode = nullptr;
+  }
+
+  virtual nsINode* GetParentObject() override
+  {
+    return mNode;
+  }
+
+private:
+  ~nsChildContentList() {}
+
+  // The node whose children make up the list.
+  // This is a non-owning ref which is safe because it's set to nullptr by
+  // DropReference() by the node slots get destroyed.
+  nsINode* MOZ_NON_OWNING_REF mNode;
 };
 
 // This should be used for any nsINode sub-class that has fields of its own
@@ -1021,8 +1066,7 @@ public:
   {
   public:
     nsSlots()
-      : mChildNodes(nullptr),
-        mWeakReference(nullptr)
+      : mWeakReference(nullptr)
     {
     }
 
@@ -1042,15 +1086,14 @@ public:
      * An object implementing nsIDOMNodeList for this content (childNodes)
      * @see nsIDOMNodeList
      * @see nsGenericHTMLElement::GetChildNodes
-     *
-     * MSVC 7 doesn't like this as an nsRefPtr
      */
-    nsChildContentList* mChildNodes;
+    nsRefPtr<nsChildContentList> mChildNodes;
 
     /**
-     * Weak reference to this node
+     * Weak reference to this node.  This is cleared by the destructor of
+     * nsNodeWeakReference.
      */
-    nsNodeWeakReference* mWeakReference;
+    nsNodeWeakReference* MOZ_NON_OWNING_REF mWeakReference;
   };
 
   /**
@@ -1926,23 +1969,33 @@ protected:
 
   nsRefPtr<mozilla::dom::NodeInfo> mNodeInfo;
 
-  nsINode* mParent;
+  // mParent is an owning ref most of the time, except for the case of document
+  // nodes, so it cannot be represented by nsCOMPtr, so mark is as
+  // MOZ_OWNING_REF.
+  nsINode* MOZ_OWNING_REF mParent;
 
 private:
   // Boolean flags.
   uint32_t mBoolFlags;
 
 protected:
-  nsIContent* mNextSibling;
-  nsIContent* mPreviousSibling;
-  nsIContent* mFirstChild;
+  // These references are non-owning and safe, as they are managed by
+  // nsAttrAndChildArray.
+  nsIContent* MOZ_NON_OWNING_REF mNextSibling;
+  nsIContent* MOZ_NON_OWNING_REF mPreviousSibling;
+  // This reference is non-owning and safe, since in the case of documents,
+  // it is set to null when the document gets destroyed, and in the case of
+  // other nodes, the children keep the parents alive.
+  nsIContent* MOZ_NON_OWNING_REF mFirstChild;
 
   union {
     // Pointer to our primary frame.  Might be null.
     nsIFrame* mPrimaryFrame;
 
     // Pointer to the root of our subtree.  Might be null.
-    nsINode* mSubtreeRoot;
+    // This reference is non-owning and safe, since it either points to the
+    // object itself, or is reset by ClearSubtreeRootPointer.
+    nsINode* MOZ_NON_OWNING_REF mSubtreeRoot;
   };
 
   // Storage for more members that are usually not needed; allocated lazily.

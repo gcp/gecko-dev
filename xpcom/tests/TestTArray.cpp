@@ -289,6 +289,16 @@ class Moveable {
 /* static */ uint32_t Countable::sCount = 0;
 /* static */ uint32_t Moveable::sCount = 0;
 
+static nsTArray<int> returns_by_value() {
+  nsTArray<int> result;
+  return result;
+}
+
+static bool test_return_by_value() {
+  nsTArray<int> result = returns_by_value();
+  return true;
+}
+
 static bool test_move_array() {
   nsTArray<Countable> countableArray;
   uint32_t i;
@@ -1157,46 +1167,6 @@ static bool test_SetLengthAndRetainStorage_no_ctor() {
   return true;
 }
 
-bool test_range_based_for_loop_stable_iterator()
-{
-  const int N = 10;
-  FallibleTArray<int> f;
-  AutoFallibleTArray<int, N> fauto;
-
-  InfallibleTArray<int> i;
-  AutoInfallibleTArray<int, N> iauto;
-
-  nsTArray<int> t;
-  nsAutoTArray<int, N> tauto;
-
-#define DO_TEST(var) {             \
-    var.AppendElement(2);          \
-    var.AppendElement(3);          \
-    var.AppendElement(4);          \
-    int count = 0;                 \
-    for (const auto& elem : var) { \
-      if (elem == 2) {             \
-        var.RemoveElementAt(1);    \
-      }                            \
-      ++count;                     \
-    }                              \
-    if (count != 3) {              \
-      return false;                \
-    }                              \
-  }
-
-  DO_TEST(f)
-  DO_TEST(fauto)
-  DO_TEST(i)
-  DO_TEST(iauto)
-  DO_TEST(t)
-  DO_TEST(tauto)
-
-#undef DO_TEST
-
-  return true;
-}
-
 //----
 
 typedef bool (*TestFunc)();
@@ -1211,6 +1181,7 @@ static const struct Test {
   DECL_TEST(test_char_array),
   DECL_TEST(test_uint32_array),
   DECL_TEST(test_object_array),
+  DECL_TEST(test_return_by_value),
   DECL_TEST(test_move_array),
   DECL_TEST(test_string_array),
   DECL_TEST(test_comptr_array),
@@ -1225,7 +1196,6 @@ static const struct Test {
   DECL_TEST(test_fallible),
   DECL_TEST(test_conversion_operator),
   DECL_TEST(test_SetLengthAndRetainStorage_no_ctor),
-  DECL_TEST(test_range_based_for_loop_stable_iterator),
   { nullptr, nullptr }
 };
 

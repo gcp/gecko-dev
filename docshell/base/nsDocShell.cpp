@@ -59,6 +59,7 @@
 #include "nsContentPolicyUtils.h" // NS_CheckContentLoadPolicy(...)
 #include "nsISeekableStream.h"
 #include "nsAutoPtr.h"
+#include "nsQueryObject.h"
 #include "nsIWritablePropertyBag2.h"
 #include "nsIAppShell.h"
 #include "nsWidgetsCID.h"
@@ -1138,8 +1139,7 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink)
     nsCOMPtr<nsISHistory> shistory;
     nsresult rv = GetSessionHistory(getter_AddRefs(shistory));
     if (NS_SUCCEEDED(rv) && shistory) {
-      *aSink = shistory;
-      NS_ADDREF((nsISupports*)*aSink);
+      shistory.forget(aSink);
       return NS_OK;
     }
     return NS_NOINTERFACE;
@@ -1157,8 +1157,7 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink)
     nsCOMPtr<nsIEditingSession> editingSession;
     mEditorData->GetEditingSession(getter_AddRefs(editingSession));
     if (editingSession) {
-      *aSink = editingSession;
-      NS_ADDREF((nsISupports*)*aSink);
+      editingSession.forget(aSink);
       return NS_OK;
     }
 
@@ -1756,8 +1755,7 @@ nsDocShell::CreateLoadInfo(nsIDocShellLoadInfo** aLoadInfo)
   NS_ENSURE_TRUE(loadInfo, NS_ERROR_OUT_OF_MEMORY);
   nsCOMPtr<nsIDocShellLoadInfo> localRef(loadInfo);
 
-  *aLoadInfo = localRef;
-  NS_ADDREF(*aLoadInfo);
+  localRef.forget(aLoadInfo);
   return NS_OK;
 }
 
@@ -5023,24 +5021,32 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
       if (errorClass == nsINSSErrorsService::ERROR_CLASS_BAD_CERT) {
         error.AssignLiteral("nssBadCert");
 
-        // if this is a Strict-Transport-Security host and the cert
-        // is bad, don't allow overrides (STS Spec section 7.3).
-        uint32_t type = nsISiteSecurityService::HEADER_HSTS;
+        // If this is an HTTP Strict Transport Security host or a pinned host
+        // and the certificate is bad, don't allow overrides (RFC 6797 section
+        // 12.1, HPKP draft spec section 2.6).
         uint32_t flags =
           mInPrivateBrowsing ? nsISocketProvider::NO_PERMANENT_STORAGE : 0;
         bool isStsHost = false;
+        bool isPinnedHost = false;
         if (XRE_GetProcessType() == GeckoProcessType_Default) {
           nsCOMPtr<nsISiteSecurityService> sss =
             do_GetService(NS_SSSERVICE_CONTRACTID, &rv);
           NS_ENSURE_SUCCESS(rv, rv);
-          rv = sss->IsSecureURI(type, aURI, flags, &isStsHost);
+          rv = sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS, aURI,
+                                flags, &isStsHost);
+          NS_ENSURE_SUCCESS(rv, rv);
+          rv = sss->IsSecureURI(nsISiteSecurityService::HEADER_HPKP, aURI,
+                                flags, &isPinnedHost);
           NS_ENSURE_SUCCESS(rv, rv);
         } else {
           mozilla::dom::ContentChild* cc =
             mozilla::dom::ContentChild::GetSingleton();
           mozilla::ipc::URIParams uri;
           SerializeURI(aURI, uri);
-          cc->SendIsSecureURI(type, uri, flags, &isStsHost);
+          cc->SendIsSecureURI(nsISiteSecurityService::HEADER_HSTS, uri, flags,
+                              &isStsHost);
+          cc->SendIsSecureURI(nsISiteSecurityService::HEADER_HPKP, uri, flags,
+                              &isPinnedHost);
         }
 
         if (Preferences::GetBool(
@@ -5048,11 +5054,16 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
           cssClass.AssignLiteral("expertBadCert");
         }
 
-        // HSTS takes precedence over the expert bad cert pref. We
-        // never want to show the "Add Exception" button for HSTS sites.
+        // HSTS/pinning takes precedence over the expert bad cert pref. We
+        // never want to show the "Add Exception" button for these sites.
+        // In the future we should differentiate between an HSTS host and a
+        // pinned host and display a more informative message to the user.
+        if (isStsHost || isPinnedHost) {
+          cssClass.AssignLiteral("badStsCert");
+        }
+
         uint32_t bucketId;
         if (isStsHost) {
-          cssClass.AssignLiteral("badStsCert");
           // measuring STS separately allows us to measure click through
           // rates easily
           bucketId = nsISecurityUITelemetry::WARNING_BAD_CERT_TOP_STS;
@@ -5076,7 +5087,8 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
       }
     }
   } else if (NS_ERROR_PHISHING_URI == aError ||
-             NS_ERROR_MALWARE_URI == aError) {
+             NS_ERROR_MALWARE_URI == aError ||
+             NS_ERROR_UNWANTED_URI == aError) {
     nsAutoCString host;
     aURI->GetHost(host);
     CopyUTF8toUTF16(host, formatStrs[0]);
@@ -5095,14 +5107,19 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
       error.AssignLiteral("phishingBlocked");
       bucketId = IsFrame() ? nsISecurityUITelemetry::WARNING_PHISHING_PAGE_FRAME
                            : nsISecurityUITelemetry::WARNING_PHISHING_PAGE_TOP;
-    } else {
+    } else if (NS_ERROR_MALWARE_URI == aError) {
       error.AssignLiteral("malwareBlocked");
       bucketId = IsFrame() ? nsISecurityUITelemetry::WARNING_MALWARE_PAGE_FRAME
                            : nsISecurityUITelemetry::WARNING_MALWARE_PAGE_TOP;
+    } else {
+      error.AssignLiteral("unwantedBlocked");
+      bucketId = IsFrame() ? nsISecurityUITelemetry::WARNING_UNWANTED_PAGE_FRAME
+                           : nsISecurityUITelemetry::WARNING_UNWANTED_PAGE_TOP;
     }
 
-    if (errorPage.EqualsIgnoreCase("blocked"))
+    if (errorPage.EqualsIgnoreCase("blocked")) {
       Telemetry::Accumulate(Telemetry::SECURITY_UI, bucketId);
+    }
 
     cssClass.AssignLiteral("blacklist");
   } else if (NS_ERROR_CONTENT_CRASHED == aError) {
@@ -6239,7 +6256,7 @@ nsDocShell::GetOnePermittedSandboxedNavigator(nsIDocShell** aSandboxedNavigator)
   NS_ENSURE_ARG_POINTER(aSandboxedNavigator);
   nsCOMPtr<nsIDocShell> permittedNavigator =
     do_QueryReferent(mOnePermittedSandboxedNavigator);
-  NS_IF_ADDREF(*aSandboxedNavigator = permittedNavigator);
+  permittedNavigator.forget(aSandboxedNavigator);
   return NS_OK;
 }
 
@@ -7813,6 +7830,7 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
              aStatus == NS_ERROR_OFFLINE ||
              aStatus == NS_ERROR_MALWARE_URI ||
              aStatus == NS_ERROR_PHISHING_URI ||
+             aStatus == NS_ERROR_UNWANTED_URI ||
              aStatus == NS_ERROR_UNSAFE_CONTENT_TYPE ||
              aStatus == NS_ERROR_REMOTE_XUL ||
              aStatus == NS_ERROR_OFFLINE ||
@@ -11461,7 +11479,7 @@ nsDocShell::AddState(JS::Handle<JS::Value> aData, const nsAString& aTitle,
     nsCOMPtr<nsIPrincipal> origPrincipal = origDocument->NodePrincipal();
 
     scContainer = new nsStructuredCloneContainer();
-    rv = scContainer->InitFromJSVal(aData);
+    rv = scContainer->InitFromJSVal(aData, aCx);
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsCOMPtr<nsIDocument> newDocument = GetDocument();
@@ -11952,8 +11970,7 @@ nsDocShell::AddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel,
   if (aNewEntry) {
     *aNewEntry = nullptr;
     if (NS_SUCCEEDED(rv)) {
-      *aNewEntry = entry;
-      NS_ADDREF(*aNewEntry);
+      entry.forget(aNewEntry);
     }
   }
 
@@ -13902,7 +13919,7 @@ nsDocShell::GetURLSearchParams()
 }
 
 void
-nsDocShell::NotifyJSRunToCompletionStart()
+nsDocShell::NotifyJSRunToCompletionStart(const char *aReason)
 {
   bool timelineOn = nsIDocShell::GetRecordProfileTimelineMarkers();
 

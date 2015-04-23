@@ -297,7 +297,7 @@ WorkerRunnable::Run()
     MOZ_ASSERT(IsCanceled(), "Subclass Cancel() didn't set IsCanceled()!");
 
     return NS_OK;
- }
+  }
 
   // Track down the appropriate global to use for the AutoJSAPI/AutoEntryScript.
   nsCOMPtr<nsIGlobalObject> globalObject;
@@ -305,7 +305,12 @@ WorkerRunnable::Run()
   MOZ_ASSERT(isMainThread == NS_IsMainThread());
   nsRefPtr<WorkerPrivate> kungFuDeathGrip;
   if (targetIsWorkerThread) {
-    JSObject* global = JS::CurrentGlobalOrNull(GetCurrentThreadJSContext());
+    JSContext* cx = GetCurrentThreadJSContext();
+    if (NS_WARN_IF(!cx)) {
+      return NS_ERROR_FAILURE;
+    }
+
+    JSObject* global = JS::CurrentGlobalOrNull(cx);
     if (global) {
       globalObject = GetGlobalObjectForGlobal(global);
     } else {
@@ -332,8 +337,9 @@ WorkerRunnable::Run()
   Maybe<mozilla::dom::AutoEntryScript> aes;
   JSContext* cx;
   if (globalObject) {
-    aes.emplace(globalObject, isMainThread, isMainThread ? nullptr :
-                                            GetCurrentThreadJSContext());
+    aes.emplace(globalObject, "Worker runnable",
+                isMainThread,
+                isMainThread ? nullptr : GetCurrentThreadJSContext());
     cx = aes->cx();
   } else {
     jsapi.Init();
@@ -352,7 +358,8 @@ WorkerRunnable::Run()
   // In the case of CompileScriptRunnnable, WorkerRun above can cause us to
   // lazily create a global, so we construct aes here before calling PostRun.
   if (targetIsWorkerThread && !aes && DefaultGlobalObject()) {
-    aes.emplace(DefaultGlobalObject(), false, GetCurrentThreadJSContext());
+    aes.emplace(DefaultGlobalObject(), "worker runnable",
+                false, GetCurrentThreadJSContext());
     cx = aes->cx();
   }
 
@@ -496,6 +503,16 @@ WorkerControlRunnable::WorkerControlRunnable(WorkerPrivate* aWorkerPrivate,
              "WorkerControlRunnables should not modify the busy count");
 }
 #endif
+
+NS_IMETHODIMP
+WorkerControlRunnable::Cancel()
+{
+  if (NS_FAILED(Run())) {
+    NS_WARNING("WorkerControlRunnable::Run() failed.");
+  }
+
+  return WorkerRunnable::Cancel();
+}
 
 bool
 WorkerControlRunnable::DispatchInternal()

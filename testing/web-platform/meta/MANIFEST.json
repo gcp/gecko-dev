@@ -1768,6 +1768,46 @@
         "url": "/html/rendering/bindings/the-select-element-0/option-label.html"
       },
       {
+        "path": "html/rendering/bindings/the-textarea-element-0/cols-default.html",
+        "references": [
+          [
+            "/html/rendering/bindings/the-textarea-element-0/textarea-ref.html",
+            "=="
+          ]
+        ],
+        "url": "/html/rendering/bindings/the-textarea-element-0/cols-default.html"
+      },
+      {
+        "path": "html/rendering/bindings/the-textarea-element-0/cols-zero.html",
+        "references": [
+          [
+            "/html/rendering/bindings/the-textarea-element-0/textarea-ref.html",
+            "=="
+          ]
+        ],
+        "url": "/html/rendering/bindings/the-textarea-element-0/cols-zero.html"
+      },
+      {
+        "path": "html/rendering/bindings/the-textarea-element-0/rows-default.html",
+        "references": [
+          [
+            "/html/rendering/bindings/the-textarea-element-0/textarea-ref.html",
+            "=="
+          ]
+        ],
+        "url": "/html/rendering/bindings/the-textarea-element-0/rows-default.html"
+      },
+      {
+        "path": "html/rendering/bindings/the-textarea-element-0/rows-zero.html",
+        "references": [
+          [
+            "/html/rendering/bindings/the-textarea-element-0/textarea-ref.html",
+            "=="
+          ]
+        ],
+        "url": "/html/rendering/bindings/the-textarea-element-0/rows-zero.html"
+      },
+      {
         "path": "html/rendering/non-replaced-elements/flow-content-0/figure.html",
         "references": [
           [
@@ -9628,6 +9668,14 @@
         "url": "/XMLHttpRequest/send-timeout-events.htm"
       },
       {
+        "path": "XMLHttpRequest/send-usp.html",
+        "url": "/XMLHttpRequest/send-usp.html"
+      },
+      {
+        "path": "XMLHttpRequest/send-usp.worker.js",
+        "url": "/XMLHttpRequest/send-usp.worker"
+      },
+      {
         "path": "XMLHttpRequest/setrequestheader-after-send.htm",
         "url": "/XMLHttpRequest/setrequestheader-after-send.htm"
       },
@@ -10902,6 +10950,10 @@
       {
         "path": "encoding/api-basics.html",
         "url": "/encoding/api-basics.html"
+      },
+      {
+        "path": "encoding/api-invalid-label.html",
+        "url": "/encoding/api-invalid-label.html"
       },
       {
         "path": "encoding/api-replacement-encodings.html",
@@ -16100,14 +16152,6 @@
         "url": "/service-workers/cache-storage/serviceworker/cache-delete.https.html"
       },
       {
-        "path": "service-workers/cache-storage/serviceworker/cache-match.https.html",
-        "url": "/service-workers/cache-storage/serviceworker/cache-match.https.html"
-      },
-      {
-        "path": "service-workers/cache-storage/serviceworker/cache-put.https.html",
-        "url": "/service-workers/cache-storage/serviceworker/cache-put.https.html"
-      },
-      {
         "path": "service-workers/cache-storage/serviceworker/cache-storage-keys.https.html",
         "url": "/service-workers/cache-storage/serviceworker/cache-storage-keys.https.html"
       },
@@ -16126,14 +16170,6 @@
       {
         "path": "service-workers/cache-storage/window/cache-delete.https.html",
         "url": "/service-workers/cache-storage/window/cache-delete.https.html"
-      },
-      {
-        "path": "service-workers/cache-storage/window/cache-match.https.html",
-        "url": "/service-workers/cache-storage/window/cache-match.https.html"
-      },
-      {
-        "path": "service-workers/cache-storage/window/cache-put.https.html",
-        "url": "/service-workers/cache-storage/window/cache-put.https.html"
       },
       {
         "path": "service-workers/cache-storage/window/cache-storage-keys.https.html",
@@ -16158,14 +16194,6 @@
       {
         "path": "service-workers/cache-storage/worker/cache-delete.https.html",
         "url": "/service-workers/cache-storage/worker/cache-delete.https.html"
-      },
-      {
-        "path": "service-workers/cache-storage/worker/cache-match.https.html",
-        "url": "/service-workers/cache-storage/worker/cache-match.https.html"
-      },
-      {
-        "path": "service-workers/cache-storage/worker/cache-put.https.html",
-        "url": "/service-workers/cache-storage/worker/cache-put.https.html"
       },
       {
         "path": "service-workers/cache-storage/worker/cache-storage-keys.https.html",
@@ -19515,6 +19543,36 @@
         "url": "/media-source/mediasource-redundant-seek.html"
       },
       {
+        "path": "service-workers/cache-storage/serviceworker/cache-match.https.html",
+        "timeout": "long",
+        "url": "/service-workers/cache-storage/serviceworker/cache-match.https.html"
+      },
+      {
+        "path": "service-workers/cache-storage/serviceworker/cache-put.https.html",
+        "timeout": "long",
+        "url": "/service-workers/cache-storage/serviceworker/cache-put.https.html"
+      },
+      {
+        "path": "service-workers/cache-storage/window/cache-match.https.html",
+        "timeout": "long",
+        "url": "/service-workers/cache-storage/window/cache-match.https.html"
+      },
+      {
+        "path": "service-workers/cache-storage/window/cache-put.https.html",
+        "timeout": "long",
+        "url": "/service-workers/cache-storage/window/cache-put.https.html"
+      },
+      {
+        "path": "service-workers/cache-storage/worker/cache-match.https.html",
+        "timeout": "long",
+        "url": "/service-workers/cache-storage/worker/cache-match.https.html"
+      },
+      {
+        "path": "service-workers/cache-storage/worker/cache-put.https.html",
+        "timeout": "long",
+        "url": "/service-workers/cache-storage/worker/cache-put.https.html"
+      },
+      {
         "path": "websockets/binary/002.html",
         "timeout": "long",
         "url": "/websockets/binary/002.html"
@@ -19646,52 +19704,7 @@
   },
   "local_changes": {
     "deleted": [],
-    "items": {
-      "testharness": {
-        "service-workers/cache-storage/serviceworker/cache-match.https.html": [
-          {
-            "path": "service-workers/cache-storage/serviceworker/cache-match.https.html",
-            "timeout": "long",
-            "url": "/service-workers/cache-storage/serviceworker/cache-match.https.html"
-          }
-        ],
-        "service-workers/cache-storage/serviceworker/cache-put.https.html": [
-          {
-            "path": "service-workers/cache-storage/serviceworker/cache-put.https.html",
-            "timeout": "long",
-            "url": "/service-workers/cache-storage/serviceworker/cache-put.https.html"
-          }
-        ],
-        "service-workers/cache-storage/window/cache-match.https.html": [
-          {
-            "path": "service-workers/cache-storage/window/cache-match.https.html",
-            "timeout": "long",
-            "url": "/service-workers/cache-storage/window/cache-match.https.html"
-          }
-        ],
-        "service-workers/cache-storage/window/cache-put.https.html": [
-          {
-            "path": "service-workers/cache-storage/window/cache-put.https.html",
-            "timeout": "long",
-            "url": "/service-workers/cache-storage/window/cache-put.https.html"
-          }
-        ],
-        "service-workers/cache-storage/worker/cache-match.https.html": [
-          {
-            "path": "service-workers/cache-storage/worker/cache-match.https.html",
-            "timeout": "long",
-            "url": "/service-workers/cache-storage/worker/cache-match.https.html"
-          }
-        ],
-        "service-workers/cache-storage/worker/cache-put.https.html": [
-          {
-            "path": "service-workers/cache-storage/worker/cache-put.https.html",
-            "timeout": "long",
-            "url": "/service-workers/cache-storage/worker/cache-put.https.html"
-          }
-        ]
-      }
-    },
+    "items": {},
     "reftest_nodes": {}
   },
   "reftest_nodes": {
@@ -21037,6 +21050,54 @@
           ]
         ],
         "url": "/html/rendering/bindings/the-select-element-0/option-label.html"
+      }
+    ],
+    "html/rendering/bindings/the-textarea-element-0/cols-default.html": [
+      {
+        "path": "html/rendering/bindings/the-textarea-element-0/cols-default.html",
+        "references": [
+          [
+            "/html/rendering/bindings/the-textarea-element-0/textarea-ref.html",
+            "=="
+          ]
+        ],
+        "url": "/html/rendering/bindings/the-textarea-element-0/cols-default.html"
+      }
+    ],
+    "html/rendering/bindings/the-textarea-element-0/cols-zero.html": [
+      {
+        "path": "html/rendering/bindings/the-textarea-element-0/cols-zero.html",
+        "references": [
+          [
+            "/html/rendering/bindings/the-textarea-element-0/textarea-ref.html",
+            "=="
+          ]
+        ],
+        "url": "/html/rendering/bindings/the-textarea-element-0/cols-zero.html"
+      }
+    ],
+    "html/rendering/bindings/the-textarea-element-0/rows-default.html": [
+      {
+        "path": "html/rendering/bindings/the-textarea-element-0/rows-default.html",
+        "references": [
+          [
+            "/html/rendering/bindings/the-textarea-element-0/textarea-ref.html",
+            "=="
+          ]
+        ],
+        "url": "/html/rendering/bindings/the-textarea-element-0/rows-default.html"
+      }
+    ],
+    "html/rendering/bindings/the-textarea-element-0/rows-zero.html": [
+      {
+        "path": "html/rendering/bindings/the-textarea-element-0/rows-zero.html",
+        "references": [
+          [
+            "/html/rendering/bindings/the-textarea-element-0/textarea-ref.html",
+            "=="
+          ]
+        ],
+        "url": "/html/rendering/bindings/the-textarea-element-0/rows-zero.html"
       }
     ],
     "html/rendering/non-replaced-elements/flow-content-0/figure.html": [
@@ -24760,7 +24821,7 @@
       }
     ]
   },
-  "rev": "7311aa630534282885b9add15b1c30b2b59316dd",
+  "rev": "20aef05e164be1ccbbd8f66192f01e778b5e5c18",
   "url_base": "/",
   "version": 2
 }

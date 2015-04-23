@@ -40,7 +40,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 #include "mozilla/Hal.h"
-#include "mozilla/ipc/UnixSocket.h"
+#include "mozilla/ipc/SocketBase.h"
 #include "mozilla/ipc/DBusUtils.h"
 #include "mozilla/ipc/RawDBusConnection.h"
 #include "mozilla/LazyIdleThread.h"
@@ -4738,6 +4738,47 @@ BluetoothDBusService::UnregisterGattClientInternal(
 void
 BluetoothDBusService::GattClientReadRemoteRssiInternal(
   int aClientIf, const nsAString& aDeviceAddress,
+  BluetoothReplyRunnable* aRunnable)
+{
+}
+
+void
+BluetoothDBusService::GattClientReadCharacteristicValueInternal(
+  const nsAString& aAppUuid,
+  const BluetoothGattServiceId& aServiceId,
+  const BluetoothGattId& aCharacteristicId,
+  BluetoothReplyRunnable* aRunnable)
+{
+}
+
+void
+BluetoothDBusService::GattClientWriteCharacteristicValueInternal(
+  const nsAString& aAppUuid,
+  const BluetoothGattServiceId& aServiceId,
+  const BluetoothGattId& aCharacteristicId,
+  const BluetoothGattWriteType& aWriteType,
+  const nsTArray<uint8_t>& aValue,
+  BluetoothReplyRunnable* aRunnable)
+{
+}
+
+void
+BluetoothDBusService::GattClientReadDescriptorValueInternal(
+  const nsAString& aAppUuid,
+  const BluetoothGattServiceId& aServiceId,
+  const BluetoothGattId& aCharacteristicId,
+  const BluetoothGattId& aDescriptorId,
+  BluetoothReplyRunnable* aRunnable)
+{
+}
+
+void
+BluetoothDBusService::GattClientWriteDescriptorValueInternal(
+  const nsAString& aAppUuid,
+  const BluetoothGattServiceId& aServiceId,
+  const BluetoothGattId& aCharacteristicId,
+  const BluetoothGattId& aDescriptorId,
+  const nsTArray<uint8_t>& aValue,
   BluetoothReplyRunnable* aRunnable)
 {
 }

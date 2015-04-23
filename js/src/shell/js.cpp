@@ -10,6 +10,7 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/GuardObjects.h"
+#include "mozilla/mozalloc.h"
 #include "mozilla/PodOperations.h"
 
 #ifdef XP_WIN
@@ -4352,7 +4353,7 @@ class SprintOptimizationTypeInfoOp : public JS::ForEachTrackedOptimizationTypeIn
     { }
 
     void readType(const char* keyedBy, const char* name,
-                  const char* location, unsigned lineno) override
+                  const char* location, Maybe<unsigned> lineno) override
     {
         if (!startedTypes_) {
             startedTypes_ = true;
@@ -4366,8 +4367,8 @@ class SprintOptimizationTypeInfoOp : public JS::ForEachTrackedOptimizationTypeIn
             PutEscapedString(buf, mozilla::ArrayLength(buf), location, strlen(location), '"');
             Sprint(sp, ",\"location\":%s", buf);
         }
-        if (lineno != UINT32_MAX)
-            Sprint(sp, ",\"line\":%u", lineno);
+        if (lineno.isSome())
+            Sprint(sp, ",\"line\":%u", *lineno);
         Sprint(sp, "},");
     }
 
@@ -5184,6 +5185,7 @@ static const JSJitInfo dom_x_getterinfo = {
     JSVAL_TYPE_UNKNOWN, /* returnType */
     true,     /* isInfallible. False in setters. */
     true,     /* isMovable */
+    true,     /* isEliminatable */
     false,    /* isAlwaysInSlot */
     false,    /* isLazilyCachedInSlot */
     false,    /* isTypedMethod */
@@ -5199,6 +5201,7 @@ static const JSJitInfo dom_x_setterinfo = {
     JSVAL_TYPE_UNKNOWN, /* returnType */
     false,    /* isInfallible. False in setters. */
     false,    /* isMovable. */
+    false,    /* isEliminatable. */
     false,    /* isAlwaysInSlot */
     false,    /* isLazilyCachedInSlot */
     false,    /* isTypedMethod */
@@ -5214,6 +5217,7 @@ static const JSJitInfo doFoo_methodinfo = {
     JSVAL_TYPE_UNKNOWN, /* returnType */
     false,    /* isInfallible. False in setters. */
     false,    /* isMovable */
+    false,    /* isEliminatable */
     false,    /* isAlwaysInSlot */
     false,    /* isLazilyCachedInSlot */
     false,    /* isTypedMethod */
@@ -6088,26 +6092,6 @@ DummyPreserveWrapperCallback(JSContext* cx, JSObject* obj)
     return true;
 }
 
-size_t
-ShellMallocSizeOf(const void* constPtr)
-{
-    // Match the type that all the library functions we might use here expect.
-    void* ptr = (void*) constPtr;
-
-    if (!ptr)
-        return 0;
-
-#if defined(HAVE_MALLOC_USABLE_SIZE)
-    return malloc_usable_size(ptr);
-#elif defined(HAVE_MALLOC_SIZE)
-    return malloc_size(ptr);
-#elif HAVE__MSIZE
-    return _msize(ptr);
-#else
-    return 0;
-#endif
-}
-
 int
 main(int argc, char** argv, char** envp)
 {
@@ -6362,7 +6346,7 @@ main(int argc, char** argv, char** envp)
 
     JS_SetNativeStackQuota(rt, gMaxStackSize);
 
-    JS::dbg::SetDebuggerMallocSizeOf(rt, ShellMallocSizeOf);
+    JS::dbg::SetDebuggerMallocSizeOf(rt, moz_malloc_size_of);
 
     if (!offThreadState.init())
         return 1;

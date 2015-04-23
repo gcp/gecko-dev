@@ -753,6 +753,11 @@ MarkupView.prototype = {
       this._inspector.immediateLayoutChange();
     }
     this._waitForChildren().then((nodes) => {
+      if (this._destroyer) {
+        console.warn("Could not fully update after markup mutations, " +
+          "the markup-view was destroyed while waiting for children.");
+        return;
+      }
       this._flashMutatedNodes(aMutations);
       this._inspector.emit("markupmutation", aMutations);
 
@@ -868,7 +873,7 @@ MarkupView.prototype = {
       if (this._destroyer) {
         console.warn("Could not expand the node, the markup-view was destroyed");
         return;
-      } 
+      }
       aContainer.expanded = true;
     });
   },
@@ -1824,6 +1829,7 @@ MarkupContainer.prototype = {
     this.hovered = false;
     this.markup.navigate(this);
     event.stopPropagation();
+    event.preventDefault();
 
     // Start dragging the container after a delay.
     this.markup._dragStartEl = target;
@@ -2140,7 +2146,7 @@ MarkupElementContainer.prototype = Heritage.extend(MarkupContainer.prototype, {
           this.tooltipData.data = promise.resolve(res);
         });
       }, () => {
-        this.tooltipData.data = promise.reject();
+        this.tooltipData.data = promise.resolve({});
       });
     }
   },
@@ -2156,13 +2162,15 @@ MarkupElementContainer.prototype = Heritage.extend(MarkupContainer.prototype, {
    */
   isImagePreviewTarget: function(target, tooltip) {
     if (!this.tooltipData || this.tooltipData.target !== target) {
-      return promise.reject();
+      return promise.reject(false);
     }
 
     return this.tooltipData.data.then(({data, size}) => {
-      tooltip.setImageContent(data, size);
-    }, () => {
-      tooltip.setBrokenImageContent();
+      if (data && size) {
+        tooltip.setImageContent(data, size);
+      } else {
+        tooltip.setBrokenImageContent();
+      }
     });
   },
 

@@ -142,12 +142,11 @@ nsContainerFrame::RemoveFrame(ChildListID aListID,
   nsIPresShell* shell = PresContext()->PresShell();
   nsContainerFrame* lastParent = nullptr;
   while (aOldFrame) {
-    //XXXfr probably should use StealFrame here. I'm not sure if we need to
-    //      check the overflow lists atm, but we'll need a prescontext lookup
-    //      for overflow containers once we can split abspos elements with
-    //      inline containing blocks.
     nsIFrame* oldFrameNextContinuation = aOldFrame->GetNextContinuation();
     nsContainerFrame* parent = aOldFrame->GetParent();
+    // Please note that 'parent' may not actually be where 'aOldFrame' lives.
+    // We really MUST use StealFrame() and nothing else here.
+    // @see nsInlineFrame::StealFrame for details.
     parent->StealFrame(aOldFrame, true);
     aOldFrame->Destroy();
     aOldFrame = oldFrameNextContinuation;
@@ -1621,7 +1620,6 @@ nsContainerFrame::DrainSelfOverflowList()
 {
   AutoFrameListPtr overflowFrames(PresContext(), StealOverflowFrames());
   if (overflowFrames) {
-    NS_ASSERTION(mFrames.NotEmpty(), "overflow list w/o frames");
     mFrames.AppendFrames(nullptr, *overflowFrames);
     return true;
   }
@@ -1679,6 +1677,24 @@ nsContainerFrame::PullNextInFlowChild(ContinuationTraversingState& aState)
     nsContainerFrame::ReparentFrameView(frame, nextInFlow, this);
   }
   return frame;
+}
+
+bool
+nsContainerFrame::ResolvedOrientationIsVertical()
+{
+  uint8_t orient = StyleDisplay()->mOrient;
+  switch (orient) {
+    case NS_STYLE_ORIENT_HORIZONTAL:
+      return false;
+    case NS_STYLE_ORIENT_VERTICAL:
+      return true;
+    case NS_STYLE_ORIENT_INLINE:
+      return GetWritingMode().IsVertical();
+    case NS_STYLE_ORIENT_BLOCK:
+      return !GetWritingMode().IsVertical();
+  }
+  NS_NOTREACHED("unexpected -moz-orient value");
+  return false;
 }
 
 nsOverflowContinuationTracker::nsOverflowContinuationTracker(nsContainerFrame* aFrame,

@@ -24,11 +24,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Queue;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.db.BrowserDB;
@@ -125,7 +123,6 @@ public class GeckoAppShell
     // We have static members only.
     private GeckoAppShell() { }
 
-    private static boolean restartScheduled;
     private static GeckoEditableListener editableListener;
 
     private static final CrashHandler CRASH_HANDLER = new CrashHandler() {
@@ -196,7 +193,6 @@ public class GeckoAppShell
         return CRASH_HANDLER;
     }
 
-    private static final Queue<GeckoEvent> PENDING_EVENTS = new ConcurrentLinkedQueue<GeckoEvent>();
     private static final Map<String, String> ALERT_COOKIES = new ConcurrentHashMap<String, String>();
 
     private static volatile boolean locationHighAccuracyEnabled;
@@ -389,15 +385,6 @@ public class GeckoAppShell
         Looper.myQueue().removeIdleHandler(idleHandler);
     }
 
-    static void sendPendingEventsToGecko() {
-        try {
-            while (!PENDING_EVENTS.isEmpty()) {
-                final GeckoEvent e = PENDING_EVENTS.poll();
-                notifyGeckoOfEvent(e);
-            }
-        } catch (NoSuchElementException e) {}
-    }
-
     /**
      * If the Gecko thread is running, immediately dispatches the event to
      * Gecko.
@@ -421,13 +408,13 @@ public class GeckoAppShell
 
         if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
             notifyGeckoOfEvent(e);
-            // Gecko will copy the event data into a normal C++ object. We can recycle the event now.
+            // Gecko will copy the event data into a normal C++ object.
+            // We can recycle the event now.
             e.recycle();
             return;
         }
 
-        // Throws if unable to add the event due to capacity restrictions.
-        PENDING_EVENTS.add(e);
+        GeckoThread.addPendingEvent(e);
     }
 
     /**
@@ -520,6 +507,14 @@ public class GeckoAppShell
             sendEventToGecko(e);
             sWaitingForEventAck = true;
             while (true) {
+                if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoExiting) ||
+                        GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoExited)) {
+                    // Gecko is quitting; don't do anything.
+                    Log.d(LOGTAG, "Skipping Gecko event sync during exit");
+                    sWaitingForEventAck = false;
+                    return;
+                }
+
                 try {
                     sEventAckLock.wait(1000);
                 } catch (InterruptedException ie) {
@@ -813,42 +808,9 @@ public class GeckoAppShell
             getGeckoInterface().getActivity().moveTaskToBack(true);
     }
 
-    public static void returnIMEQueryResult(String result, int selectionStart, int selectionLength) {
-        // This method may be called from JNI to report Gecko's current selection indexes, but
-        // Native Fennec doesn't care because the Java code already knows the selection indexes.
-    }
-
-    @WrapElementForJNI(stubName = "NotifyXreExit")
-    static void onXreExit() {
-        // The launch state can only be Launched or GeckoRunning at this point
-        GeckoThread.setLaunchState(GeckoThread.LaunchState.GeckoExiting);
-        if (getGeckoInterface() != null) {
-            if (restartScheduled) {
-                getGeckoInterface().doRestart();
-            } else {
-                getGeckoInterface().getActivity().finish();
-            }
-        }
-
-        systemExit();
-    }
-
-    static void gracefulExit() {
-        Log.d(LOGTAG, "Initiating graceful exit...");
-        sendEventToGeckoSync(GeckoEvent.createBroadcastEvent("Browser:Quit", ""));
-        GeckoThread.setLaunchState(GeckoThread.LaunchState.GeckoExited);
-        System.exit(0);
-    }
-
-    static void systemExit() {
-        Log.d(LOGTAG, "Killing via System.exit()");
-        GeckoThread.setLaunchState(GeckoThread.LaunchState.GeckoExited);
-        System.exit(0);
-    }
-
     @WrapElementForJNI
     static void scheduleRestart() {
-        restartScheduled = true;
+        getGeckoInterface().doRestart();
     }
 
     // Creates a homescreen shortcut for a web page.
@@ -1679,24 +1641,6 @@ public class GeckoAppShell
         EnumerateGeckoProcesses(visitor);
     }
 
-    public static boolean checkForGeckoProcs() {
-
-        class GeckoPidCallback implements GeckoProcessesVisitor {
-            public boolean otherPidExist;
-            @Override
-            public boolean callback(int pid) {
-                if (pid != android.os.Process.myPid()) {
-                    otherPidExist = true;
-                    return false;
-                }
-                return true;
-            }            
-        }
-        GeckoPidCallback visitor = new GeckoPidCallback();            
-        EnumerateGeckoProcesses(visitor);
-        return visitor.otherPidExist;
-    }
-
     interface GeckoProcessesVisitor{
         boolean callback(int pid);
     }
@@ -1748,14 +1692,6 @@ public class GeckoAppShell
         }
     }
 
-    public static void waitForAnotherGeckoProc(){
-        int countdown = 40;
-        while (!checkForGeckoProcs() &&  --countdown > 0) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException ie) {}
-        }
-    }
     public static String getAppNameByPID(int pid) {
         BufferedReader cmdlineReader = null;
         String path = "/proc/" + pid + "/cmdline";
