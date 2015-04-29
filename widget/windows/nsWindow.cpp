@@ -175,6 +175,8 @@
 
 #include <d3d11.h>
 
+#include "InkCollector.h"
+
 #if !defined(SM_CONVERTIBLESLATEMODE)
 #define SM_CONVERTIBLESLATEMODE 0x2003
 #endif
@@ -395,6 +397,7 @@ nsWindow::nsWindow() : nsWindowBase()
     // Init theme data
     nsUXThemeData::UpdateNativeThemeInfo();
     RedirectedKeyDownMessageManager::Forget();
+    InkCollector::sInkCollector = new InkCollector();
 
     Preferences::AddBoolVarCache(&gIsPointerEventsEnabled,
                                  "dom.w3c_pointer_events.enabled",
@@ -428,6 +431,8 @@ nsWindow::~nsWindow()
 
   // Global shutdown
   if (sInstanceCount == 0) {
+    InkCollector::sInkCollector->Shutdown();
+    InkCollector::sInkCollector = nullptr;
     IMEHandler::Terminate();
     NS_IF_RELEASE(sCursorImgContainer);
     if (sIsOleInitialized) {
@@ -650,6 +655,7 @@ nsWindow::Create(nsIWidget *aParent,
        !nsUXThemeData::sTitlebarInfoPopulatedAero)) {
     nsUXThemeData::UpdateTitlebarInfo(mWnd);
   }
+
   return NS_OK;
 }
 
@@ -3273,26 +3279,17 @@ struct LayerManagerPrefs {
 static void
 GetLayerManagerPrefs(LayerManagerPrefs* aManagerPrefs)
 {
-  Preferences::GetBool("layers.acceleration.disabled",
-                       &aManagerPrefs->mDisableAcceleration);
-  Preferences::GetBool("layers.acceleration.force-enabled",
-                       &aManagerPrefs->mForceAcceleration);
-  Preferences::GetBool("layers.prefer-opengl",
-                       &aManagerPrefs->mPreferOpenGL);
-  Preferences::GetBool("layers.prefer-d3d9",
-                       &aManagerPrefs->mPreferD3D9);
+  aManagerPrefs->mDisableAcceleration = gfxPrefs::LayersAccelerationDisabled();
+  aManagerPrefs->mForceAcceleration = gfxPrefs::LayersAccelerationForceEnabled();
+  aManagerPrefs->mPreferOpenGL = gfxPrefs::LayersPreferOpenGL();
+  aManagerPrefs->mPreferD3D9 = gfxPrefs::LayersPreferD3D9();
 
   const char *acceleratedEnv = PR_GetEnv("MOZ_ACCELERATED");
   aManagerPrefs->mAccelerateByDefault =
     aManagerPrefs->mAccelerateByDefault ||
     (acceleratedEnv && (*acceleratedEnv != '0'));
-
-  bool safeMode = false;
-  nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
-  if (xr)
-    xr->GetInSafeMode(&safeMode);
   aManagerPrefs->mDisableAcceleration =
-    aManagerPrefs->mDisableAcceleration || safeMode;
+    aManagerPrefs->mDisableAcceleration || gfxPlatform::InSafeMode();
 }
 
 LayerManager*
@@ -3772,6 +3769,20 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, WPARAM wParam,
     // send touch-generated mouse events to content.
     MOZ_ASSERT(mAPZC);
     return result;
+  }
+
+  // Checking for NS_MOUSE_MOVE prevents a largest waterfall of unused initializations.
+  if (NS_MOUSE_MOVE != aEventType
+      // Since it is unclear whether a user will use the digitizer,
+      // Postpone initialization until first PEN message will be found.
+      && nsIDOMMouseEvent::MOZ_SOURCE_PEN == aInputSource
+      // Messages should be only at topLevel window.
+      && nsWindowType::eWindowType_toplevel == mWindowType
+      // Currently this scheme is used only when pointer events is enabled.
+      && gfxPrefs::PointerEventsEnabled()
+      // NS_MOUSE_EXIT is received, when InkCollector has been already initialized.
+      && NS_MOUSE_EXIT != aEventType) {
+    InkCollector::sInkCollector->SetTarget(mWnd);
   }
 
   switch (aEventType) {
@@ -4895,6 +4906,15 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
     }
     break;
 
+    case MOZ_WM_PEN_LEAVES_HOVER_OF_DIGITIZER:
+    {
+      LPARAM pos = lParamToClient(::GetMessagePos());
+      DispatchMouseEvent(NS_MOUSE_EXIT, wParam, pos, false,
+                         WidgetMouseEvent::eLeftButton,
+                         nsIDOMMouseEvent::MOZ_SOURCE_PEN);
+    }
+    break;
+
     case WM_CONTEXTMENU:
     {
       // if the context menu is brought up from the keyboard, |lParam|
@@ -5391,23 +5411,6 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       *aRetValue = (LRESULT)(command.mSucceeded && command.mIsEnabled);
       result = true;
     }
-    break;
-
-    case WM_SETTINGCHANGE:
-      if (IsWin8OrLater() && lParam &&
-          !wcsicmp(L"ConvertibleSlateMode", (wchar_t*)lParam)) {
-        // If we're switching into slate mode, switch to Metro for hardware
-        // that supports this feature if the pref is set.
-        if (GetSystemMetrics(SM_CONVERTIBLESLATEMODE) == 0 &&
-            Preferences::GetBool("browser.shell.desktop-auto-switch-enabled",
-                                 false)) {
-          nsCOMPtr<nsIAppStartup> appStartup(do_GetService(NS_APPSTARTUP_CONTRACTID));
-          if (appStartup) {
-            appStartup->Quit(nsIAppStartup::eForceQuit |
-                             nsIAppStartup::eRestartTouchEnvironment);
-          }
-        }
-      }
     break;
 
     default:

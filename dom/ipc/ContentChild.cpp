@@ -23,6 +23,7 @@
 #ifdef ACCESSIBILITY
 #include "mozilla/a11y/DocAccessibleChild.h"
 #endif
+#include "mozilla/LookAndFeel.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessHangMonitorIPC.h"
 #include "mozilla/docshell/OfflineCacheUpdateChild.h"
@@ -53,6 +54,8 @@
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
+#include "mozilla/media/webrtc/WebrtcGlobalChild.h"
+#include "mozilla/widget/WidgetMessageUtils.h"
 
 #if defined(MOZ_CONTENT_SANDBOX)
 #if defined(XP_WIN)
@@ -153,6 +156,10 @@
 #include "ipc/Nuwa.h"
 #endif
 
+#ifdef MOZ_GAMEPAD
+#include "mozilla/dom/GamepadService.h"
+#endif
+
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/cellbroadcast/CellBroadcastIPCService.h"
 #include "mozilla/dom/icc/IccChild.h"
@@ -233,13 +240,12 @@ class MemoryReportRequestChild : public PMemoryReportRequestChild,
 public:
     NS_DECL_ISUPPORTS
 
-    MemoryReportRequestChild(uint32_t aGeneration, bool aAnonymize,
+    MemoryReportRequestChild(bool aAnonymize,
                              const MaybeFileDesc& aDMDFile);
     NS_IMETHOD Run() override;
 private:
     virtual ~MemoryReportRequestChild();
 
-    uint32_t mGeneration;
     bool     mAnonymize;
     FileDescriptor mDMDFile;
 };
@@ -247,8 +253,8 @@ private:
 NS_IMPL_ISUPPORTS(MemoryReportRequestChild, nsIRunnable)
 
 MemoryReportRequestChild::MemoryReportRequestChild(
-    uint32_t aGeneration, bool aAnonymize, const MaybeFileDesc& aDMDFile)
-  : mGeneration(aGeneration), mAnonymize(aAnonymize)
+    bool aAnonymize, const MaybeFileDesc& aDMDFile)
+  : mAnonymize(aAnonymize)
 {
     MOZ_COUNT_CTOR(MemoryReportRequestChild);
     if (aDMDFile.type() == MaybeFileDesc::TFileDescriptor) {
@@ -808,6 +814,9 @@ ContentChild::InitXPCOM()
     RecvSetOffline(isOffline);
     RecvBidiKeyboardNotify(isLangRTL);
 
+    // Create the CPOW manager as soon as possible.
+    SendPJavaScriptConstructor();
+
     if (domainPolicy.active()) {
         nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
         MOZ_ASSERT(ssm);
@@ -857,48 +866,37 @@ ContentChild::AllocPMemoryReportRequestChild(const uint32_t& aGeneration,
                                              const MaybeFileDesc& aDMDFile)
 {
     MemoryReportRequestChild *actor =
-        new MemoryReportRequestChild(aGeneration, aAnonymize, aDMDFile);
+        new MemoryReportRequestChild(aAnonymize, aDMDFile);
     actor->AddRef();
     return actor;
 }
-
-// This is just a wrapper for InfallibleTArray<MemoryReport> that implements
-// nsISupports, so it can be passed to nsIMemoryReporter::CollectReports.
-class MemoryReportsWrapper final : public nsISupports {
-    ~MemoryReportsWrapper() {}
-public:
-    NS_DECL_ISUPPORTS
-    explicit MemoryReportsWrapper(InfallibleTArray<MemoryReport>* r) : mReports(r) { }
-    InfallibleTArray<MemoryReport> *mReports;
-};
-NS_IMPL_ISUPPORTS0(MemoryReportsWrapper)
 
 class MemoryReportCallback final : public nsIMemoryReporterCallback
 {
 public:
     NS_DECL_ISUPPORTS
 
-    explicit MemoryReportCallback(const nsACString& aProcess)
-    : mProcess(aProcess)
+    explicit MemoryReportCallback(MemoryReportRequestChild* aActor,
+                                  const nsACString& aProcess)
+    : mActor(aActor)
+    , mProcess(aProcess)
     {
     }
 
     NS_IMETHOD Callback(const nsACString& aProcess, const nsACString &aPath,
                         int32_t aKind, int32_t aUnits, int64_t aAmount,
                         const nsACString& aDescription,
-                        nsISupports* aiWrappedReports) override
+                        nsISupports* aUnused) override
     {
-        MemoryReportsWrapper *wrappedReports =
-            static_cast<MemoryReportsWrapper *>(aiWrappedReports);
-
         MemoryReport memreport(mProcess, nsCString(aPath), aKind, aUnits,
                                aAmount, nsCString(aDescription));
-        wrappedReports->mReports->AppendElement(memreport);
+        mActor->SendReport(memreport);
         return NS_OK;
     }
 private:
     ~MemoryReportCallback() {}
 
+    nsRefPtr<MemoryReportRequestChild> mActor;
     const nsCString mProcess;
 };
 NS_IMPL_ISUPPORTS(
@@ -934,21 +932,18 @@ NS_IMETHODIMP MemoryReportRequestChild::Run()
     ContentChild *child = static_cast<ContentChild*>(Manager());
     nsCOMPtr<nsIMemoryReporterManager> mgr = do_GetService("@mozilla.org/memory-reporter-manager;1");
 
-    InfallibleTArray<MemoryReport> reports;
-
     nsCString process;
     child->GetProcessName(process);
     child->AppendProcessId(process);
 
     // Run the reporters.  The callback will turn each measurement into a
     // MemoryReport.
-    nsRefPtr<MemoryReportsWrapper> wrappedReports =
-        new MemoryReportsWrapper(&reports);
-    nsRefPtr<MemoryReportCallback> cb = new MemoryReportCallback(process);
-    mgr->GetReportsForThisProcessExtended(cb, wrappedReports, mAnonymize,
+    nsRefPtr<MemoryReportCallback> cb =
+        new MemoryReportCallback(this, process);
+    mgr->GetReportsForThisProcessExtended(cb, nullptr, mAnonymize,
                                           FileDescriptorToFILE(mDMDFile, "wb"));
 
-    bool sent = Send__delete__(this, mGeneration, reports);
+    bool sent = Send__delete__(this);
     return sent ? NS_OK : NS_ERROR_FAILURE;
 }
 
@@ -1819,6 +1814,21 @@ ContentChild::DeallocPSpeechSynthesisChild(PSpeechSynthesisChild* aActor)
     return false;
 #endif
 }
+
+PWebrtcGlobalChild *
+ContentChild::AllocPWebrtcGlobalChild()
+{
+    WebrtcGlobalChild *child = new WebrtcGlobalChild();
+    return child;
+}
+
+bool
+ContentChild::DeallocPWebrtcGlobalChild(PWebrtcGlobalChild *aActor)
+{
+    delete static_cast<WebrtcGlobalChild*>(aActor);
+    return true;
+}
+
 
 bool
 ContentChild::RecvRegisterChrome(InfallibleTArray<ChromePackage>&& packages,
@@ -2770,6 +2780,18 @@ ContentChild::DeallocPContentPermissionRequestChild(PContentPermissionRequestChi
 {
     auto child = static_cast<RemotePermissionRequest*>(actor);
     child->IPDLRelease();
+    return true;
+}
+
+bool
+ContentChild::RecvGamepadUpdate(const GamepadChangeEvent& aGamepadEvent)
+{
+#ifdef MOZ_GAMEPAD
+    nsRefPtr<GamepadService> svc(GamepadService::GetService());
+    if (svc) {
+        svc->Update(aGamepadEvent);
+    }
+#endif
     return true;
 }
 

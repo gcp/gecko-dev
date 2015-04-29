@@ -124,26 +124,26 @@ extern bool gBluetoothDebugFlag;
   } while(0)                                                         \
 
 /**
- * Resolve promise with |ret| if |x| is false.
+ * Resolve |promise| with |ret| if |x| is false.
  */
-#define BT_ENSURE_TRUE_RESOLVE(x, ret)                               \
+#define BT_ENSURE_TRUE_RESOLVE(x, promise, ret)                      \
   do {                                                               \
     if (MOZ_UNLIKELY(!(x))) {                                        \
       BT_API2_LOGR("BT_ENSURE_TRUE_RESOLVE(" #x ") failed");         \
-      promise->MaybeResolve(ret);                                    \
-      return promise.forget();                                       \
+      (promise)->MaybeResolve(ret);                                  \
+      return (promise).forget();                                     \
     }                                                                \
   } while(0)
 
 /**
- * Reject promise with |ret| if |x| is false.
+ * Reject |promise| with |ret| if |x| is false.
  */
-#define BT_ENSURE_TRUE_REJECT(x, ret)                                \
+#define BT_ENSURE_TRUE_REJECT(x, promise, ret)                       \
   do {                                                               \
     if (MOZ_UNLIKELY(!(x))) {                                        \
       BT_API2_LOGR("BT_ENSURE_TRUE_REJECT(" #x ") failed");          \
-      promise->MaybeReject(ret);                                     \
-      return promise.forget();                                       \
+      (promise)->MaybeReject(ret);                                   \
+      return (promise).forget();                                     \
     }                                                                \
   } while(0)
 
@@ -497,7 +497,21 @@ enum BluetoothHandsfreeWbsConfig {
 };
 
 class BluetoothSignal;
-typedef mozilla::Observer<BluetoothSignal> BluetoothSignalObserver;
+
+class BluetoothSignalObserver : public mozilla::Observer<BluetoothSignal>
+{
+public:
+  BluetoothSignalObserver() : mSignalRegistered(false)
+  { }
+
+  void SetSignalRegistered(bool aSignalRegistered)
+  {
+    mSignalRegistered = aSignalRegistered;
+  }
+
+protected:
+  bool mSignalRegistered;
+};
 
 // Enums for object types, currently used for shared function lookups
 // (get/setproperty, etc...). Possibly discernable via dbus paths, but this

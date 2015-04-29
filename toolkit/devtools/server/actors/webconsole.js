@@ -33,7 +33,7 @@ XPCOMUtils.defineLazyGetter(this, "events", () => {
 
 for (let name of ["WebConsoleUtils", "ConsoleServiceListener",
     "ConsoleAPIListener", "addWebConsoleCommands", "JSPropertyProvider",
-    "ConsoleReflowListener"]) {
+    "ConsoleReflowListener", "CONSOLE_WORKER_IDS"]) {
   Object.defineProperty(this, name, {
     get: function(prop) {
       if (prop == "WebConsoleUtils") {
@@ -913,6 +913,10 @@ WebConsoleActor.prototype =
                               .getService(Ci.nsIConsoleAPIStorage);
     ConsoleAPIStorage.clearEvents(windowId);
 
+    CONSOLE_WORKER_IDS.forEach((aId) => {
+      ConsoleAPIStorage.clearEvents(aId);
+    });
+
     if (this.parentActor.isRootActor) {
       Services.console.logStringMessage(null); // for the Error Console
       Services.console.reset();
@@ -1268,6 +1272,7 @@ WebConsoleActor.prototype =
       error: !!(aPageError.flags & aPageError.errorFlag),
       exception: !!(aPageError.flags & aPageError.exceptionFlag),
       strict: !!(aPageError.flags & aPageError.strictFlag),
+      info: !!(aPageError.flags & aPageError.infoFlag),
       private: aPageError.isFromPrivateWindow,
     };
   },
@@ -1313,7 +1318,7 @@ WebConsoleActor.prototype =
     let packet = {
       from: this.actorID,
       type: "networkEvent",
-      eventActor: actor.grip(),
+      eventActor: actor.grip()
     };
 
     this.conn.send(packet);
@@ -1432,6 +1437,10 @@ WebConsoleActor.prototype =
   function WCA_prepareConsoleMessageForRemote(aMessage)
   {
     let result = WebConsoleUtils.cloneObject(aMessage);
+
+    result.workerType = CONSOLE_WORKER_IDS.indexOf(result.innerID) == -1
+                          ? 'none' : result.innerID;
+
     delete result.wrappedJSObject;
     delete result.ID;
     delete result.innerID;
@@ -1686,6 +1695,7 @@ NetworkEventActor.prototype =
       url: this._request.url,
       method: this._request.method,
       isXHR: this._isXHR,
+      fromCache: this._fromCache,
       private: this._private,
     };
   },
@@ -1729,6 +1739,7 @@ NetworkEventActor.prototype =
   {
     this._startedDateTime = aNetworkEvent.startedDateTime;
     this._isXHR = aNetworkEvent.isXHR;
+    this._fromCache = aNetworkEvent.fromCache;
 
     for (let prop of ['method', 'url', 'httpVersion', 'headersSize']) {
       this._request[prop] = aNetworkEvent[prop];
@@ -1854,7 +1865,7 @@ NetworkEventActor.prototype =
     return {
       from: this.actorID,
       timings: this._timings,
-      totalTime: this._totalTime,
+      totalTime: this._totalTime
     };
   },
 
@@ -1964,7 +1975,7 @@ NetworkEventActor.prototype =
       from: this.actorID,
       type: "networkEventUpdate",
       updateType: "responseStart",
-      response: aInfo,
+      response: aInfo
     };
 
     this.conn.send(packet);
@@ -2080,7 +2091,7 @@ NetworkEventActor.prototype =
       from: this.actorID,
       type: "networkEventUpdate",
       updateType: "eventTimings",
-      totalTime: aTotal,
+      totalTime: aTotal
     };
 
     this.conn.send(packet);

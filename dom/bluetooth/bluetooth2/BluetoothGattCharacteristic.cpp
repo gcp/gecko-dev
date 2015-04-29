@@ -20,8 +20,34 @@ using namespace mozilla::dom;
 
 USING_BLUETOOTH_NAMESPACE
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(
-  BluetoothGattCharacteristic, mOwner, mService, mDescriptors)
+NS_IMPL_CYCLE_COLLECTION_CLASS(BluetoothGattCharacteristic)
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(BluetoothGattCharacteristic)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mOwner)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mService)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDescriptors)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
+
+  /**
+   * Unregister the bluetooth signal handler after unlinked.
+   *
+   * This is needed to avoid ending up with exposing a deleted object to JS or
+   * accessing deleted objects while receiving signals from parent process
+   * after unlinked. Please see Bug 1138267 for detail informations.
+   */
+  nsString path;
+  GeneratePathFromGattId(tmp->mCharId, path);
+  UnregisterBluetoothSignalHandler(path, tmp);
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(BluetoothGattCharacteristic)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOwner)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mService)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDescriptors)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(BluetoothGattCharacteristic)
+
 NS_IMPL_CYCLE_COLLECTING_ADDREF(BluetoothGattCharacteristic)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(BluetoothGattCharacteristic)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BluetoothGattCharacteristic)
@@ -42,24 +68,18 @@ BluetoothGattCharacteristic::BluetoothGattCharacteristic(
   MOZ_ASSERT(aOwner);
   MOZ_ASSERT(mService);
 
-  BluetoothService* bs = BluetoothService::Get();
-  NS_ENSURE_TRUE_VOID(bs);
-
   // Generate bluetooth signal path and a string representation to provide uuid
   // of this characteristic to applications
   nsString path;
   GeneratePathFromGattId(mCharId, path, mUuidStr);
-  bs->RegisterBluetoothSignalHandler(path, this);
+  RegisterBluetoothSignalHandler(path, this);
 }
 
 BluetoothGattCharacteristic::~BluetoothGattCharacteristic()
 {
-  BluetoothService* bs = BluetoothService::Get();
-  NS_ENSURE_TRUE_VOID(bs);
-
   nsString path;
   GeneratePathFromGattId(mCharId, path);
-  bs->UnregisterBluetoothSignalHandler(path, this);
+  UnregisterBluetoothSignalHandler(path, this);
 }
 
 already_AddRefed<Promise>
@@ -75,8 +95,8 @@ BluetoothGattCharacteristic::StartNotifications(ErrorResult& aRv)
   NS_ENSURE_TRUE(!aRv.Failed(), nullptr);
 
   BluetoothService* bs = BluetoothService::Get();
-  BT_ENSURE_TRUE_REJECT(bs, NS_ERROR_NOT_AVAILABLE);
-  BT_ENSURE_TRUE_REJECT(mService, NS_ERROR_NOT_AVAILABLE);
+  BT_ENSURE_TRUE_REJECT(bs, promise, NS_ERROR_NOT_AVAILABLE);
+  BT_ENSURE_TRUE_REJECT(mService, promise, NS_ERROR_NOT_AVAILABLE);
 
   nsRefPtr<BluetoothReplyRunnable> result =
     new BluetoothVoidReplyRunnable(
@@ -104,8 +124,8 @@ BluetoothGattCharacteristic::StopNotifications(ErrorResult& aRv)
   NS_ENSURE_TRUE(!aRv.Failed(), nullptr);
 
   BluetoothService* bs = BluetoothService::Get();
-  BT_ENSURE_TRUE_REJECT(bs, NS_ERROR_NOT_AVAILABLE);
-  BT_ENSURE_TRUE_REJECT(mService, NS_ERROR_NOT_AVAILABLE);
+  BT_ENSURE_TRUE_REJECT(bs, promise, NS_ERROR_NOT_AVAILABLE);
+  BT_ENSURE_TRUE_REJECT(mService, promise, NS_ERROR_NOT_AVAILABLE);
 
   nsRefPtr<BluetoothReplyRunnable> result =
     new BluetoothVoidReplyRunnable(
@@ -150,6 +170,7 @@ void
 BluetoothGattCharacteristic::Notify(const BluetoothSignal& aData)
 {
   BT_LOGD("[D] %s", NS_ConvertUTF16toUTF8(aData.name()).get());
+  NS_ENSURE_TRUE_VOID(mSignalRegistered);
 
   BluetoothValue v = aData.value();
   if (aData.name().EqualsLiteral("DescriptorsDiscovered")) {
@@ -251,10 +272,11 @@ BluetoothGattCharacteristic::ReadValue(ErrorResult& aRv)
   NS_ENSURE_TRUE(!aRv.Failed(), nullptr);
 
   BT_ENSURE_TRUE_REJECT(mProperties & GATT_CHAR_PROP_BIT_READ,
+                        promise,
                         NS_ERROR_NOT_AVAILABLE);
 
   BluetoothService* bs = BluetoothService::Get();
-  BT_ENSURE_TRUE_REJECT(bs, NS_ERROR_NOT_AVAILABLE);
+  BT_ENSURE_TRUE_REJECT(bs, promise, NS_ERROR_NOT_AVAILABLE);
 
   nsRefPtr<BluetoothReplyRunnable> result = new ReadValueTask(this, promise);
   bs->GattClientReadCharacteristicValueInternal(mService->GetAppUuid(),
@@ -282,6 +304,7 @@ BluetoothGattCharacteristic::WriteValue(const ArrayBuffer& aValue,
                           (GATT_CHAR_PROP_BIT_WRITE_NO_RESPONSE ||
                            GATT_CHAR_PROP_BIT_WRITE ||
                            GATT_CHAR_PROP_BIT_SIGNED_WRITE),
+                        promise,
                         NS_ERROR_NOT_AVAILABLE);
 
   aValue.ComputeLengthAndData();
@@ -290,7 +313,7 @@ BluetoothGattCharacteristic::WriteValue(const ArrayBuffer& aValue,
   value.AppendElements(aValue.Data(), aValue.Length());
 
   BluetoothService* bs = BluetoothService::Get();
-  BT_ENSURE_TRUE_REJECT(bs, NS_ERROR_NOT_AVAILABLE);
+  BT_ENSURE_TRUE_REJECT(bs, promise, NS_ERROR_NOT_AVAILABLE);
 
   nsRefPtr<BluetoothReplyRunnable> result = new BluetoothVoidReplyRunnable(
     nullptr, promise, NS_LITERAL_STRING("GattClientWriteCharacteristicValue"));

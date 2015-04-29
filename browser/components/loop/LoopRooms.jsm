@@ -202,10 +202,10 @@ let LoopRoomsInternal = {
    *                          information.
    */
   promiseEncryptRoomData: Task.async(function* (roomData) {
-    // For now, disable encryption/context if context is disabled, or if
-    // FxA is turned on.
-    if (!MozLoopService.getLoopPref("contextInConverations.enabled") ||
-        this.sessionType == LOOP_SESSION_TYPE.FXA) {
+    // XXX We should only return unencrypted data whilst we're still working
+    // on context. Once bug 1115340 is fixed, this function should no longer be
+    // here.
+    function getUnencryptedData() {
       var serverRoomData = extend({}, roomData);
       delete serverRoomData.decryptedContext;
 
@@ -218,6 +218,11 @@ let LoopRoomsInternal = {
       };
     }
 
+    // For now, disable encryption/context if context is disabled
+    if (!MozLoopService.getLoopPref("contextInConverations.enabled")) {
+      return getUnencryptedData();
+    }
+
     var newRoomData = extend({}, roomData);
 
     if (!newRoomData.context) {
@@ -227,7 +232,17 @@ let LoopRoomsInternal = {
     // First get the room key.
     let key = yield this.promiseGetOrCreateRoomKey(newRoomData);
 
-    newRoomData.context.wrappedKey = yield this.promiseEncryptedRoomKey(key);
+    try {
+      newRoomData.context.wrappedKey = yield this.promiseEncryptedRoomKey(key);
+    }
+    catch (ex) {
+      // XXX Bug 1153788 should remove this, then we can remove the whole
+      // try/catch.
+      if (ex.message == "FxA re-register not implemented") {
+        return getUnencryptedData();
+      }
+      return Promise.reject(ex);
+    }
 
     // Now encrypt the actual data.
     newRoomData.context.value = yield loopCrypto.encryptBytes(key,
@@ -624,6 +639,37 @@ let LoopRoomsInternal = {
   },
 
   /**
+   * Forwards connection status to the server.
+   *
+   * @param {String}                  roomToken The room token.
+   * @param {String}                  sessionToken The session token for the
+   *                                               session that has been
+   *                                               joined.
+   * @param {sharedActions.SdkStatus} status The connection status.
+   * @param {Function} callback Optional. Function that will be invoked once
+   *                            the operation finished. The first argument
+   *                            passed will be an `Error` object or `null`.
+   */
+  sendConnectionStatus: function(roomToken, sessionToken, status, callback) {
+    if (!callback) {
+      callback = function(error) {
+        if (error) {
+          MozLoopService.log.error(error);
+        }
+      };
+    }
+    this._postToRoom(roomToken, {
+      action: "status",
+      event: status.event,
+      state: status.state,
+      connections: status.connections,
+      sendStreams: status.sendStreams,
+      recvStreams: status.recvStreams,
+      sessionToken: sessionToken
+    }, callback);
+  },
+
+  /**
    * Renames a room.
    *
    * @param {String} roomToken   The room token
@@ -654,8 +700,7 @@ let LoopRoomsInternal = {
       };
 
       // If we're not encrypting currently, then only send the roomName.
-      if (!Services.prefs.getBoolPref("loop.contextInConverations.enabled") ||
-          this.sessionType == LOOP_SESSION_TYPE.FXA) {
+      if (!Services.prefs.getBoolPref("loop.contextInConverations.enabled")) {
         sendData = {
           roomName: newRoomName
         };
@@ -764,6 +809,10 @@ this.LoopRooms = {
 
   leave: function(roomToken, sessionToken, callback) {
     return LoopRoomsInternal.leave(roomToken, sessionToken, callback);
+  },
+
+  sendConnectionStatus: function(roomToken, sessionToken, status, callback) {
+    return LoopRoomsInternal.sendConnectionStatus(roomToken, sessionToken, status, callback);
   },
 
   rename: function(roomToken, newRoomName, callback) {

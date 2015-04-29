@@ -1361,6 +1361,7 @@ const Class ScriptSourceObject::class_ = {
     nullptr, /* setProperty */
     nullptr, /* enumerate */
     nullptr, /* resolve */
+    nullptr, /* mayResolve */
     nullptr, /* convert */
     finalize,
     nullptr, /* call */
@@ -3910,7 +3911,7 @@ LazyScript::hasUncompiledEnclosingScript() const
         return false;
 
     JSFunction& fun = enclosingScope()->as<JSFunction>();
-    return fun.isInterpreted() && (!fun.hasScript() || !fun.nonLazyScript()->code());
+    return !fun.hasScript() || fun.hasUncompiledScript() || !fun.nonLazyScript()->code();
 }
 
 uint32_t

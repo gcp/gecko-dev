@@ -3,7 +3,7 @@
 
 const { classes: Cc, utils: Cu, interfaces: Ci, results: Cr } = Components;
 
-Cu.import("resource://gre/modules/TelemetryPing.jsm", this);
+Cu.import("resource://gre/modules/TelemetryController.jsm", this);
 Cu.import("resource://gre/modules/Services.jsm", this);
 
 const gIsWindows = ("@mozilla.org/windows-registry-key;1" in Cc);
@@ -16,6 +16,8 @@ const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE;
 const MILLISECONDS_PER_DAY = 24 * MILLISECONDS_PER_HOUR;
 
 const HAS_DATAREPORTINGSERVICE = "@mozilla.org/datareporting/service;1" in Cc;
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 let gOldAppInfo = null;
 let gGlobalScope = this;
@@ -140,10 +142,10 @@ function fakeSchedulerTimer(set, clear) {
  *
  * @return Date The new faked date.
  */
-function fakeNow(...arguments) {
-  const date = new Date(...arguments);
+function fakeNow(...args) {
+  const date = new Date(...args);
 
-  let ping = Cu.import("resource://gre/modules/TelemetryPing.jsm");
+  let ping = Cu.import("resource://gre/modules/TelemetryController.jsm");
   ping.Policy.now = () => date;
   let session = Cu.import("resource://gre/modules/TelemetrySession.jsm");
   session.Policy.now = () => date;
@@ -162,9 +164,18 @@ function truncateToDays(aMsec) {
   return Math.floor(aMsec / MILLISECONDS_PER_DAY);
 }
 
+// Returns a promise that resolves to true when the passed promise rejects,
+// false otherwise.
+function promiseRejects(promise) {
+  return promise.then(() => false, () => true);
+}
+
 // Set logging preferences for all the tests.
 Services.prefs.setCharPref("toolkit.telemetry.log.level", "Trace");
-TelemetryPing.initLogging();
+TelemetryController.initLogging();
+
+// Telemetry archiving should be on.
+Services.prefs.setBoolPref("toolkit.telemetry.archive.enabled", true);
 
 // Avoid timers interrupting test behavior.
 fakeSchedulerTimer(() => {}, () => {});

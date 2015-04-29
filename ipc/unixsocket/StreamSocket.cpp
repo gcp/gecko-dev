@@ -7,7 +7,6 @@
 #include "StreamSocket.h"
 #include <fcntl.h>
 #include "mozilla/RefPtr.h"
-#include "mozilla/unused.h"
 #include "nsXULAppAPI.h"
 #include "UnixSocketConnector.h"
 
@@ -20,13 +19,15 @@ namespace ipc {
 // StreamSocketIO
 //
 
-class StreamSocketIO final : public UnixSocketWatcher
-                           , protected SocketIOBase
-                           , public ConnectionOrientedSocketIO
+class StreamSocketIO final
+  : public UnixSocketWatcher
+  , protected DataSocketIO
+  , public ConnectionOrientedSocketIO
 {
 public:
   class ConnectTask;
   class DelayedConnectTask;
+  class ReceiveRunnable;
 
   StreamSocketIO(MessageLoop* mIOLoop,
                  StreamSocket* aStreamSocket,
@@ -39,9 +40,11 @@ public:
                  const nsACString& aAddress);
   ~StreamSocketIO();
 
-  void                GetSocketAddr(nsAString& aAddrStr) const;
-  SocketConsumerBase* GetConsumer();
-  SocketBase*         GetSocketBase();
+  void GetSocketAddr(nsAString& aAddrStr) const;
+
+  StreamSocket* GetStreamSocket();
+  DataSocket* GetDataSocket();
+  SocketBase* GetSocketBase();
 
   // StreamSocketIOBase
   //
@@ -73,7 +76,7 @@ public:
    */
   void Connect();
 
-  void Send(UnixSocketRawData* aData);
+  void Send(UnixSocketIOBuffer* aBuffer);
 
   // I/O callback methods
   //
@@ -85,6 +88,13 @@ public:
   void OnListening() override;
   void OnSocketCanReceiveWithoutBlocking() override;
   void OnSocketCanSendWithoutBlocking() override;
+
+  // Methods for |DataSocket|
+  //
+
+  nsresult QueryReceiveBuffer(UnixSocketIOBuffer** aBuffer);
+  void ConsumeBuffer();
+  void DiscardBuffer();
 
 private:
   void FireSocketError();
@@ -128,19 +138,23 @@ private:
    * Task member for delayed connect task. Should only be access on main thread.
    */
   CancelableTask* mDelayedConnectTask;
+
+  /**
+   * I/O buffer for received data
+   */
+  nsAutoPtr<UnixSocketRawData> mBuffer;
 };
 
 StreamSocketIO::StreamSocketIO(MessageLoop* mIOLoop,
                                StreamSocket* aStreamSocket,
                                UnixSocketConnector* aConnector,
                                const nsACString& aAddress)
-: UnixSocketWatcher(mIOLoop)
-, SocketIOBase(MAX_READ_SIZE)
-, mStreamSocket(aStreamSocket)
-, mConnector(aConnector)
-, mShuttingDownOnIOThread(false)
-, mAddress(aAddress)
-, mDelayedConnectTask(nullptr)
+  : UnixSocketWatcher(mIOLoop)
+  , mStreamSocket(aStreamSocket)
+  , mConnector(aConnector)
+  , mShuttingDownOnIOThread(false)
+  , mAddress(aAddress)
+  , mDelayedConnectTask(nullptr)
 {
   MOZ_ASSERT(mStreamSocket);
   MOZ_ASSERT(mConnector);
@@ -151,13 +165,12 @@ StreamSocketIO::StreamSocketIO(MessageLoop* mIOLoop, int aFd,
                                StreamSocket* aStreamSocket,
                                UnixSocketConnector* aConnector,
                                const nsACString& aAddress)
-: UnixSocketWatcher(mIOLoop, aFd, aConnectionStatus)
-, SocketIOBase(MAX_READ_SIZE)
-, mStreamSocket(aStreamSocket)
-, mConnector(aConnector)
-, mShuttingDownOnIOThread(false)
-, mAddress(aAddress)
-, mDelayedConnectTask(nullptr)
+  : UnixSocketWatcher(mIOLoop, aFd, aConnectionStatus)
+  , mStreamSocket(aStreamSocket)
+  , mConnector(aConnector)
+  , mShuttingDownOnIOThread(false)
+  , mAddress(aAddress)
+  , mDelayedConnectTask(nullptr)
 {
   MOZ_ASSERT(mStreamSocket);
   MOZ_ASSERT(mConnector);
@@ -180,8 +193,14 @@ StreamSocketIO::GetSocketAddr(nsAString& aAddrStr) const
   mConnector->GetSocketAddr(mAddr, aAddrStr);
 }
 
-SocketConsumerBase*
-StreamSocketIO::GetConsumer()
+StreamSocket*
+StreamSocketIO::GetStreamSocket()
+{
+  return mStreamSocket.get();
+}
+
+DataSocket*
+StreamSocketIO::GetDataSocket()
 {
   return mStreamSocket.get();
 }
@@ -189,7 +208,7 @@ StreamSocketIO::GetConsumer()
 SocketBase*
 StreamSocketIO::GetSocketBase()
 {
-  return GetConsumer();
+  return GetDataSocket();
 }
 
 bool
@@ -327,7 +346,7 @@ StreamSocketIO::Connect()
 }
 
 void
-StreamSocketIO::Send(UnixSocketRawData* aData)
+StreamSocketIO::Send(UnixSocketIOBuffer* aData)
 {
   EnqueueData(aData);
   AddWatchers(WRITE_WATCHER, false);
@@ -498,6 +517,68 @@ StreamSocketIO::SetSocketFlags(int aFd)
   return true;
 }
 
+nsresult
+StreamSocketIO::QueryReceiveBuffer(UnixSocketIOBuffer** aBuffer)
+{
+  MOZ_ASSERT(aBuffer);
+
+  if (!mBuffer) {
+    mBuffer = new UnixSocketRawData(MAX_READ_SIZE);
+  }
+  *aBuffer = mBuffer.get();
+
+  return NS_OK;
+}
+
+/**
+ * |ReceiveRunnable| transfers data received on the I/O thread
+ * to an instance of |StreamSocket| on the main thread.
+ */
+class StreamSocketIO::ReceiveRunnable final
+  : public SocketIORunnable<StreamSocketIO>
+{
+public:
+  ReceiveRunnable(StreamSocketIO* aIO, UnixSocketBuffer* aBuffer)
+    : SocketIORunnable<StreamSocketIO>(aIO)
+    , mBuffer(aBuffer)
+  { }
+
+  NS_IMETHOD Run() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    StreamSocketIO* io = SocketIORunnable<StreamSocketIO>::GetIO();
+
+    if (NS_WARN_IF(io->IsShutdownOnMainThread())) {
+      // Since we've already explicitly closed and the close
+      // happened before this, this isn't really an error.
+      return NS_OK;
+    }
+
+    StreamSocket* streamSocket = io->GetStreamSocket();
+    MOZ_ASSERT(streamSocket);
+
+    streamSocket->ReceiveSocketData(mBuffer);
+
+    return NS_OK;
+  }
+
+private:
+  nsAutoPtr<UnixSocketBuffer> mBuffer;
+};
+
+void
+StreamSocketIO::ConsumeBuffer()
+{
+  NS_DispatchToMainThread(new ReceiveRunnable(this, mBuffer.forget()));
+}
+
+void
+StreamSocketIO::DiscardBuffer()
+{
+  // Nothing to do.
+}
+
 //
 // Socket tasks
 //
@@ -558,20 +639,16 @@ StreamSocket::~StreamSocket()
   MOZ_ASSERT(!mIO);
 }
 
-bool
-StreamSocket::SendSocketData(UnixSocketRawData* aData)
+void
+StreamSocket::SendSocketData(UnixSocketIOBuffer* aBuffer)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  if (!mIO) {
-    return false;
-  }
+  MOZ_ASSERT(mIO);
 
   MOZ_ASSERT(!mIO->IsShutdownOnMainThread());
   XRE_GetIOMessageLoop()->PostTask(
     FROM_HERE,
-    new SocketIOSendTask<StreamSocketIO, UnixSocketRawData>(mIO, aData));
-
-  return true;
+    new SocketIOSendTask<StreamSocketIO, UnixSocketIOBuffer>(mIO, aBuffer));
 }
 
 bool
@@ -581,14 +658,7 @@ StreamSocket::SendSocketData(const nsACString& aStr)
     return false;
   }
 
-  nsAutoPtr<UnixSocketRawData> data(
-    new UnixSocketRawData(aStr.BeginReading(), aStr.Length()));
-
-  if (!SendSocketData(data)) {
-    return false;
-  }
-
-  unused << data.forget();
+  SendSocketData(new UnixSocketRawData(aStr.BeginReading(), aStr.Length()));
 
   return true;
 }

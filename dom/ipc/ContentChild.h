@@ -457,12 +457,17 @@ public:
     virtual bool
     DeallocPOfflineCacheUpdateChild(POfflineCacheUpdateChild* offlineCacheUpdate) override;
 
+    virtual PWebrtcGlobalChild* AllocPWebrtcGlobalChild() override;
+    virtual bool DeallocPWebrtcGlobalChild(PWebrtcGlobalChild *aActor) override;
+
     virtual PContentPermissionRequestChild*
     AllocPContentPermissionRequestChild(const InfallibleTArray<PermissionRequest>& aRequests,
                                         const IPC::Principal& aPrincipal,
                                         const TabId& aTabId) override;
     virtual bool
     DeallocPContentPermissionRequestChild(PContentPermissionRequestChild* actor) override;
+
+    virtual bool RecvGamepadUpdate(const GamepadChangeEvent& aGamepadEvent) override;
 
 private:
     virtual void ActorDestroy(ActorDestroyReason why) override;

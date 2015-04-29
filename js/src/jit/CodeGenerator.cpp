@@ -1023,7 +1023,7 @@ RegExpPairsVectorStartOffset(size_t inputOutputDataStartOffset)
 }
 
 static Address
-RegExpPairCountAddress(MacroAssembler &masm, size_t inputOutputDataStartOffset)
+RegExpPairCountAddress(MacroAssembler& masm, size_t inputOutputDataStartOffset)
 {
     return Address(masm.getStackPointer(), inputOutputDataStartOffset
                                            + sizeof(irregexp::InputOutputData)
@@ -4796,39 +4796,24 @@ CodeGenerator::visitCreateThisWithProto(LCreateThisWithProto* lir)
     callVM(CreateThisWithProtoInfo, lir);
 }
 
-typedef JSObject* (*NewGCObjectFn)(JSContext* cx, gc::AllocKind allocKind,
-                                   gc::InitialHeap initialHeap, size_t ndynamic,
-                                   const js::Class* clasp);
-static const VMFunction NewGCObjectInfo =
-    FunctionInfo<NewGCObjectFn>(js::jit::NewGCObject);
-
 void
 CodeGenerator::visitCreateThisWithTemplate(LCreateThisWithTemplate* lir)
 {
     JSObject* templateObject = lir->mir()->templateObject();
-    gc::AllocKind allocKind = templateObject->asTenured().getAllocKind();
-    gc::InitialHeap initialHeap = lir->mir()->initialHeap();
-    const js::Class* clasp = templateObject->getClass();
-    size_t ndynamic = 0;
-    if (templateObject->isNative())
-        ndynamic = templateObject->as<NativeObject>().numDynamicSlots();
     Register objReg = ToRegister(lir->output());
     Register tempReg = ToRegister(lir->temp());
 
-    OutOfLineCode* ool = oolCallVM(NewGCObjectInfo, lir,
-                                   (ArgList(), Imm32(int32_t(allocKind)), Imm32(initialHeap),
-                                    Imm32(ndynamic), ImmPtr(clasp)),
+    OutOfLineCode* ool = oolCallVM(NewInitObjectWithTemplateInfo, lir,
+                                   (ArgList(), ImmGCPtr(templateObject)),
                                    StoreRegisterTo(objReg));
 
     // Allocate. If the FreeList is empty, call to VM, which may GC.
-    masm.newGCThing(objReg, tempReg, templateObject, lir->mir()->initialHeap(), ool->entry());
-
-    // Initialize based on the templateObject.
-    masm.bind(ool->rejoin());
-
     bool initContents = !templateObject->is<PlainObject>() ||
-                          ShouldInitFixedSlots(lir, &templateObject->as<PlainObject>());
-    masm.initGCThing(objReg, tempReg, templateObject, initContents);
+                        ShouldInitFixedSlots(lir, &templateObject->as<PlainObject>());
+    masm.createGCObject(objReg, tempReg, templateObject, lir->mir()->initialHeap(), ool->entry(),
+                        initContents);
+
+    masm.bind(ool->rejoin());
 }
 
 typedef JSObject* (*NewIonArgumentsObjectFn)(JSContext* cx, JitFrameLayout* frame, HandleObject);
@@ -4972,6 +4957,22 @@ CodeGenerator::visitTypedArrayElements(LTypedArrayElements* lir)
     Register obj = ToRegister(lir->object());
     Register out = ToRegister(lir->output());
     masm.loadPtr(Address(obj, TypedArrayLayout::dataOffset()), out);
+}
+
+void
+CodeGenerator::visitSetDisjointTypedElements(LSetDisjointTypedElements* lir)
+{
+    Register target = ToRegister(lir->target());
+    Register targetOffset = ToRegister(lir->targetOffset());
+    Register source = ToRegister(lir->source());
+
+    Register temp = ToRegister(lir->temp());
+
+    masm.setupUnalignedABICall(3, temp);
+    masm.passABIArg(target);
+    masm.passABIArg(targetOffset);
+    masm.passABIArg(source);
+    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, js::SetDisjointTypedElements));
 }
 
 void

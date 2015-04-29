@@ -69,6 +69,9 @@ pref("extensions.hotfix.certs.1.sha1Fingerprint", "91:53:98:0C:C1:86:DF:47:8F:35
 // See the SCOPE constants in AddonManager.jsm for values to use here.
 pref("extensions.autoDisableScopes", 15);
 
+// Don't require signed add-ons by default
+pref("xpinstall.signatures.required", false);
+
 // Dictionary download preference
 pref("browser.dictionaries.download.url", "https://addons.mozilla.org/%LOCALE%/firefox/dictionaries/");
 
@@ -140,7 +143,6 @@ pref("app.update.cert.maxErrors", 5);
 // |app.update.url.override| user preference has been set for testing updates or
 // when the |app.update.cert.checkAttributes| preference is set to false. Also,
 // the |app.update.url.override| preference should ONLY be used for testing.
-// IMPORTANT! metro.js should also be updated for updates to certs.X.issuerName
 // IMPORTANT! media.gmp-manager.certs.* prefs should also be updated if these
 // are updated.
 
@@ -162,16 +164,7 @@ pref("app.update.enabled", true);
 pref("app.update.auto", true);
 
 // See chart in nsUpdateService.js source for more details
-// incompatibilities are ignored by updates in Metro
 pref("app.update.mode", 1);
-
-#ifdef XP_WIN
-#ifdef MOZ_METRO
-// Enables update checking in the Metro environment.
-// add-on incompatibilities are ignored by updates in Metro.
-pref("app.update.metro.enabled", true);
-#endif
-#endif
 
 // If set to true, the Update Service will present no UI for any event.
 pref("app.update.silent", false);
@@ -1435,6 +1428,8 @@ pref("devtools.performance.enabled", true);
 pref("devtools.performance.memory.sample-probability", "0.05");
 pref("devtools.performance.memory.max-log-length", 2147483647); // Math.pow(2,31) - 1
 pref("devtools.performance.timeline.hidden-markers", "[]");
+pref("devtools.performance.profiler.buffer-size", 10000000);
+pref("devtools.performance.profiler.sample-frequency-khz", 1);
 pref("devtools.performance.ui.invert-call-tree", true);
 pref("devtools.performance.ui.invert-flame-graph", false);
 pref("devtools.performance.ui.flatten-tree-recursion", true);
@@ -1540,6 +1535,9 @@ pref("devtools.webconsole.filter.info", true);
 pref("devtools.webconsole.filter.log", true);
 pref("devtools.webconsole.filter.secerror", true);
 pref("devtools.webconsole.filter.secwarn", true);
+pref("devtools.webconsole.filter.serviceworkers", false);
+pref("devtools.webconsole.filter.sharedworkers", false);
+pref("devtools.webconsole.filter.windowlessworkers", false);
 
 // Remember the Browser Console filters
 pref("devtools.browserconsole.filter.network", true);
@@ -1558,6 +1556,9 @@ pref("devtools.browserconsole.filter.info", true);
 pref("devtools.browserconsole.filter.log", true);
 pref("devtools.browserconsole.filter.secerror", true);
 pref("devtools.browserconsole.filter.secwarn", true);
+pref("devtools.browserconsole.filter.serviceworkers", true);
+pref("devtools.browserconsole.filter.sharedworkers", true);
+pref("devtools.browserconsole.filter.windowlessworkers", true);
 
 // Text size in the Web Console. Use 0 for the system default size.
 pref("devtools.webconsole.fontSize", 0);
@@ -1607,6 +1608,11 @@ pref("devtools.fontinspector.enabled", true);
 // opened developer tool. This allows us to ping telemetry just once per browser
 // version for each user.
 pref("devtools.telemetry.tools.opened.version", "{}");
+
+// Set imgur upload client ID
+pref("devtools.gcli.imgurClientID", '0df414e888d7240');
+// Imgur's upload URL
+pref("devtools.gcli.imgurUploadURL", "https://api.imgur.com/3/image");
 
 // Whether the character encoding menu is under the main Firefox button. This
 // preference is a string so that localizers can alter it.
@@ -1831,6 +1837,10 @@ pref("browser.translation.neverForLanguages", "");
 // Show the translation UI bits, like the info bar, notification icon and preferences.
 pref("browser.translation.ui.show", false);
 
+// Telemetry settings.
+// Determines if Telemetry pings can be archived locally.
+pref("toolkit.telemetry.archive.enabled", true);
+
 // Telemetry experiments settings.
 pref("experiments.enabled", true);
 pref("experiments.manifest.fetchIntervalSeconds", 86400);
@@ -1892,3 +1902,9 @@ pref("reader.parse-node-limit", 0);
 #ifdef NIGHTLY_BUILD
 pref("dom.serviceWorkers.enabled", true);
 #endif
+
+pref("browser.pocket.enabled", false);
+pref("browser.pocket.hostname", "localhost");
+pref("browser.pocket.removedByUser", false);
+pref("browser.pocket.useLocaleList", true);
+pref("browser.pocket.enabledLocales", "en-US");

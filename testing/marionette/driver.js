@@ -96,7 +96,7 @@ this.Context.fromString = function(s) {
  * passed literally.  The latter specialisation is temporary to achieve
  * backwards compatibility with listener.js.
  *
- * @param {function(): nsIMessageManager} mmFn
+ * @param {function(): (nsIMessageSender|nsIMessageBroadcaster)} mmFn
  *     Function returning the current message manager.
  * @param {function(string, Object, number)} sendAsyncFn
  *     Callback for sending async messages to the current listener.
@@ -104,6 +104,34 @@ this.Context.fromString = function(s) {
  *     Function that returns the current browser.
  */
 let ListenerProxy = function(mmFn, sendAsyncFn, curBrowserFn) {
+  let sender = new ContentSender(mmFn, sendAsyncFn, curBrowserFn);
+  let handler = {
+    set: (obj, prop, val) => { obj[prop] = val; return true; },
+    get: (obj, prop) => (...args) => obj.send(prop, args),
+  };
+  return new Proxy(sender, handler);
+};
+
+/**
+ * The ContentSender allows one to make synchronous calls to the
+ * message listener of the content frame of the current browsing context.
+ *
+ * Presumptions about the responses from content space are made so we
+ * can provide a nicer API on top of the message listener primitives that
+ * make calls from chrome- to content space seem synchronous by leveraging
+ * promises.
+ *
+ * The promise is guaranteed not to resolve until the execution of the
+ * command in content space is complete.
+ *
+ * @param {function(): (nsIMessageSender|nsIMessageBroadcaster)} mmFn
+ *     Function returning the current message manager.
+ * @param {function(string, Object, number)} sendAsyncFn
+ *     Callback for sending async messages to the current listener.
+ * @param {function(): BrowserObj} curBrowserFn
+ *     Function that returns the current browser.
+ */
+let ContentSender = function(mmFn, sendAsyncFn, curBrowserFn) {
   this.curCmdId = null;
   this.sendAsync = sendAsyncFn;
 
@@ -111,15 +139,30 @@ let ListenerProxy = function(mmFn, sendAsyncFn, curBrowserFn) {
   this.curBrowserFn_ = curBrowserFn;
 };
 
-Object.defineProperty(ListenerProxy.prototype, "mm", {
+Object.defineProperty(ContentSender.prototype, "mm", {
   get: function() { return this.mmFn_(); }
 });
 
-Object.defineProperty(ListenerProxy.prototype, "curBrowser", {
+Object.defineProperty(ContentSender.prototype, "curBrowser", {
   get: function() { return this.curBrowserFn_(); }
 });
 
-ListenerProxy.prototype.__noSuchMethod__ = function*(name, args) {
+/**
+ * Call registered function in the frame script environment of the
+ * current browsing context's content frame.
+ *
+ * @param {string} name
+ *     Function to call in the listener, e.g. for "Marionette:foo8",
+ *     use "foo".
+ * @param {Array} args
+ *     Argument list to pass the function.  If args has a single entry
+ *     that is an object, we assume it's an old style dispatch, and
+ *     the object will passed literally.
+ *
+ * @return {Promise}
+ *     A promise that resolves to the result of the command.
+ */
+ContentSender.prototype.send = function(name, args) {
   const ok = "Marionette:ok";
   const val = "Marionette:done";
   const err = "Marionette:error";
@@ -169,12 +212,11 @@ ListenerProxy.prototype.__noSuchMethod__ = function*(name, args) {
     listeners.add();
     modal.addHandler(handleDialog);
 
-    // convert to array if passed arguments
-    let msg;
-    if (args.length == 1 && typeof args[0] == "object" && args[0] !== null) {
+    // new style dispatches are arrays of arguments, old style dispatches
+    // are key-value objects
+    let msg = args;
+    if (args.length == 1 && typeof args[0] == "object") {
       msg = args[0];
-    } else {
-      msg = Array.prototype.slice.call(args);
     }
 
     this.sendAsync(name, msg, this.curCmdId);
@@ -183,7 +225,7 @@ ListenerProxy.prototype.__noSuchMethod__ = function*(name, args) {
   return proxy;
 };
 
-ListenerProxy.prototype.isOutOfSync = function(id) {
+ContentSender.prototype.isOutOfSync = function(id) {
   return this.curCmdId !== id;
 };
 
@@ -268,7 +310,7 @@ this.GeckoDriver = function(appName, device, emulator) {
   };
 
   this.mm = globalMessageManager;
-  this.listener = new ListenerProxy(
+  this.listener = ListenerProxy(
       () => this.mm,
       this.sendAsync.bind(this),
       () => this.curBrowser);
@@ -356,8 +398,8 @@ GeckoDriver.prototype.sendAsync = function(name, msg, cmdId) {
  */
 GeckoDriver.prototype.getCurrentWindow = function() {
   let typ = null;
-  if (this.curFrame == null) {
-    if (this.curBrowser == null) {
+  if (this.curFrame === null) {
+    if (this.curBrowser === null) {
       if (this.context == Context.CONTENT) {
         typ = 'navigator:browser';
       }
@@ -459,7 +501,7 @@ GeckoDriver.prototype.whenBrowserStarted = function(win, isNewSession) {
       // with no children, we don't have a hope of coming back from this call,
       // so send the ack here. Otherwise, make a note of how many child scripts
       // will be loaded so we known when it's safe to return.
-      if (mm.childCount != 0) {
+      if (mm.childCount !== 0) {
         this.curBrowser.frameRegsPending = mm.childCount;
       }
     }
@@ -518,7 +560,7 @@ GeckoDriver.prototype.deleteFile = function(filename) {
  * their type they are either accepted or ignored.
  */
 GeckoDriver.prototype.registerBrowser = function(id, be) {
-  let nullPrevious = this.curBrowser.curFrameId == null;
+  let nullPrevious = this.curBrowser.curFrameId === null;
   let listenerWindow = Services.wm.getOuterWindowWithId(id);
 
   // go in here if we're already in a remote frame
@@ -542,7 +584,7 @@ GeckoDriver.prototype.registerBrowser = function(id, be) {
 
   let reg = {};
   // this will be sent to tell the content process if it is the main content
-  let mainContent = this.curBrowser.mainContentId == null;
+  let mainContent = this.curBrowser.mainContentId === null;
   if (be.getAttribute("type") != "content") {
     // curBrowser holds all the registered frames in knownFrames
     let uid = this.generateFrameId(id);
@@ -551,15 +593,14 @@ GeckoDriver.prototype.registerBrowser = function(id, be) {
   }
 
   // set to true if we updated mainContentId
-  mainContent = mainContent == true &&
-      this.curBrowser.mainContentId != null;
+  mainContent = mainContent && this.curBrowser.mainContentId !== null;
   if (mainContent) {
     this.mainContentFrameId = this.curBrowser.curFrameId;
   }
 
   this.curBrowser.elementManager.seenItems[reg.id] =
       Cu.getWeakReference(listenerWindow);
-  if (nullPrevious && (this.curBrowser.curFrameId != null)) {
+  if (nullPrevious && (this.curBrowser.curFrameId !== null)) {
     this.sendAsync("newSession",
         {
           B2G: (this.appName == "B2G"),
@@ -588,7 +629,7 @@ GeckoDriver.prototype.registerPromise = function() {
         this.curBrowser.frameRegsPending--;
       }
 
-      if (this.curBrowser.frameRegsPending == 0) {
+      if (this.curBrowser.frameRegsPending === 0) {
         this.mm.removeMessageListener(li, cb);
         resolve();
       }
@@ -753,7 +794,7 @@ GeckoDriver.prototype.setSessionCapabilities = function(newCaps) {
       to[key] = from[key];
     }
 
-    if (Object.keys(errors).length == 0) {
+    if (Object.keys(errors).length === 0) {
       return to;
     }
 
@@ -883,7 +924,7 @@ GeckoDriver.prototype.executeScriptInSandbox = function(
     directInject,
     async,
     timeout) {
-  if (directInject && async && (timeout == null || timeout == 0)) {
+  if (directInject && async && (timeout === null || timeout === 0)) {
     throw new TimeoutError("Please set a timeout");
   }
 
@@ -899,7 +940,7 @@ GeckoDriver.prototype.executeScriptInSandbox = function(
   let res = Cu.evalInSandbox(script, sandbox, "1.8", "dummy file", 0);
 
   if (directInject && !async &&
-      (res == undefined || res.passed == undefined)) {
+      (typeof res == "undefined" || typeof res.passed == "undefined")) {
     throw new WebDriverError("finish() not called");
   }
 
@@ -953,7 +994,7 @@ GeckoDriver.prototype.execute = function(cmd, resp, directInject) {
   if (inactivityTimeout) {
     let setTimer = function() {
       that.inactivityTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-      if (that.inactivityTimer != null) {
+      if (that.inactivityTimer !== null) {
         that.inactivityTimer.initWithCallback(function() {
           throw new ScriptTimeoutError("timed out due to inactivity");
         }, inactivityTimeout, Ci.nsITimer.TYPE_ONE_SHOT);
@@ -988,7 +1029,7 @@ GeckoDriver.prototype.execute = function(cmd, resp, directInject) {
 
   try {
     this.sandbox.finish = () => {
-      if (this.inactivityTimer != null) {
+      if (this.inactivityTimer !== null) {
         this.inactivityTimer.cancel();
       }
       return this.sandbox.generate_results();
@@ -1114,7 +1155,7 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
   let that = this;
   if (inactivityTimeout) {
     this.inactivityTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-    if (this.inactivityTimer != null) {
+    if (this.inactivityTimer !== null) {
       this.inactivityTimer.initWithCallback(function() {
        chromeAsyncReturnFunc(new ScriptTimeoutError("timed out due to inactivity"));
       }, inactivityTimeout, Ci.nsITimer.TYPE_ONE_SHOT);
@@ -1122,7 +1163,7 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
     this.heartbeatCallback = function resetInactivityTimer() {
       that.inactivityTimer.cancel();
       that.inactivityTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-      if (that.inactivityTimer != null) {
+      if (that.inactivityTimer !== null) {
         that.inactivityTimer.initWithCallback(function() {
           chromeAsyncReturnFunc(new ScriptTimeoutError("timed out due to inactivity"));
         }, inactivityTimeout, Ci.nsITimer.TYPE_ONE_SHOT);
@@ -1142,7 +1183,7 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
       }
 
       if (cmd.id == that.sandbox.command_id) {
-        if (that.timer != null) {
+        if (that.timer !== null) {
           that.timer.cancel();
           that.timer = null;
         }
@@ -1156,7 +1197,7 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
         }
       }
 
-      if (that.inactivityTimer != null) {
+      if (that.inactivityTimer !== null) {
         that.inactivityTimer.cancel();
       }
     };
@@ -1216,7 +1257,7 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
 
     try {
       this.timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-      if (this.timer != null) {
+      if (this.timer !== null) {
         this.timer.initWithCallback(function() {
           chromeAsyncReturnFunc(new ScriptTimeoutError("timed out"));
         }, that.timeout, Ci.nsITimer.TYPE_ONE_SHOT);
@@ -1282,7 +1323,7 @@ GeckoDriver.prototype.get = function(cmd, resp) {
       // We need to re-issue this request to correctly poll for readyState and
       // send errors.
       this.curBrowser.pendingCommands.push(() => {
-        cmd.parameters.command_id = this.listener.curCmdId;
+        cmd.parameters.command_id = cmd.id;
         this.mm.broadcastAsyncMessage(
             "Marionette:pollForReadyState" + this.curBrowser.curFrameId,
             cmd.parameters);
@@ -1317,7 +1358,7 @@ GeckoDriver.prototype.pageLoadPromise = function() {
     let checkLoad = function() {
       end = new Date().getTime();
       let elapse = end - start;
-      if (timeout == null || elapse <= timeout) {
+      if (timeout === null || elapse <= timeout) {
         if (win.document.readyState == "complete") {
           resolve();
         } else {
@@ -1705,7 +1746,10 @@ GeckoDriver.prototype.switchToFrame = function(cmd, resp) {
 
   if (this.context == Context.CHROME) {
     let foundFrame = null;
-    if ((cmd.parameters.id == null) && (cmd.parameters.element == null)) {
+
+    // Bug 1158219: Python client sends id when it shouldn't,
+    // but we know that if it's null it wants us to switch to default
+    if (cmd.parameters.id == null && !cmd.parameters.hasOwnProperty("element")) {
       this.curFrame = null;
       if (cmd.parameters.focus) {
         this.mainFrame.focus();
@@ -1713,7 +1757,8 @@ GeckoDriver.prototype.switchToFrame = function(cmd, resp) {
       checkTimer.initWithCallback(checkLoad.bind(this), 100, Ci.nsITimer.TYPE_ONE_SHOT);
       return;
     }
-    if (cmd.parameters.element != undefined) {
+
+    if (typeof cmd.parameters.element != "undefined") {
       if (this.curBrowser.elementManager.seenItems[cmd.parameters.element]) {
         // HTMLIFrameElement
         let wantedFrame = this.curBrowser.elementManager
@@ -1756,23 +1801,23 @@ GeckoDriver.prototype.switchToFrame = function(cmd, resp) {
           foundFrame = i;
           curWindow = frame.contentWindow;
           break;
-        } else if ((foundById == null) && (frame.id == cmd.parameters.id)) {
+        } else if ((foundById === null) && (frame.id == cmd.parameters.id)) {
           foundById = i;
         }
       }
-      if ((foundFrame == null) && (foundById != null)) {
+      if ((foundFrame === null) && (foundById !== null)) {
         foundFrame = foundById;
         curWindow = frames[foundById].contentWindow;
       }
       break;
     case "number":
-      if (curWindow.frames[cmd.parameters.id] != undefined) {
+      if (typeof curWindow.frames[cmd.parameters.id] != "undefined") {
         foundFrame = cmd.parameters.id;
         curWindow = curWindow.frames[foundFrame].frameElement.contentWindow;
       }
       break;
     }
-    if (foundFrame != null) {
+    if (foundFrame !== null) {
       this.curFrame = curWindow;
       if (cmd.parameters.focus) {
         this.curFrame.focus();
@@ -1894,7 +1939,7 @@ GeckoDriver.prototype.actionChain = function(cmd, resp) {
 
       let cbs = {};
       cbs.onSuccess = val => resp.value = val;
-      cbs.onError = err => { throw err };
+      cbs.onError = err => { throw err; };
 
       let win = this.getCurrentWindow();
       let elm = this.curBrowser.elementManager;
@@ -2308,7 +2353,7 @@ GeckoDriver.prototype.sendKeysToElement = function(cmd, resp) {
   let {id, value} = cmd.parameters;
 
   if (!value) {
-    throw new IllegalArgumentError(`Expected character sequence: ${value}`);
+    throw new InvalidArgumentError(`Expected character sequence: ${value}`);
   }
 
   switch (this.context) {
@@ -2341,7 +2386,7 @@ GeckoDriver.prototype.sendKeysToElement = function(cmd, resp) {
           try {
             file = new File(val);
           } catch (e) {
-            err = new IllegalArgumentError(`File not found: ${val}`);
+            err = new InvalidArgumentError(`File not found: ${val}`);
           }
           fs.push(file);
           el.mozSetFileArray(fs);
@@ -2525,7 +2570,7 @@ GeckoDriver.prototype.closeChromeWindow = function(cmd, resp) {
  * be reused.
  */
 GeckoDriver.prototype.sessionTearDown = function(cmd, resp) {
-  if (this.curBrowser != null) {
+  if (this.curBrowser !== null) {
     if (this.appName == "B2G") {
       globalMessageManager.broadcastAsyncMessage(
           "Marionette:sleepSession" + this.curBrowser.mainContentId, {});
@@ -3231,7 +3276,7 @@ BrowserObj.prototype.startSession = function(newSession, win, callback) {
 BrowserObj.prototype.closeTab = function() {
   if (this.browser &&
       this.browser.removeTab &&
-      this.tab != null && (this.driver.appName != "B2G")) {
+      this.tab !== null && (this.driver.appName != "B2G")) {
     this.browser.removeTab(this.tab);
   }
 };

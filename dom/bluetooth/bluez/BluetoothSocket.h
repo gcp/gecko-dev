@@ -9,7 +9,7 @@
 
 #include "BluetoothCommon.h"
 #include <stdlib.h>
-#include "mozilla/ipc/SocketBase.h"
+#include "mozilla/ipc/DataSocket.h"
 #include "mozilla/ipc/UnixSocketWatcher.h"
 #include "mozilla/RefPtr.h"
 #include "nsAutoPtr.h"
@@ -21,7 +21,7 @@ BEGIN_BLUETOOTH_NAMESPACE
 class BluetoothSocketObserver;
 class BluetoothUnixSocketConnector;
 
-class BluetoothSocket final : public mozilla::ipc::SocketConsumerBase
+class BluetoothSocket final : public mozilla::ipc::DataSocket
 {
 public:
   BluetoothSocket(BluetoothSocketObserver* aObserver,
@@ -44,8 +44,6 @@ public:
   virtual void OnConnectSuccess() override;
   virtual void OnConnectError() override;
   virtual void OnDisconnect() override;
-  virtual void ReceiveSocketData(
-    nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage) override;
 
   inline void GetAddress(nsAString& aDeviceAddress)
   {
@@ -53,14 +51,20 @@ public:
   }
 
   /**
+   * Method to be called whenever data is received. This is only called on the
+   * main thread.
+   *
+   * @param aBuffer Data received from the socket.
+   */
+  void ReceiveSocketData(nsAutoPtr<mozilla::ipc::UnixSocketBuffer>& aBuffer);
+
+  /**
    * Queue data to be sent to the socket on the IO thread. Can only be called on
    * originating thread.
    *
-   * @param aMessage Data to be sent to socket
-   *
-   * @return true if data is queued, false otherwise (i.e. not connected)
+   * @param aBuffer Data to be sent to socket
    */
-  bool SendSocketData(mozilla::ipc::UnixSocketRawData* aMessage);
+  void SendSocketData(mozilla::ipc::UnixSocketIOBuffer* aBuffer) override;
 
   /**
    * Convenience function for sending strings to the socket (common in bluetooth
@@ -101,7 +105,7 @@ public:
    * Queues the internal representation of socket for deletion. Can be called
    * from main thread.
    */
-  void CloseSocket();
+  void CloseSocket() override;
 
   /**
    * Get the current sockaddr for the socket

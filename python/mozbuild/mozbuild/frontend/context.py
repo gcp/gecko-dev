@@ -910,10 +910,6 @@ VARIABLES = {
         """Additional directories to be searched for include files by the compiler.
         """, None),
 
-    'MSVC_ENABLE_PGO': (bool, bool,
-        """Whether profile-guided optimization is enabled for MSVC in this directory.
-        """, None),
-
     'NO_PGO': (bool, bool,
         """Whether profile-guided optimization is disable in this directory.
         """, None),
@@ -1243,6 +1239,25 @@ VARIABLES = {
         neither are present, the result is dist/bin. If XPI_NAME is present, the
         result is dist/xpi-stage/$(XPI_NAME). If DIST_SUBDIR is present, then
         the $(DIST_SUBDIR) directory of the otherwise default value is used.
+        """, None),
+
+    'USE_EXTENSION_MANIFEST': (bool, bool,
+        """Controls the name of the manifest for JAR files.
+
+        By default, the name of the manifest is ${JAR_MANIFEST}.manifest.
+        Setting this variable to ``True`` changes the name of the manifest to
+        chrome.manifest.
+        """, None),
+
+    'NO_JS_MANIFEST': (bool, bool,
+        """Explicitly disclaims responsibility for manifest listing in EXTRA_COMPONENTS.
+
+        Normally, if you have .js files listed in ``EXTRA_COMPONENTS`` or
+        ``EXTRA_PP_COMPONENTS``, you are expected to have a corresponding
+        .manifest file to go with those .js files.  Setting ``NO_JS_MANIFEST``
+        indicates that the relevant .manifest file and entries for those .js
+        files are elsehwere (jar.mn, for instance) and this state of affairs
+        is OK.
         """, None),
 
     'GYP_DIRS': (StrictOrderingOnAppendListWithFlagsFactory({

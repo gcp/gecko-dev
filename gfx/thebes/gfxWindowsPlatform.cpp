@@ -117,8 +117,7 @@ DCFromDrawTarget::DCFromDrawTarget(DrawTarget& aDrawTarget)
 static const char *kFeatureLevelPref =
   "gfx.direct3d.last_used_feature_level_idx";
 static const int kSupportedFeatureLevels[] =
-  { D3D10_FEATURE_LEVEL_10_1, D3D10_FEATURE_LEVEL_10_0,
-    D3D10_FEATURE_LEVEL_9_3 };
+  { D3D10_FEATURE_LEVEL_10_1, D3D10_FEATURE_LEVEL_10_0 };
 
 class GfxD2DSurfaceReporter final : public nsIMemoryReporter
 {
@@ -495,11 +494,6 @@ gfxWindowsPlatform::UpdateRenderMode()
 
     bool isVistaOrHigher = IsVistaOrLater();
 
-    bool safeMode = false;
-    nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
-    if (xr)
-      xr->GetInSafeMode(&safeMode);
-
     mUseDirectWrite = Preferences::GetBool("gfx.font_rendering.directwrite.enabled", false);
 
 #ifdef CAIRO_HAS_D2D_SURFACE
@@ -536,7 +530,7 @@ gfxWindowsPlatform::UpdateRenderMode()
     }
 
     ID3D11Device *device = GetD3D11Device();
-    if (isVistaOrHigher && !safeMode && tryD2D &&
+    if (isVistaOrHigher && !InSafeMode() && tryD2D &&
         device &&
         device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_10_0 &&
         DoesD3D11TextureSharingWork(device)) {
@@ -676,10 +670,6 @@ gfxWindowsPlatform::VerifyD2DDevice(bool aAttemptForce)
     nsRefPtr<ID3D10Device1> device;
 
     int supportedFeatureLevelsCount = ArrayLength(kSupportedFeatureLevels);
-    // If we're not running in Metro don't allow DX9.3
-    if (!IsRunningInWindowsMetro()) {
-      supportedFeatureLevelsCount--;
-    }
 
     nsRefPtr<IDXGIAdapter1> adapter1 = GetDXGIAdapter();
 
@@ -1874,13 +1864,7 @@ gfxWindowsPlatform::InitD3D11Devices()
 
   MOZ_ASSERT(!mD3D11Device); 
 
-  bool safeMode = false;
-  nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
-  if (xr) {
-    xr->GetInSafeMode(&safeMode);
-  }
-
-  if (safeMode) {
+  if (InSafeMode()) {
     return;
   }
 
@@ -1892,7 +1876,8 @@ gfxWindowsPlatform::InitD3D11Devices()
     if (NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DIRECT3D_11_LAYERS, &status))) {
       if (status != nsIGfxInfo::FEATURE_STATUS_OK) {
 
-        if (gfxPrefs::LayersD3D11DisableWARP()) {
+        // It seems like nvdxgiwrapper makes a mess of WARP. See bug 1154703 for more.
+        if (gfxPrefs::LayersD3D11DisableWARP() || GetModuleHandleA("nvdxgiwrapper.dll")) {
           return;
         }
 

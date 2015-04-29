@@ -38,8 +38,8 @@
   <string name="no_space_to_start_error">&no_space_to_start_error;</string>
   <string name="error_loading_file">&error_loading_file;</string>
 
-  <string name="firstrun_welcome_message">&onboard_start_message2;</string>
-  <string name="firstrun_welcome_subtext">&onboard_start_subtext2;</string>
+  <string name="firstrun_welcome_message">&onboard_start_message3;</string>
+  <string name="firstrun_welcome_subtext">&onboard_start_subtext3;</string>
   <string name="firstrun_welcome_button_account">&onboard_start_button_account;</string>
   <string name="firstrun_welcome_button_browser">&onboard_start_button_browser;</string>
   <string name="firstrun_empty_contentDescription"></string>
@@ -247,10 +247,9 @@
   <string name="tab_queue_prompt_negative_action_button">&tab_queue_prompt_negative_action_button;</string>
   <string name="tab_queue_toast_message">&tab_queue_toast_message2;</string>
   <string name="tab_queue_toast_action">&tab_queue_toast_action;</string>
-  <string name="tab_queue_notification_text_singular">&tab_queue_notification_text_singular;</string>
-  <string name="tab_queue_notification_text_plural">&tab_queue_notification_text_plural;</string>
-  <string name="tab_queue_notification_title_singular">&tab_queue_notification_title_singular;</string>
-  <string name="tab_queue_notification_title_plural">&tab_queue_notification_title_plural;</string>
+  <string name="tab_queue_notification_text_singular">&tab_queue_notification_text_singular2;</string>
+  <string name="tab_queue_notification_text_plural">&tab_queue_notification_text_plural2;</string>
+  <string name="tab_queue_notification_title">&tab_queue_notification_title;</string>
 
   <string name="pref_about_firefox">&pref_about_firefox;</string>
   <string name="pref_vendor_faqs">&pref_vendor_faqs;</string>

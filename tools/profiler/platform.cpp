@@ -81,10 +81,7 @@ static mozilla::StaticAutoPtr<mozilla::ProfilerIOInterposeObserver>
                                                             sInterposeObserver;
 
 // The name that identifies the gecko thread for calls to
-// profiler_register_thread. For all platform except metro
-// the thread that calls mozilla_sampler_init is considered
-// the gecko thread.  With metro the gecko thread is
-// registered later based on this thread name.
+// profiler_register_thread.
 static const char * gGeckoThreadName = "GeckoMain";
 
 void Sampler::Startup() {
@@ -204,7 +201,7 @@ ProfilerMarker::SetGeneration(uint32_t aGenID) {
 }
 
 float
-ProfilerMarker::GetTime() {
+ProfilerMarker::GetTime() const {
   return mTime;
 }
 
@@ -467,10 +464,6 @@ void mozilla_sampler_init(void* stackTop)
   tlsPseudoStack.set(stack);
 
   bool isMainThread = true;
-#ifdef XP_WIN
-  // For metrofx, we'll register the main thread once it's created.
-  isMainThread = !(XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro);
-#endif
   Sampler::RegisterCurrentThread(isMainThread ?
                                    gGeckoThreadName : "Application Thread",
                                  stack, isMainThread, stackTop);
@@ -558,7 +551,7 @@ void mozilla_sampler_save()
   t->HandleSaveRequest();
 }
 
-char* mozilla_sampler_get_profile()
+char* mozilla_sampler_get_profile(float aSinceTime)
 {
   TableTicker *t = tlsTicker.get();
   if (!t) {
@@ -566,19 +559,19 @@ char* mozilla_sampler_get_profile()
   }
 
   std::stringstream stream;
-  t->ToStreamAsJSON(stream);
+  t->ToStreamAsJSON(stream, aSinceTime);
   char* profile = strdup(stream.str().c_str());
   return profile;
 }
 
-JSObject *mozilla_sampler_get_profile_data(JSContext *aCx)
+JSObject *mozilla_sampler_get_profile_data(JSContext *aCx, float aSinceTime)
 {
   TableTicker *t = tlsTicker.get();
   if (!t) {
     return nullptr;
   }
 
-  return t->ToJSObject(aCx);
+  return t->ToJSObject(aCx, aSinceTime);
 }
 
 void mozilla_sampler_save_profile_to_file(const char* aFilename)

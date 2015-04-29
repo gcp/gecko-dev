@@ -41,7 +41,8 @@
 
 #include "mozilla/dom/ScreenOrientation.h"
 #ifdef MOZ_GAMEPAD
-#include "mozilla/dom/GamepadService.h"
+#include "mozilla/dom/GamepadFunctions.h"
+#include "mozilla/dom/Gamepad.h"
 #endif
 
 #include "GeckoProfiler.h"
@@ -242,6 +243,16 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
 
         curEvent = PopNextEvent();
         if (!curEvent && mayWait) {
+            // This processes messages in the Android Looper. Note that we only
+            // get here if the normal Gecko event loop has been awoken
+            // (bug 750713). Looper messages effectively have the lowest
+            // priority because we only process them before we're about to
+            // wait for new events.
+            if (AndroidBridge::HasEnv() &&
+                    AndroidBridge::Bridge()->PumpMessageLoop()) {
+                return true;
+            }
+
             PROFILER_LABEL("nsAppShell", "ProcessNextNativeEvent::Wait",
                 js::ProfileEntry::Category::EVENTS);
             mozilla::HangMonitor::Suspend();
@@ -656,19 +667,15 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
 
     case AndroidGeckoEvent::GAMEPAD_ADDREMOVE: {
 #ifdef MOZ_GAMEPAD
-        nsRefPtr<mozilla::dom::GamepadService> svc =
-            mozilla::dom::GamepadService::GetService();
-        if (svc) {
             if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_ADDED) {
-                int svc_id = svc->AddGamepad("android",
-                                             mozilla::dom::GamepadMappingType::Standard,
-                                             mozilla::dom::kStandardGamepadButtons,
-                                             mozilla::dom::kStandardGamepadAxes);
+            int svc_id = dom::GamepadFunctions::AddGamepad("android",
+                                                           dom::GamepadMappingType::Standard,
+                                                           dom::kStandardGamepadButtons,
+                                                           dom::kStandardGamepadAxes);
                 widget::GeckoAppShell::GamepadAdded(curEvent->ID(),
                                                     svc_id);
             } else if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_REMOVED) {
-                svc->RemoveGamepad(curEvent->ID());
-            }
+            dom::GamepadFunctions::RemoveGamepad(curEvent->ID());
         }
 #endif
         break;
@@ -676,12 +683,9 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
 
     case AndroidGeckoEvent::GAMEPAD_DATA: {
 #ifdef MOZ_GAMEPAD
-        nsRefPtr<mozilla::dom::GamepadService> svc =
-            mozilla::dom::GamepadService::GetService();
-        if (svc) {
             int id = curEvent->ID();
             if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_BUTTON) {
-                 svc->NewButtonEvent(id, curEvent->GamepadButton(),
+            dom::GamepadFunctions::NewButtonEvent(id, curEvent->GamepadButton(),
                                      curEvent->GamepadButtonPressed(),
                                      curEvent->GamepadButtonValue());
             } else if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_AXES) {
@@ -689,8 +693,7 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
                 const nsTArray<float>& values = curEvent->GamepadValues();
                 for (unsigned i = 0; i < values.Length(); i++) {
                     if (valid & (1<<i)) {
-                        svc->NewAxisMoveEvent(id, i, values[i]);
-                    }
+                    dom::GamepadFunctions::NewAxisMoveEvent(id, i, values[i]);
                 }
             }
         }

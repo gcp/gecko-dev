@@ -187,6 +187,7 @@
 #include "mozilla/dom/StructuredCloneTags.h"
 
 #ifdef MOZ_GAMEPAD
+#include "mozilla/dom/Gamepad.h"
 #include "mozilla/dom/GamepadService.h"
 #endif
 
@@ -1438,6 +1439,8 @@ nsGlobalWindow::CleanUp()
     return;
   mCleanedUp = true;
 
+  StartDying();
+
   mEventTargetObjects.EnumerateEntries(DisconnectEventTargetObjects, nullptr);
   mEventTargetObjects.Clear();
 
@@ -2619,6 +2622,12 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
         NS_ERROR("can't create the 'window' property");
         return NS_ERROR_FAILURE;
       }
+
+      // And same thing for the "self" property.
+      if (!JS_GetProperty(cx, newInnerGlobal, "self", &unused)) {
+        NS_ERROR("can't create the 'self' property");
+        return NS_ERROR_FAILURE;
+      }
     }
   }
 
@@ -3524,7 +3533,7 @@ NS_IMETHODIMP
 nsGlobalWindow::GetWindow(nsIDOMWindow** aWindow)
 {
   ErrorResult rv;
-  FORWARD_TO_OUTER_OR_THROW(GetWindow, (aWindow), rv, rv.ErrorCode());
+  FORWARD_TO_OUTER_OR_THROW(GetWindow, (aWindow), rv, rv.StealNSResult());
 
   nsCOMPtr<nsIDOMWindow> window = Window();
   window.forget(aWindow);
@@ -3532,11 +3541,9 @@ nsGlobalWindow::GetWindow(nsIDOMWindow** aWindow)
   return NS_OK;
 }
 
-nsIDOMWindow*
-nsGlobalWindow::GetSelf(ErrorResult& aError)
+nsGlobalWindow*
+nsGlobalWindow::Self()
 {
-  FORWARD_TO_OUTER_OR_THROW(GetSelf, (aError), aError, nullptr);
-
   return this;
 }
 
@@ -3544,10 +3551,12 @@ NS_IMETHODIMP
 nsGlobalWindow::GetSelf(nsIDOMWindow** aWindow)
 {
   ErrorResult rv;
-  nsCOMPtr<nsIDOMWindow> window = GetSelf(rv);
+  FORWARD_TO_OUTER_OR_THROW(GetSelf, (aWindow), rv, rv.StealNSResult());
+
+  nsCOMPtr<nsIDOMWindow> window = Self();
   window.forget(aWindow);
 
-  return rv.ErrorCode();
+  return NS_OK;
 }
 
 Navigator*
@@ -3569,7 +3578,7 @@ nsGlobalWindow::GetNavigator(nsIDOMNavigator** aNavigator)
   nsCOMPtr<nsIDOMNavigator> navigator = GetNavigator(rv);
   navigator.forget(aNavigator);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsScreen*
@@ -3595,7 +3604,7 @@ nsGlobalWindow::GetScreen(nsIDOMScreen** aScreen)
   nsRefPtr<nsScreen> screen = GetScreen(rv);
   screen.forget(aScreen);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsHistory*
@@ -3617,7 +3626,7 @@ nsGlobalWindow::GetHistory(nsISupports** aHistory)
   nsCOMPtr<nsISupports> history = GetHistory(rv);
   history.forget(aHistory);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsPerformance*
@@ -3813,7 +3822,7 @@ nsGlobalWindow::GetScriptableParent(nsIDOMWindow** aParent)
   nsCOMPtr<nsIDOMWindow> parent = GetParent(rv);
   parent.forget(aParent);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 /**
@@ -4000,7 +4009,7 @@ nsGlobalWindow::GetContent(nsIDOMWindow** aContent)
   ErrorResult rv;
   *aContent = GetContentInternal(rv).take();
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 MozSelfSupport*
@@ -4026,7 +4035,7 @@ nsGlobalWindow::GetScriptableContent(JSContext* aCx, JS::MutableHandle<JS::Value
     aVal.setObjectOrNull(content);
   }
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -4070,7 +4079,7 @@ nsGlobalWindow::GetMenubar(nsISupports** aMenubar)
   nsCOMPtr<nsISupports> menubar = GetMenubar(rv);
   menubar.forget(aMenubar);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 BarProp*
@@ -4092,7 +4101,7 @@ nsGlobalWindow::GetToolbar(nsISupports** aToolbar)
   nsCOMPtr<nsISupports> toolbar = GetToolbar(rv);
   toolbar.forget(aToolbar);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 BarProp*
@@ -4113,7 +4122,7 @@ nsGlobalWindow::GetLocationbar(nsISupports** aLocationbar)
   nsCOMPtr<nsISupports> locationbar = GetLocationbar(rv);
   locationbar.forget(aLocationbar);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 BarProp*
@@ -4134,7 +4143,7 @@ nsGlobalWindow::GetPersonalbar(nsISupports** aPersonalbar)
   nsCOMPtr<nsISupports> personalbar = GetPersonalbar(rv);
   personalbar.forget(aPersonalbar);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 BarProp*
@@ -4155,7 +4164,7 @@ nsGlobalWindow::GetStatusbar(nsISupports** aStatusbar)
   nsCOMPtr<nsISupports> statusbar = GetStatusbar(rv);
   statusbar.forget(aStatusbar);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 BarProp*
@@ -4177,7 +4186,7 @@ nsGlobalWindow::GetScrollbars(nsISupports** aScrollbars)
   nsCOMPtr<nsISupports> scrollbars = GetScrollbars(rv);
   scrollbars.forget(aScrollbars);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 bool
@@ -4195,7 +4204,7 @@ nsGlobalWindow::GetClosed(bool* aClosed)
   ErrorResult rv;
   *aClosed = GetClosed(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsDOMWindowList*
@@ -4381,7 +4390,7 @@ nsGlobalWindow::GetApplicationCache(nsIDOMOfflineResourceList **aApplicationCach
     GetApplicationCache(rv);
   applicationCache.forget(aApplicationCache);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 Crypto*
@@ -4403,7 +4412,7 @@ nsGlobalWindow::GetCrypto(nsIDOMCrypto** aCrypto)
   nsCOMPtr<nsIDOMCrypto> crypto = GetCrypto(rv);
   crypto.forget(aCrypto);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsIControllers*
@@ -4447,7 +4456,7 @@ nsGlobalWindow::GetControllers(nsIControllers** aResult)
   nsCOMPtr<nsIControllers> controllers = GetControllers(rv);
   controllers.forget(aResult);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsIDOMWindow*
@@ -4518,7 +4527,7 @@ nsGlobalWindow::GetScriptableOpener(JSContext* aCx,
   ErrorResult rv;
   GetOpener(aCx, aOpener, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -4527,7 +4536,7 @@ nsGlobalWindow::GetOpener(nsIDOMWindow** aOpener)
   ErrorResult rv;
   nsCOMPtr<nsIDOMWindow> opener = GetOpenerWindow(rv);
   opener.forget(aOpener);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -4586,7 +4595,7 @@ nsGlobalWindow::SetScriptableOpener(JSContext* aCx,
   ErrorResult rv;
   SetOpener(aCx, aOpener, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -4610,7 +4619,7 @@ nsGlobalWindow::GetStatus(nsAString& aStatus)
   ErrorResult rv;
   GetStatus(aStatus, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -4642,7 +4651,7 @@ nsGlobalWindow::SetStatus(const nsAString& aStatus)
   ErrorResult rv;
   SetStatus(aStatus, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -4661,7 +4670,7 @@ nsGlobalWindow::GetName(nsAString& aName)
   ErrorResult rv;
   GetName(aName, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -4680,7 +4689,7 @@ nsGlobalWindow::SetName(const nsAString& aName)
   ErrorResult rv;
   SetName(aName, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 // Helper functions used by many methods below.
@@ -4808,7 +4817,7 @@ nsGlobalWindow::GetInnerWidth(int32_t* aInnerWidth)
   ErrorResult rv;
   *aInnerWidth = GetInnerWidth(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -4865,7 +4874,7 @@ nsGlobalWindow::SetInnerWidth(int32_t aInnerWidth)
   ErrorResult rv;
   SetInnerWidth(aInnerWidth, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 int32_t
@@ -4893,7 +4902,7 @@ nsGlobalWindow::GetInnerHeight(int32_t* aInnerHeight)
   ErrorResult rv;
   *aInnerHeight = GetInnerHeight(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -4949,7 +4958,7 @@ nsGlobalWindow::SetInnerHeight(int32_t aInnerHeight)
   ErrorResult rv;
   SetInnerHeight(aInnerHeight, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsIntSize
@@ -5000,7 +5009,7 @@ nsGlobalWindow::GetOuterWidth(int32_t* aOuterWidth)
   ErrorResult rv;
   *aOuterWidth = GetOuterWidth(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 int32_t
@@ -5025,7 +5034,7 @@ nsGlobalWindow::GetOuterHeight(int32_t* aOuterHeight)
   ErrorResult rv;
   *aOuterHeight = GetOuterHeight(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -5084,7 +5093,7 @@ nsGlobalWindow::SetOuterWidth(int32_t aOuterWidth)
   ErrorResult rv;
   SetOuterWidth(aOuterWidth, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -5113,7 +5122,7 @@ nsGlobalWindow::SetOuterHeight(int32_t aOuterHeight)
   ErrorResult rv;
   SetOuterHeight(aOuterHeight, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsIntPoint
@@ -5155,7 +5164,7 @@ nsGlobalWindow::GetScreenX(int32_t* aScreenX)
   ErrorResult rv;
   *aScreenX = GetScreenX(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsRect
@@ -5204,7 +5213,7 @@ nsGlobalWindow::GetMozInnerScreenX(float* aScreenX)
   ErrorResult rv;
   *aScreenX = GetMozInnerScreenX(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 float
@@ -5222,7 +5231,7 @@ nsGlobalWindow::GetMozInnerScreenY(float* aScreenY)
   ErrorResult rv;
   *aScreenY = GetMozInnerScreenY(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 float
@@ -5250,7 +5259,7 @@ nsGlobalWindow::GetDevicePixelRatio(float* aRatio)
   ErrorResult rv;
   *aRatio = GetDevicePixelRatio(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 uint64_t
@@ -5272,7 +5281,7 @@ nsGlobalWindow::GetMozPaintCount(uint64_t* aResult)
   ErrorResult rv;
   *aResult = GetMozPaintCount(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -5290,7 +5299,7 @@ nsGlobalWindow::MozRequestAnimationFrame(nsIFrameRequestCallback* aCallback,
   nsIDocument::FrameRequestCallbackHolder holder(aCallback);
   *aHandle = RequestAnimationFrame(holder, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 int32_t
@@ -5345,7 +5354,7 @@ nsGlobalWindow::RequestAnimationFrame(JS::Handle<JS::Value> aCallback,
   ErrorResult rv;
   *aHandle = RequestAnimationFrame(*callback, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -5378,7 +5387,7 @@ nsGlobalWindow::CancelAnimationFrame(int32_t aHandle)
   ErrorResult rv;
   CancelAnimationFrame(aHandle, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 int64_t
@@ -5404,7 +5413,7 @@ nsGlobalWindow::GetMozAnimationStartTime(int64_t *aTime)
   ErrorResult rv;
   *aTime = GetMozAnimationStartTime(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 already_AddRefed<MediaQueryList>
@@ -5433,7 +5442,7 @@ nsGlobalWindow::MatchMedia(const nsAString& aMediaQueryList,
   nsRefPtr<MediaQueryList> mediaQueryList = MatchMedia(aMediaQueryList, rv);
   mediaQueryList.forget(aResult);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -5477,7 +5486,7 @@ nsGlobalWindow::SetScreenX(int32_t aScreenX)
   ErrorResult rv;
   SetScreenX(aScreenX, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 int32_t
@@ -5494,7 +5503,7 @@ nsGlobalWindow::GetScreenY(int32_t* aScreenY)
   ErrorResult rv;
   *aScreenY = GetScreenY(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -5547,7 +5556,7 @@ nsGlobalWindow::SetScreenY(int32_t aScreenY)
   ErrorResult rv;
   SetScreenY(aScreenY, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 // NOTE: Arguments to this function should have values scaled to
@@ -5747,7 +5756,7 @@ nsGlobalWindow::GetScrollMaxX(int32_t* aScrollMaxX)
   ErrorResult rv;
   *aScrollMaxX = GetScrollMaxX(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 int32_t
@@ -5765,7 +5774,7 @@ nsGlobalWindow::GetScrollMaxY(int32_t* aScrollMaxY)
   ErrorResult rv;
   *aScrollMaxY = GetScrollMaxY(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 CSSIntPoint
@@ -5808,7 +5817,7 @@ nsGlobalWindow::GetScrollX(int32_t* aScrollX)
   NS_ENSURE_ARG_POINTER(aScrollX);
   ErrorResult rv;
   *aScrollX = GetScrollX(rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 int32_t
@@ -5824,7 +5833,7 @@ nsGlobalWindow::GetScrollY(int32_t* aScrollY)
   NS_ENSURE_ARG_POINTER(aScrollY);
   ErrorResult rv;
   *aScrollY = GetScrollY(rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 uint32_t
@@ -6083,7 +6092,7 @@ nsGlobalWindow::SetFullScreenInternal(bool aFullScreen, bool aRequireTrust, gfx:
     mWakeLock = pmService->NewWakeLock(NS_LITERAL_STRING("DOM_Fullscreen"),
                                        this, rv);
     if (rv.Failed()) {
-      return rv.ErrorCode();
+      return rv.StealNSResult();
     }
 
   } else if (mWakeLock && !mFullScreen) {
@@ -6131,7 +6140,7 @@ nsGlobalWindow::GetFullScreen(bool* aFullScreen)
   ErrorResult rv;
   *aFullScreen = GetFullScreen(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -6431,7 +6440,7 @@ nsGlobalWindow::Alert(const nsAString& aString)
   ErrorResult rv;
   Alert(aString, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 bool
@@ -6448,7 +6457,7 @@ nsGlobalWindow::Confirm(const nsAString& aString, bool* aReturn)
   ErrorResult rv;
   *aReturn = Confirm(aString, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 already_AddRefed<Promise>
@@ -6549,7 +6558,7 @@ nsGlobalWindow::Prompt(const nsAString& aMessage, const nsAString& aInitial,
   ErrorResult rv;
   Prompt(aMessage, aInitial, aReturn, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -6669,7 +6678,7 @@ nsGlobalWindow::Focus()
   ErrorResult rv;
   Focus(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -6710,7 +6719,7 @@ nsGlobalWindow::Blur()
   ErrorResult rv;
   Blur(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -6733,7 +6742,7 @@ nsGlobalWindow::Back()
   ErrorResult rv;
   Back(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -6756,7 +6765,7 @@ nsGlobalWindow::Forward()
   ErrorResult rv;
   Forward(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -6817,7 +6826,7 @@ nsGlobalWindow::Home()
   ErrorResult rv;
   Home(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -6837,7 +6846,7 @@ nsGlobalWindow::Stop()
   ErrorResult rv;
   Stop(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -6923,7 +6932,7 @@ nsGlobalWindow::Print()
   ErrorResult rv;
   Print(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -6961,7 +6970,7 @@ nsGlobalWindow::MoveTo(int32_t aXPos, int32_t aYPos)
   ErrorResult rv;
   MoveTo(aXPos, aYPos, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -7013,7 +7022,7 @@ nsGlobalWindow::MoveBy(int32_t aXDif, int32_t aYDif)
   ErrorResult rv;
   MoveBy(aXDif, aYDif, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -7063,7 +7072,7 @@ nsGlobalWindow::ResizeTo(int32_t aWidth, int32_t aHeight)
   ErrorResult rv;
   ResizeTo(aWidth, aHeight, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -7135,7 +7144,7 @@ nsGlobalWindow::ResizeBy(int32_t aWidthDif, int32_t aHeightDif)
   ErrorResult rv;
   ResizeBy(aWidthDif, aHeightDif, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -7194,7 +7203,7 @@ nsGlobalWindow::SizeToContent()
   ErrorResult rv;
   SizeToContent(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -7443,7 +7452,7 @@ nsGlobalWindow::ClearTimeout(int32_t aHandle)
   ErrorResult rv;
   ClearTimeout(aHandle, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -7460,7 +7469,7 @@ nsGlobalWindow::ClearInterval(int32_t aHandle)
   ErrorResult rv;
   ClearInterval(aHandle, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -7867,7 +7876,7 @@ nsGlobalWindow::GetFrames(nsIDOMWindow** aFrames)
   nsCOMPtr<nsIDOMWindow> frames = GetFrames(rv);
   frames.forget(aFrames);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsGlobalWindow*
@@ -8447,7 +8456,7 @@ nsGlobalWindow::PostMessageMoz(JS::Handle<JS::Value> aMessage,
   ErrorResult rv;
   PostMessageMoz(aCx, aMessage, aOrigin, aTransfer, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 class nsCloseEvent : public nsRunnable {
@@ -8593,7 +8602,7 @@ nsGlobalWindow::Close()
   ErrorResult rv;
   Close(rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -9041,7 +9050,7 @@ nsGlobalWindow::GetScriptableFrameElement(nsIDOMElement** aFrameElement)
   ErrorResult rv;
   nsCOMPtr<nsIDOMElement> frameElement = do_QueryInterface(GetFrameElement(rv));
   if (rv.Failed()) {
-    return rv.ErrorCode();
+    return rv.StealNSResult();
   }
 
   frameElement.forget(aFrameElement);
@@ -9103,7 +9112,7 @@ nsGlobalWindow::GetRealFrameElement(nsIDOMElement** aFrameElement)
     do_QueryInterface(GetRealFrameElement(rv));
   frameElement.forget(aFrameElement);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 // Helper for converting window.showModalDialog() options (list of ';'
@@ -9350,7 +9359,7 @@ nsGlobalWindow::ShowModalDialog(const nsAString& aURI, nsIVariant *aArgs_,
   nsCOMPtr<nsIVariant> retVal = ShowModalDialog(aURI, aArgs, aOptions, rv);
   retVal.forget(aRetVal);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 class ChildCommandDispatcher : public nsRunnable
@@ -9454,7 +9463,7 @@ nsGlobalWindow::GetSelection(nsISelection** aSelection)
   nsCOMPtr<nsISelection> selection = GetSelection(rv);
   selection.forget(aSelection);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 bool
@@ -9544,7 +9553,7 @@ nsGlobalWindow::Find(const nsAString& aStr, bool aCaseSensitive,
   *aDidFind = Find(aStr, aCaseSensitive, aBackwards, aWrapAround, aWholeWord,
                    aSearchInFrames, aShowDialog, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -9561,7 +9570,7 @@ nsGlobalWindow::Atob(const nsAString& aAsciiBase64String,
   ErrorResult rv;
   Atob(aAsciiBase64String, aBinaryData, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -9578,7 +9587,7 @@ nsGlobalWindow::Btoa(const nsAString& aBinaryData,
   ErrorResult rv;
   Btoa(aBinaryData, aAsciiBase64String, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 //*****************************************************************************
@@ -9827,7 +9836,7 @@ nsGlobalWindow::GetLocation(nsIDOMLocation ** aLocation)
   nsCOMPtr<nsIDOMLocation> location = GetLocation(rv);
   location.forget(aLocation);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -10439,7 +10448,7 @@ nsGlobalWindow::GetComputedStyleHelper(nsIDOMElement* aElt,
     GetComputedStyleHelper(*element, aPseudoElt, aDefaultStylesOnly, rv);
   declaration.forget(aReturn);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 already_AddRefed<nsICSSDeclaration>
@@ -10582,7 +10591,7 @@ nsGlobalWindow::GetSessionStorage(nsISupports** aSessionStorage)
   nsCOMPtr<nsIDOMStorage> storage = GetSessionStorage(rv);
   storage.forget(aSessionStorage);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 DOMStorage*
@@ -10652,7 +10661,7 @@ nsGlobalWindow::GetLocalStorage(nsISupports** aLocalStorage)
   nsCOMPtr<nsIDOMStorage> storage = GetLocalStorage(rv);
   storage.forget(aLocalStorage);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 IDBFactory*
@@ -10673,7 +10682,7 @@ nsGlobalWindow::GetIndexedDB(nsISupports** _retval)
   nsCOMPtr<nsISupports> request(GetIndexedDB(rv));
   request.forget(_retval);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 //*****************************************************************************
@@ -11526,7 +11535,7 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
                           NS_LITERAL_STRING("storage"),
                         event, error);
     if (error.Failed()) {
-      return error.ErrorCode();
+      return error.StealNSResult();
     }
 
     newEvent->SetTrusted(true);
@@ -13367,6 +13376,15 @@ void
 nsGlobalWindow::AddGamepad(uint32_t aIndex, Gamepad* aGamepad)
 {
   MOZ_ASSERT(IsInnerWindow());
+  // Create the index we will present to content based on which indices are
+  // already taken, as required by the spec.
+  // https://w3c.github.io/gamepad/gamepad.html#widl-Gamepad-index
+  int index = 0;
+  while(mGamepadIndexSet.Contains(index)) {
+    ++index;
+  }
+  mGamepadIndexSet.Put(index);
+  aGamepad->SetIndex(index);
   mGamepads.Put(aIndex, aGamepad);
 }
 
@@ -13374,6 +13392,12 @@ void
 nsGlobalWindow::RemoveGamepad(uint32_t aIndex)
 {
   MOZ_ASSERT(IsInnerWindow());
+  nsRefPtr<Gamepad> gamepad;
+  if (!mGamepads.Get(aIndex, getter_AddRefs(gamepad))) {
+    return;
+  }
+  // Free up the index we were using so it can be reused
+  mGamepadIndexSet.Remove(gamepad->Index());
   mGamepads.Remove(aIndex);
 }
 
@@ -13384,8 +13408,8 @@ nsGlobalWindow::EnumGamepadsForGet(const uint32_t& aKey, Gamepad* aData,
 {
   nsTArray<nsRefPtr<Gamepad> >* array =
     static_cast<nsTArray<nsRefPtr<Gamepad> >*>(aUserArg);
-  array->EnsureLengthAtLeast(aKey + 1);
-  (*array)[aKey] = aData;
+  array->EnsureLengthAtLeast(aData->Index() + 1);
+  (*array)[aData->Index()] = aData;
   return PL_DHASH_NEXT;
 }
 
@@ -13404,6 +13428,7 @@ nsGlobalWindow::GetGamepad(uint32_t aIndex)
 {
   MOZ_ASSERT(IsInnerWindow());
   nsRefPtr<Gamepad> gamepad;
+
   if (mGamepads.Get(aIndex, getter_AddRefs(gamepad))) {
     return gamepad.forget();
   }
@@ -13541,7 +13566,7 @@ nsGlobalChromeWindow::Maximize()
 {
   ErrorResult rv;
   Maximize(rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -13559,7 +13584,7 @@ nsGlobalChromeWindow::Minimize()
 {
   ErrorResult rv;
   Minimize(rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -13577,7 +13602,7 @@ nsGlobalChromeWindow::Restore()
 {
   ErrorResult rv;
   Restore(rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -13595,7 +13620,7 @@ nsGlobalChromeWindow::GetAttention()
 {
   ErrorResult rv;
   GetAttention(rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -13609,7 +13634,7 @@ nsGlobalChromeWindow::GetAttentionWithCycleCount(int32_t aCycleCount)
 {
   ErrorResult rv;
   GetAttentionWithCycleCount(aCycleCount, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -13635,7 +13660,7 @@ nsGlobalChromeWindow::BeginWindowMove(nsIDOMEvent *aMouseDownEvent, nsIDOMElemen
 
   ErrorResult rv;
   BeginWindowMove(*mouseDownEvent, panel, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -13690,7 +13715,7 @@ nsGlobalChromeWindow::SetCursor(const nsAString& aCursor)
 {
   ErrorResult rv;
   SetCursor(aCursor, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -13753,7 +13778,7 @@ nsGlobalChromeWindow::GetBrowserDOMWindow(nsIBrowserDOMWindow **aBrowserWindow)
 {
   ErrorResult rv;
   NS_IF_ADDREF(*aBrowserWindow = GetBrowserDOMWindow(rv));
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsIBrowserDOMWindow*
@@ -13770,7 +13795,7 @@ nsGlobalChromeWindow::SetBrowserDOMWindow(nsIBrowserDOMWindow *aBrowserWindow)
 {
   ErrorResult rv;
   SetBrowserDOMWindow(aBrowserWindow, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -13791,7 +13816,7 @@ nsGlobalChromeWindow::NotifyDefaultButtonLoaded(nsIDOMElement* aDefaultButton)
 
   ErrorResult rv;
   NotifyDefaultButtonLoaded(*defaultButton, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -13848,7 +13873,7 @@ nsGlobalChromeWindow::GetMessageManager(nsIMessageBroadcaster** aManager)
 {
   ErrorResult rv;
   NS_IF_ADDREF(*aManager = GetMessageManager(rv));
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsIMessageBroadcaster*
@@ -13874,7 +13899,7 @@ nsGlobalChromeWindow::GetGroupMessageManager(const nsAString& aGroup,
 {
   ErrorResult rv;
   NS_IF_ADDREF(*aManager = GetGroupMessageManager(aGroup, rv));
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 nsIMessageBroadcaster*
@@ -14050,7 +14075,7 @@ nsGlobalWindow::GetConsole(JSContext* aCx,
   ErrorResult rv;
   nsRefPtr<Console> console = GetConsole(rv);
   if (rv.Failed()) {
-    return rv.ErrorCode();
+    return rv.StealNSResult();
   }
 
   if (!GetOrCreateDOMReflector(aCx, console, aConsole)) {
@@ -14065,7 +14090,7 @@ nsGlobalWindow::SetConsole(JSContext* aCx, JS::Handle<JS::Value> aValue)
 {
   ErrorResult rv;
   RedefineProperty(aCx, "console", aValue, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 Console*

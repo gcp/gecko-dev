@@ -97,6 +97,10 @@ AsmJSModule::AsmJSModule(ScriptSource* scriptSource, uint32_t srcStart, uint32_t
     pod.strict_ = strict;
     pod.usesSignalHandlers_ = canUseSignalHandlers;
 
+    // AsmJSCheckedImmediateRange should be defined to be at most the minimum
+    // heap length so that offsets can be folded into bounds checks.
+    MOZ_ASSERT(pod.minHeapLength_ - AsmJSCheckedImmediateRange <= pod.minHeapLength_);
+
     scriptSource_->incref();
 }
 
@@ -476,6 +480,13 @@ OnOutOfBounds()
     JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BAD_INDEX);
 }
 
+static void
+OnImpreciseConversion()
+{
+    JSContext* cx = JSRuntime::innermostAsmJSActivation()->cx();
+    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_SIMD_FAILED_CONVERSION);
+}
+
 static bool
 AsmJSHandleExecutionInterrupt()
 {
@@ -672,6 +683,8 @@ AddressOf(AsmJSImmKind kind, ExclusiveContext* cx)
         return RedirectCall(FuncCast(OnDetached), Args_General0);
       case AsmJSImm_OnOutOfBounds:
         return RedirectCall(FuncCast(OnOutOfBounds), Args_General0);
+      case AsmJSImm_OnImpreciseConversion:
+        return RedirectCall(FuncCast(OnImpreciseConversion), Args_General0);
       case AsmJSImm_HandleExecutionInterrupt:
         return RedirectCall(FuncCast(AsmJSHandleExecutionInterrupt), Args_General0);
       case AsmJSImm_InvokeFromAsmJS_Ignore:
@@ -994,6 +1007,7 @@ const Class AsmJSModuleObject::class_ = {
     nullptr, /* setProperty */
     nullptr, /* enumerate */
     nullptr, /* resolve */
+    nullptr, /* mayResolve */
     nullptr, /* convert */
     AsmJSModuleObject_finalize,
     nullptr, /* call */

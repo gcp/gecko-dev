@@ -183,12 +183,12 @@ public:
     ErrorResult rv;
     nsRefPtr<CacheStorage> cacheStorage = CreateCacheStorage(aPrincipal, rv);
     if (NS_WARN_IF(rv.Failed())) {
-      return rv.ErrorCode();
+      return rv.StealNSResult();
     }
 
     nsRefPtr<Promise> promise = cacheStorage->Open(aCacheName, rv);
     if (NS_WARN_IF(rv.Failed())) {
-      return rv.ErrorCode();
+      return rv.StealNSResult();
     }
 
     promise->AppendNativeHandler(this);
@@ -418,21 +418,47 @@ CompareNetwork::OnStreamComplete(nsIStreamLoader* aLoader, nsISupports* aContext
   }
 
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(request);
-  if (!httpChannel) {
-    mManager->NetworkFinished(NS_ERROR_FAILURE);
-    return NS_OK;
-  }
+  if (httpChannel) {
+    bool requestSucceeded;
+    rv = httpChannel->GetRequestSucceeded(&requestSucceeded);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      mManager->NetworkFinished(rv);
+      return NS_OK;
+    }
 
-  bool requestSucceeded;
-  rv = httpChannel->GetRequestSucceeded(&requestSucceeded);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    mManager->NetworkFinished(rv);
-    return NS_OK;
+    if (!requestSucceeded) {
+      mManager->NetworkFinished(NS_ERROR_FAILURE);
+      return NS_OK;
+    }
   }
+  else {
+    // The only supported request schemes are http, https, and app.
+    // Above, we check to ensure that the request is http or https
+    // based on the channel qi.  Here we test the scheme to ensure
+    // that it is app.  Otherwise, bail.
+    nsCOMPtr<nsIChannel> channel = do_QueryInterface(request);
+    if (NS_WARN_IF(!channel)) {
+      mManager->NetworkFinished(NS_ERROR_FAILURE);
+      return NS_OK;
+    }
+    nsCOMPtr<nsIURI> uri;
+    rv = channel->GetURI(getter_AddRefs(uri));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      mManager->NetworkFinished(rv);
+      return NS_OK;
+    }
 
-  if (!requestSucceeded) {
-    mManager->NetworkFinished(NS_ERROR_FAILURE);
-    return NS_OK;
+    nsAutoCString scheme;
+    rv = uri->GetScheme(scheme);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      mManager->NetworkFinished(rv);
+      return NS_OK;
+    }
+
+    if (!scheme.LowerCaseEqualsLiteral("app")) {
+      mManager->NetworkFinished(NS_ERROR_FAILURE);
+      return NS_OK;      
+    }
   }
 
   // FIXME(nsm): "Extract mime type..."
@@ -528,7 +554,7 @@ CompareCache::ManageCacheResult(JSContext* aCx, JS::Handle<JS::Value> aValue)
   CacheQueryOptions params;
   nsRefPtr<Promise> promise = cache->Match(request, params, error);
   if (NS_WARN_IF(error.Failed())) {
-    mManager->CacheFinished(error.ErrorCode(), false);
+    mManager->CacheFinished(error.StealNSResult(), false);
     return;
   }
 
@@ -617,14 +643,14 @@ PurgeCache(nsIPrincipal* aPrincipal, const nsAString& aCacheName)
   ErrorResult rv;
   nsRefPtr<CacheStorage> cacheStorage = CreateCacheStorage(aPrincipal, rv);
   if (NS_WARN_IF(rv.Failed())) {
-    return rv.ErrorCode();
+    return rv.StealNSResult();
   }
 
   // We use the ServiceWorker scope as key for the cacheStorage.
   nsRefPtr<Promise> promise =
     cacheStorage->Delete(aCacheName, rv);
   if (NS_WARN_IF(rv.Failed())) {
-    return rv.ErrorCode();
+    return rv.StealNSResult();
   }
 
   // We don't actually care about the result of the delete operation.

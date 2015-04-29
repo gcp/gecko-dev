@@ -476,6 +476,7 @@ class CGDOMJSClass(CGThing):
                 nullptr,               /* setProperty */
                 ${enumerate}, /* enumerate */
                 ${resolve}, /* resolve */
+                nullptr,               /* mayResolve */
                 nullptr,               /* convert */
                 ${finalize}, /* finalize */
                 ${call}, /* call */
@@ -616,6 +617,7 @@ class CGPrototypeJSClass(CGThing):
                 nullptr,               /* setProperty */
                 nullptr,               /* enumerate */
                 nullptr,               /* resolve */
+                nullptr,               /* mayResolve */
                 nullptr,               /* convert */
                 nullptr,               /* finalize */
                 nullptr,               /* call */
@@ -709,6 +711,7 @@ class CGInterfaceObjectJSClass(CGThing):
                 nullptr,               /* setProperty */
                 nullptr,               /* enumerate */
                 nullptr,               /* resolve */
+                nullptr,               /* mayResolve */
                 nullptr,               /* convert */
                 nullptr,               /* finalize */
                 ${ctorname}, /* call */
@@ -3552,11 +3555,12 @@ class CGUpdateMemberSlotsMethod(CGAbstractStaticMethod):
                 "JSJitGetterCallArgs args(&temp);\n")
         for m in self.descriptor.interface.members:
             if m.isAttr() and m.getExtendedAttribute("StoreInSlot"):
-                # Skip doing this for the "window" attribute on the Window
-                # interface, because that can't be gotten safely until we have
-                # hooked it up correctly to the outer window.
+                # Skip doing this for the "window" and "self" attributes on the
+                # Window interface, because those can't be gotten safely until
+                # we have hooked it up correctly to the outer window.  The
+                # window code handles doing the get itself.
                 if (self.descriptor.interface.identifier.name == "Window" and
-                    m.identifier.name == "window"):
+                    (m.identifier.name == "window" or m.identifier.name == "self")):
                     continue
                 body += fill(
                     """

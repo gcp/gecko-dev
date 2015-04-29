@@ -21,12 +21,6 @@ function debug(s) {
   dump("-@- MmsService: " + s + "\n");
 };
 
-// Read debug setting from pref.
-try {
-  let debugPref = Services.prefs.getBoolPref("mms.debugging.enabled");
-  DEBUG = DEBUG || debugPref;
-} catch (e) {}
-
 const kSmsSendingObserverTopic           = "sms-sending";
 const kSmsSentObserverTopic              = "sms-sent";
 const kSmsFailedObserverTopic            = "sms-failed";
@@ -42,6 +36,7 @@ const NS_XPCOM_SHUTDOWN_OBSERVER_ID      = "xpcom-shutdown";
 const kNetworkConnStateChangedTopic      = "network-connection-state-changed";
 
 const kPrefRilRadioDisabled              = "ril.radio.disabled";
+const kPrefMmsDebuggingEnabled           = "mms.debugging.enabled";
 
 // HTTP status codes:
 // @see http://tools.ietf.org/html/rfc2616#page-39
@@ -138,6 +133,10 @@ const kPrefDefaultServiceId = "dom.mms.defaultServiceId";
 XPCOMUtils.defineLazyServiceGetter(this, "gpps",
                                    "@mozilla.org/network/protocol-proxy-service;1",
                                    "nsIProtocolProxyService");
+
+XPCOMUtils.defineLazyServiceGetter(this, "gIccService",
+                                   "@mozilla.org/icc/iccservice;1",
+                                   "nsIIccService");
 
 XPCOMUtils.defineLazyServiceGetter(this, "gUUIDGenerator",
                                    "@mozilla.org/uuid-generator;1",
@@ -352,7 +351,7 @@ MmsConnection.prototype = {
     // Get the proper IccInfo based on the current card type.
     try {
       let iccInfo = null;
-      let baseIccInfo = this.radioInterface.rilContext.iccInfo;
+      let baseIccInfo = this.getIccInfo();
       if (baseIccInfo.iccType === 'ruim' || baseIccInfo.iccType === 'csim') {
         iccInfo = baseIccInfo.QueryInterface(Ci.nsICdmaIccInfo);
         number = iccInfo.mdn;
@@ -371,10 +370,26 @@ MmsConnection.prototype = {
   },
 
   /**
+   * A utility function to get IccInfo of the SIM card (if installed).
+   */
+  getIccInfo: function() {
+    let icc = gIccService.getIccByServiceId(this.serviceId);
+    return icc ? icc.iccInfo : null;
+  },
+
+  /**
+   * A utility function to get CardState of the SIM card (if installed).
+   */
+  getCardState: function() {
+    let icc = gIccService.getIccByServiceId(this.serviceId);
+    return icc ? icc.cardState : Ci.nsIIcc.CARD_STATE_UNKNOWN;
+  },
+
+  /**
   * A utility function to get the ICC ID of the SIM card (if installed).
   */
   getIccId: function() {
-    let iccInfo = this.radioInterface.rilContext.iccInfo;
+    let iccInfo = this.getIccInfo();
 
     if (!iccInfo) {
       return null;
@@ -409,8 +424,7 @@ MmsConnection.prototype = {
       if (getRadioDisabledState()) {
         if (DEBUG) debug("Error! Radio is disabled when sending MMS.");
         errorStatus = _HTTP_STATUS_RADIO_DISABLED;
-      } else if (this.radioInterface.rilContext.cardState !=
-                 Ci.nsIIcc.CARD_STATE_READY) {
+      } else if (this.getCardState() != Ci.nsIIcc.CARD_STATE_READY) {
         if (DEBUG) debug("Error! SIM card is not ready when sending MMS.");
         errorStatus = _HTTP_STATUS_NO_SIM_CARD;
       }
@@ -1518,6 +1532,7 @@ ReadRecTransaction.prototype = {
  * MmsService
  */
 function MmsService() {
+  this._updateDebugFlag();
   if (DEBUG) {
     let macro = (MMS.MMS_VERSION >> 4) & 0x0f;
     let minor = MMS.MMS_VERSION & 0x0f;
@@ -1525,6 +1540,7 @@ function MmsService() {
   }
 
   Services.prefs.addObserver(kPrefDefaultServiceId, this, false);
+  Services.prefs.addObserver(kPrefMmsDebuggingEnabled, this, false);
   this.mmsDefaultServiceId = getDefaultServiceId();
 
   // TODO: bug 810084 - support application identifier
@@ -1540,6 +1556,12 @@ MmsService.prototype = {
    * and M-Acknowledge.ind PDU.
    */
   confSendDeliveryReport: CONFIG_SEND_REPORT_DEFAULT_YES,
+
+  _updateDebugFlag: function() {
+    try {
+      DEBUG = Services.prefs.getBoolPref(kPrefMmsDebuggingEnabled);
+    } catch (e) {}
+  },
 
   /**
    * Calculate Whether or not should we enable X-Mms-Report-Allowed.
@@ -2637,6 +2659,8 @@ MmsService.prototype = {
       case NS_PREFBRANCH_PREFCHANGE_TOPIC_ID:
         if (aData === kPrefDefaultServiceId) {
           this.mmsDefaultServiceId = getDefaultServiceId();
+        } else if (aData === kPrefMmsDebuggingEnabled) {
+          this._updateDebugFlag();
         }
         break;
     }

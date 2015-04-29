@@ -64,6 +64,7 @@
 #include "mozilla/dom/DOMJSClass.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "jsprf.h"
+#include "js/Debug.h"
 #include "nsCycleCollectionNoteRootCallback.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsCycleCollector.h"
@@ -399,9 +400,8 @@ NoteJSChild(JS::CallbackTracer* aTrc, JS::GCCellPtr aThing)
    * This function needs to be careful to avoid stack overflow. Normally, when
    * AddToCCKind is true, the recursion terminates immediately as we just add
    * |thing| to the CC graph. So overflow is only possible when there are long
-   * chains of non-AddToCCKind GC things. Currently, this only can happen via
-   * shape parent pointers. The special JSTRACE_SHAPE case below handles
-   * parent pointers iteratively, rather than recursively, to avoid overflow.
+   * or cyclic chains of non-AddToCCKind GC things. Places where this can occur
+   * use special APIs to handle such chains iteratively.
    */
   if (AddToCCKind(aThing.kind())) {
     if (MOZ_UNLIKELY(tracer->mCb.WantDebugInfo())) {
@@ -415,7 +415,14 @@ NoteJSChild(JS::CallbackTracer* aTrc, JS::GCCellPtr aThing)
       tracer->mCb.NoteJSScript(aThing.toScript());
     }
   } else if (aThing.isShape()) {
+    // The maximum depth of traversal when tracing a Shape is unbounded, due to
+    // the parent pointers on the shape.
     JS_TraceShapeCycleCollectorChildren(aTrc, aThing);
+  } else if (aThing.isObjectGroup()) {
+    // The maximum depth of traversal when tracing an ObjectGroup is unbounded,
+    // due to information attached to the groups which can lead other groups to
+    // be traced.
+    JS_TraceObjectGroupCycleCollectorChildren(aTrc, aThing);
   } else if (!aThing.isString()) {
     JS_TraceChildren(aTrc, aThing.asCell(), aThing.kind());
   }
@@ -496,6 +503,8 @@ CycleCollectedJSRuntime::CycleCollectedJSRuntime(JSRuntime* aParentRuntime,
     InstanceClassHasProtoAtDepth
   };
   SetDOMCallbacks(mJSRuntime, &DOMcallbacks);
+
+  JS::dbg::SetDebuggerMallocSizeOf(mJSRuntime, moz_malloc_size_of);
 
   nsCycleCollector_registerJSRuntime(this);
 }

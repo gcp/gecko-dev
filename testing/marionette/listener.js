@@ -437,7 +437,7 @@ function checkForInterrupted() {
     if (wasInterrupted()) {
       if (previousFrame) {
         //if previousFrame is set, then we're in a single process environment
-        cuFrame = actions.frame = previousFrame;
+        curFrame = actions.frame = previousFrame;
         previousFrame = null;
         sandbox = null;
       }
@@ -1562,7 +1562,7 @@ function sendKeysToElement(msg) {
       try {
         file = new File(p);
       } catch (e) {
-        let err = new IllegalArgumentError(`File not found: ${val}`);
+        let err = new InvalidArgumentError(`File not found: ${val}`);
         sendError(err, command_id);
         return;
       }

@@ -246,6 +246,7 @@ public:
     void UpdateDimensions(const nsIntRect& rect, const ScreenIntSize& size);
     void UpdateFrame(const layers::FrameMetrics& aFrameMetrics);
     void UIResolutionChanged();
+    void ThemeChanged();
     void RequestFlingSnap(const FrameMetrics::ViewID& aScrollId,
                           const mozilla::CSSPoint& aDestination);
     void AcknowledgeScrollUpdate(const ViewID& aScrollId, const uint32_t& aScrollGeneration);
@@ -453,7 +454,7 @@ protected:
 
     bool SendCompositionChangeEvent(mozilla::WidgetCompositionEvent& event);
 
-    bool InitBrowserConfiguration(nsIURI* aURI,
+    bool InitBrowserConfiguration(const nsCString& aURI,
                                   BrowserConfiguration& aConfiguration);
 
     // IME

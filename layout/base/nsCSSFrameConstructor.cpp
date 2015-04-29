@@ -62,6 +62,7 @@
 #include "nsBoxLayout.h"
 #include "nsFlexContainerFrame.h"
 #include "nsGridContainerFrame.h"
+#include "RubyUtils.h"
 #include "nsRubyFrame.h"
 #include "nsRubyBaseFrame.h"
 #include "nsRubyBaseContainerFrame.h"
@@ -87,6 +88,7 @@
 #include "nsSimplePageSequenceFrame.h"
 #include "nsTableOuterFrame.h"
 #include "nsIScrollableFrame.h"
+#include "nsTransitionManager.h"
 
 #ifdef MOZ_XUL
 #include "nsIRootBox.h"
@@ -1802,6 +1804,10 @@ nsCSSFrameConstructor::CreateGeneratedContentItem(nsFrameConstructorState& aStat
                                             container,
                                             oldStyleContext,
                                             &pseudoStyleContext);
+    } else {
+      aState.mPresContext->TransitionManager()->
+        PruneCompletedTransitions(container, aPseudoElement,
+                                  pseudoStyleContext);
     }
   }
 
@@ -4846,10 +4852,14 @@ nsCSSFrameConstructor::ResolveStyleContext(nsStyleContext* aParentStyleContext,
   if (rsc) {
     nsStyleContext* oldStyleContext =
       rsc->Get(aContent, nsCSSPseudoElements::ePseudo_NotPseudoElement);
+    nsPresContext* presContext = mPresShell->GetPresContext();
     if (oldStyleContext) {
-      RestyleManager::TryStartingTransition(mPresShell->GetPresContext(),
-                                            aContent,
+      RestyleManager::TryStartingTransition(presContext, aContent,
                                             oldStyleContext, &result);
+    } else if (aContent->IsElement()) {
+      presContext->TransitionManager()->
+        PruneCompletedTransitions(aContent->AsElement(),
+          nsCSSPseudoElements::ePseudo_NotPseudoElement, result);
     }
   }
 
@@ -9146,8 +9156,7 @@ nsCSSFrameConstructor::MaybeRecreateContainerForFrameRemoval(nsIFrame* aFrame,
   // Check ruby containers
   nsIAtom* parentType = parent->GetType();
   if (parentType == nsGkAtoms::rubyFrame ||
-      parentType == nsGkAtoms::rubyBaseContainerFrame ||
-      parentType == nsGkAtoms::rubyTextContainerFrame) {
+      RubyUtils::IsRubyContainerBox(parentType)) {
     // In ruby containers, pseudo frames may be created from
     // whitespaces or even nothing. There are two cases we actually
     // need to handle here, but hard to check exactly:
@@ -11911,8 +11920,7 @@ nsCSSFrameConstructor::WipeContainingBlock(nsFrameConstructorState& aState,
   nsIAtom* frameType = aFrame->GetType();
   if (IsRubyPseudo(aFrame) ||
       frameType == nsGkAtoms::rubyFrame ||
-      frameType == nsGkAtoms::rubyBaseContainerFrame ||
-      frameType == nsGkAtoms::rubyTextContainerFrame) {
+      RubyUtils::IsRubyContainerBox(frameType)) {
     // We want to optimize it better, and avoid reframing as much as
     // possible. But given the cases above, and the fact that a ruby
     // usually won't be very large, it should be fine to reframe it.

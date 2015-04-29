@@ -123,12 +123,11 @@ class HTMLElement(object):
 
     @property
     def size(self):
-        '''
-        A dictionary with the size of the element.
-        '''
+        """A dictionary with the size of the element."""
         warnings.warn("The size property has been deprecated and will be removed in a future version. \
             Please use HTMLElement#rect", DeprecationWarning)
-        return self.marionette._send_message('getElementSize', 'value', id=self.id)
+        rect = self.rect
+        return {"width": rect["width"], "height": rect["height"]}
 
     @property
     def tag_name(self):
@@ -150,18 +149,20 @@ class HTMLElement(object):
         """
         warnings.warn("The location property has been deprecated and will be removed in a future version. \
             Please use HTMLElement#rect", DeprecationWarning)
-        return self.marionette._send_message("getElementLocation", "value", id=self.id)
+        rect = self.rect
+        return {"x": rect["x"], "y": rect["y"]}
 
     @property
     def rect(self):
+        """Gets the element's bounding rectangle.
+        
+        This will return a dictionary with the following:
+
+          * x and y represent the top left coordinates of the ``HTMLElement``
+            relative to top left corner of the document.
+          * height and the width will contain the height and the width
+            of the DOMRect of the ``HTMLElement``.
         """
-            this will return a dictionary with the following:
-
-            * x and y represent the top left coordinates of the WebElement relative to top left corner of the document.
-            * height and the width will contain the height and the width of the DOMRect of the WebElement.
-
-        """
-
         return self.marionette._send_message("getElementRect", "value", id=self.id)
 
     def value_of_css_property(self, property_name):
@@ -1135,23 +1136,28 @@ class Marionette(object):
         return None
 
     def switch_to_default_content(self):
-        '''
-        Switch the current context to page's default content.
-        '''
+        """Switch the current context to page's default content."""
         return self.switch_to_frame()
 
     def switch_to_frame(self, frame=None, focus=True):
-        '''
-        Switch the current context to the specified frame. Subsequent commands will operate in the context of the specified frame, if applicable.
+        """Switch the current context to the specified frame. Subsequent
+        commands will operate in the context of the specified frame,
+        if applicable.
 
-        :param frame: A reference to the frame to switch to: this can be an HTMLElement, an index, name or an id attribute. If you call switch_to_frame() without an argument, it will switch to the top-level frame.
-        :param focus: A boolean value which determins whether to focus the frame that we just switched to.
-        '''
+        :param frame: A reference to the frame to switch to.  This can
+            be an ``HTMLElement``, an integer index, string name, or an
+            ID attribute.  If you call ``switch_to_frame`` without an
+            argument, it will switch to the top-level frame.
+
+        :param focus: A boolean value which determins whether to focus
+            the frame that we just switched to.
+        """
+        kwargs = {"focus": focus}
         if isinstance(frame, HTMLElement):
-            response = self._send_message('switchToFrame', 'ok', element=frame.id, focus=focus)
-        else:
-            response = self._send_message('switchToFrame', 'ok', id=frame, focus=focus)
-        return response
+            kwargs["element"] = frame.id
+        elif frame is not None:
+            kwargs["id"] = frame
+        return self._send_message("switchToFrame", "ok", **kwargs)
 
     def get_url(self):
         """Get a string representing the current URL.

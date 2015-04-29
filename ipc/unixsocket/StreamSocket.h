@@ -7,7 +7,7 @@
 #ifndef mozilla_ipc_streamsocket_h
 #define mozilla_ipc_streamsocket_h
 
-#include "mozilla/ipc/SocketBase.h"
+#include "mozilla/ipc/DataSocket.h"
 #include "ConnectionOrientedSocket.h"
 
 namespace mozilla {
@@ -16,26 +16,34 @@ namespace ipc {
 class StreamSocketIO;
 class UnixSocketConnector;
 
-class StreamSocket : public SocketConsumerBase
+class StreamSocket : public DataSocket
                    , public ConnectionOrientedSocket
 {
 public:
   StreamSocket();
 
   /**
+   * Method to be called whenever data is received. This is only called on the
+   * main thread.
+   *
+   * @param aBuffer Data received from the socket.
+   */
+  virtual void ReceiveSocketData(nsAutoPtr<UnixSocketBuffer>& aBuffer) = 0;
+
+  /**
    * Queue data to be sent to the socket on the IO thread. Can only be called on
    * originating thread.
    *
-   * @param aMessage Data to be sent to socket
-   *
-   * @return true if data is queued, false otherwise (i.e. not connected)
+   * @param aBuffer Data to be sent to socket
    */
-  bool SendSocketData(UnixSocketRawData* aMessage);
+  void SendSocketData(UnixSocketIOBuffer* aBuffer);
 
   /**
    * Convenience function for sending strings to the socket (common in bluetooth
    * profile usage). Converts to a UnixSocketRawData struct. Can only be called
    * on originating thread.
+   *
+   * TODO: Move this method into Bluetooth module.
    *
    * @param aMessage String to be sent to socket
    *

@@ -14,9 +14,9 @@ Cu.import("resource://gre/modules/ClientID.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/LightweightThemeManager.jsm", this);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
-Cu.import("resource://gre/modules/TelemetryPing.jsm", this);
+Cu.import("resource://gre/modules/TelemetryController.jsm", this);
 Cu.import("resource://gre/modules/TelemetrySession.jsm", this);
-Cu.import("resource://gre/modules/TelemetryFile.jsm", this);
+Cu.import("resource://gre/modules/TelemetryStorage.jsm", this);
 Cu.import("resource://gre/modules/TelemetryEnvironment.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
 Cu.import("resource://gre/modules/Promise.jsm", this);
@@ -97,10 +97,10 @@ function truncateDateToDays(date) {
 function sendPing() {
   TelemetrySession.gatherStartup();
   if (gServerStarted) {
-    TelemetryPing.setServer("http://localhost:" + gHttpServer.identity.primaryPort);
+    TelemetryController.setServer("http://localhost:" + gHttpServer.identity.primaryPort);
     return TelemetrySession.testPing();
   } else {
-    TelemetryPing.setServer("http://doesnotexist");
+    TelemetryController.setServer("http://doesnotexist");
     return TelemetrySession.testPing();
   }
 }
@@ -219,8 +219,7 @@ function checkPayloadInfo(data) {
     return (Services.appinfo.isOfficial) ? stringCheck(arg) : (typeof arg == "string");
   };
   let uuidCheck = arg => {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    return uuidRegex.test(arg);
+    return UUID_REGEX.test(arg);
   };
   let isoDateCheck = arg => {
     // We expect use of this version of the ISO format:
@@ -366,7 +365,7 @@ function checkPayload(payload, reason, successfulPings) {
   // memory reporters.  But we can at least check that the data is there.
   //
   // It's important to check for the presence of reporters with a mix of units,
-  // because TelemetryPing has separate logic for each one.  But we can't
+  // because TelemetryController has separate logic for each one.  But we can't
   // currently check UNITS_COUNT_CUMULATIVE or UNITS_PERCENTAGE because
   // Telemetry doesn't touch a memory reporter with these units that's
   // available on all platforms.
@@ -483,7 +482,7 @@ function run_test() {
 
 add_task(function* asyncSetup() {
   yield TelemetrySession.setup();
-  yield TelemetryPing.setup();
+  yield TelemetryController.setup();
   // Load the client ID from the client ID provider to check for pings sanity.
   gClientID = yield ClientID.getClientID();
 });
@@ -499,14 +498,14 @@ add_task(function* test_expiredHistogram() {
   do_check_eq(TelemetrySession.getPayload()["histograms"]["TELEMETRY_TEST_EXPIRED"], undefined);
 });
 
-// Checks that an invalid histogram file is deleted if TelemetryFile fails to parse it.
+// Checks that an invalid histogram file is deleted if TelemetryStorage fails to parse it.
 add_task(function* test_runInvalidJSON() {
   let pingFile = getSavedPingFile("invalid-histograms.dat");
 
   writeStringToFile(pingFile, "this.is.invalid.JSON");
   do_check_true(pingFile.exists());
 
-  yield TelemetryFile.testLoadHistograms(pingFile);
+  yield TelemetryStorage.testLoadHistograms(pingFile);
   do_check_false(pingFile.exists());
 });
 
@@ -568,7 +567,7 @@ add_task(function* test_saveLoadPing() {
 
   setupTestData();
   yield TelemetrySession.testSaveHistograms(histogramsFile);
-  yield TelemetryFile.testLoadHistograms(histogramsFile);
+  yield TelemetryStorage.testLoadHistograms(histogramsFile);
   yield sendPing();
 
   // Get requests received by dummy server.
@@ -795,7 +794,7 @@ add_task(function* test_checkSubsessionData() {
   }
 
   // Keep track of the active ticks count if the session recorder is available.
-  let sessionRecorder = TelemetryPing.getSessionRecorder();
+  let sessionRecorder = TelemetryController.getSessionRecorder();
   let activeTicksAtSubsessionStart = sessionRecorder.activeTicks;
   let expectedActiveTicks = activeTicksAtSubsessionStart;
 
@@ -855,7 +854,7 @@ add_task(function* test_dailyCollection() {
 
   // Init and check timer.
   yield TelemetrySession.setup();
-  TelemetryPing.setServer("http://localhost:" + gHttpServer.identity.primaryPort);
+  TelemetryController.setServer("http://localhost:" + gHttpServer.identity.primaryPort);
 
   // Set histograms to expected state.
   const COUNT_ID = "TELEMETRY_TEST_COUNT";
@@ -1059,13 +1058,15 @@ add_task(function* test_environmentChange() {
 
   const PREF_TEST = "toolkit.telemetry.test.pref1";
   Preferences.reset(PREF_TEST);
-  let prefsToWatch = {};
-  prefsToWatch[PREF_TEST] = TelemetryEnvironment.RECORD_PREF_VALUE;
+
+  const PREFS_TO_WATCH = new Map([
+    [PREF_TEST, TelemetryEnvironment.RECORD_PREF_VALUE],
+  ]);
 
   // Setup.
   yield TelemetrySession.setup();
-  TelemetryPing.setServer("http://localhost:" + gHttpServer.identity.primaryPort);
-  TelemetryEnvironment._watchPreferences(prefsToWatch);
+  TelemetryController.setServer("http://localhost:" + gHttpServer.identity.primaryPort);
+  TelemetryEnvironment._watchPreferences(PREFS_TO_WATCH);
 
   // Set histograms to expected state.
   const COUNT_ID = "TELEMETRY_TEST_COUNT";
@@ -1127,7 +1128,7 @@ add_task(function* test_runOldPingFile() {
   let mtime = histogramsFile.lastModifiedTime;
   histogramsFile.lastModifiedTime = mtime - (14 * 24 * 60 * 60 * 1000 + 60000); // 14 days, 1m
 
-  yield TelemetryFile.testLoadHistograms(histogramsFile);
+  yield TelemetryStorage.testLoadHistograms(histogramsFile);
   do_check_false(histogramsFile.exists());
 });
 
@@ -1137,15 +1138,15 @@ add_task(function* test_savedPingsOnShutdown() {
   const expectedPings = (gIsAndroid) ? 1 : 2;
   // Assure that we store the ping properly when saving sessions on shutdown.
   // We make the TelemetrySession shutdown to trigger a session save.
-  const dir = TelemetryFile.pingDirectoryPath;
+  const dir = TelemetryStorage.pingDirectoryPath;
   yield OS.File.removeDir(dir, {ignoreAbsent: true});
   yield OS.File.makeDir(dir);
   yield TelemetrySession.shutdown();
 
-  yield TelemetryFile.loadSavedPings();
-  Assert.equal(TelemetryFile.pingsLoaded, expectedPings);
+  yield TelemetryStorage.loadSavedPings();
+  Assert.equal(TelemetryStorage.pingsLoaded, expectedPings);
 
-  let pingsIterator = TelemetryFile.popPendingPings();
+  let pingsIterator = TelemetryStorage.popPendingPings();
   for (let ping of pingsIterator) {
     Assert.ok("type" in ping);
 
@@ -1173,8 +1174,9 @@ add_task(function* test_savedSessionData() {
 
   const PREF_TEST = "toolkit.telemetry.test.pref1";
   Preferences.reset(PREF_TEST);
-  let prefsToWatch = {};
-  prefsToWatch[PREF_TEST] = TelemetryEnvironment.RECORD_PREF_VALUE;
+  const PREFS_TO_WATCH = new Map([
+    [PREF_TEST, TelemetryEnvironment.RECORD_PREF_VALUE],
+  ]);
 
   // We expect one new subsession when starting TelemetrySession and one after triggering
   // an environment change.
@@ -1193,7 +1195,7 @@ add_task(function* test_savedSessionData() {
 
   // _watchPreferences triggers a subsession notification
   fakeNow(new Date(2050, 1, 1, 12, 0, 0));
-  TelemetryEnvironment._watchPreferences(prefsToWatch);
+  TelemetryEnvironment._watchPreferences(PREFS_TO_WATCH);
   let changePromise = new Promise(resolve =>
     TelemetryEnvironment.registerChangeListener("test_fake_change", resolve));
   Preferences.set(PREF_TEST, 1);
@@ -1272,7 +1274,7 @@ add_task(function* test_abortedSession() {
             "There must be an aborted session ping.");
 
   // This ping is not yet in the pending pings folder, so we can't access it using
-  // TelemetryFile.popPendingPings().
+  // TelemetryStorage.popPendingPings().
   let pingContent = yield OS.File.read(ABORTED_FILE, { encoding: "utf-8" });
   let abortedSessionPing = JSON.parse(pingContent);
 
@@ -1298,7 +1300,7 @@ add_task(function* test_abortedSession() {
 
   // Write the ping to the aborted-session file. TelemetrySession will add it to the
   // saved pings directory when it starts.
-  yield TelemetryFile.savePingToFile(abortedSessionPing, ABORTED_FILE, false);
+  yield TelemetryStorage.savePingToFile(abortedSessionPing, ABORTED_FILE, false);
 
   gRequestIterator = Iterator(new Request());
   yield TelemetrySession.reset();
@@ -1306,18 +1308,18 @@ add_task(function* test_abortedSession() {
   Assert.ok(!(yield OS.File.exists(ABORTED_FILE)),
             "The aborted session ping must be removed from the aborted session ping directory.");
 
-  // TelemetryFile requires all the pings to have their ID as filename. When appending
+  // TelemetryStorage requires all the pings to have their ID as filename. When appending
   // the aborted-session ping to the pending pings, we must verify that it exists.
   const PENDING_PING_FILE =
-    OS.Path.join(TelemetryFile.pingDirectoryPath, abortedSessionPing.id);
+    OS.Path.join(TelemetryStorage.pingDirectoryPath, abortedSessionPing.id);
   Assert.ok((yield OS.File.exists(PENDING_PING_FILE)),
             "The aborted session ping must exist in the saved pings directory.");
 
   // Trick: make the aborted ping file overdue so that it gets sent immediately when
-  // resetting TelemetryPing.
-  const OVERDUE_PING_FILE_AGE = TelemetryFile.OVERDUE_PING_FILE_AGE + 60 * 1000;
+  // resetting TelemetryController.
+  const OVERDUE_PING_FILE_AGE = TelemetryStorage.OVERDUE_PING_FILE_AGE + 60 * 1000;
   yield OS.File.setDates(PENDING_PING_FILE, null, Date.now() - OVERDUE_PING_FILE_AGE);
-  yield TelemetryPing.reset();
+  yield TelemetryController.reset();
 
   // Wait for the aborted-session ping.
   let request = yield gRequestIterator.next();
@@ -1426,8 +1428,9 @@ add_task(function* test_schedulerEnvironmentReschedules() {
   // Reset the test preference.
   const PREF_TEST = "toolkit.telemetry.test.pref1";
   Preferences.reset(PREF_TEST);
-  let prefsToWatch = {};
-  prefsToWatch[PREF_TEST] = TelemetryEnvironment.RECORD_PREF_VALUE;
+  const PREFS_TO_WATCH = new Map([
+    [PREF_TEST, TelemetryEnvironment.RECORD_PREF_VALUE],
+  ]);
 
   gRequestIterator = Iterator(new Request());
 
@@ -1437,7 +1440,7 @@ add_task(function* test_schedulerEnvironmentReschedules() {
   let schedulerTickCallback = null;
   fakeSchedulerTimer(callback => schedulerTickCallback = callback, () => {});
   yield TelemetrySession.reset();
-  TelemetryEnvironment._watchPreferences(prefsToWatch);
+  TelemetryEnvironment._watchPreferences(PREFS_TO_WATCH);
 
   // Set the current time at midnight.
   let future = futureDate(nowDate, MS_IN_ONE_DAY);

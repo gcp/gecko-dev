@@ -280,15 +280,28 @@ loop.standaloneRoomViews = (function(mozL10n) {
       roomInfoFailure: React.PropTypes.string
     },
 
+    getInitialState: function() {
+      return {
+        failureLogged: false
+      }
+    },
+
+    _logFailure: function(message) {
+      if (!this.state.failureLogged) {
+        console.error(mozL10n.get(message));
+        this.state.failureLogged = true;
+      }
+    },
+
     render: function() {
+      // For failures, we currently just log the messages - UX doesn't want them
+      // displayed on primary UI at the moment.
       if (this.props.roomInfoFailure === ROOM_INFO_FAILURES.WEB_CRYPTO_UNSUPPORTED) {
-        return (<h2 className="room-info-failure">
-          {mozL10n.get("room_information_failure_unsupported_browser")}
-        </h2>);
+        this._logFailure("room_information_failure_unsupported_browser");
+        return null;
       } else if (this.props.roomInfoFailure) {
-        return (<h2 className="room-info-failure">
-          {mozL10n.get("room_information_failure_not_available")}
-        </h2>);
+        this._logFailure("room_information_failure_not_available");
+        return null;
       }
 
       // We only support one item in the context Urls array for now.
@@ -381,6 +394,12 @@ loop.standaloneRoomViews = (function(mozL10n) {
         // first, and then connecting to the session doesn't seem to set the
         // initial size correctly.
         this.updateVideoContainer();
+      }
+
+      if (nextState.roomState === ROOM_STATES.INIT ||
+          nextState.roomState === ROOM_STATES.GATHER ||
+          nextState.roomState === ROOM_STATES.READY) {
+        this.resetDimensionsCache();
       }
 
       // When screen sharing stops.

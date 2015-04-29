@@ -23,12 +23,18 @@ namespace mozilla {
 namespace ipc {
 
 //
-// UnixSocketIOBuffer
+// UnixSocketBuffer
 //
 
-class UnixSocketIOBuffer
+/**
+ * |UnixSocketBuffer| implements a FIFO buffer that stores raw socket
+ * data, either for sending on a socket or received from a socket.
+ */
+class UnixSocketBuffer
 {
 public:
+  virtual ~UnixSocketBuffer();
+
   const uint8_t* GetData() const
   {
     return mData + mOffset;
@@ -110,15 +116,13 @@ public:
 protected:
 
   /* This constructor copies aData of aSize bytes length into the
-   * new instance of |UnixSocketIOBuffer|.
+   * new instance of |UnixSocketBuffer|.
    */
-  UnixSocketIOBuffer(const void* aData, size_t aSize);
+  UnixSocketBuffer(const void* aData, size_t aSize);
 
   /* This constructor reserves aAvailableSpace bytes of space.
    */
-  UnixSocketIOBuffer(size_t aAvailableSpace);
-
-  ~UnixSocketIOBuffer();
+  UnixSocketBuffer(size_t aAvailableSpace);
 
   size_t GetLeadingSpace() const
   {
@@ -165,6 +169,46 @@ private:
 };
 
 //
+// UnixSocketIOBuffer
+//
+
+/**
+ * |UnixSocketIOBuffer| is a |UnixSocketBuffer| that supports being
+ * received on a socket or being send on a socket. Network protocols
+ * might differ in their exact usage of Unix socket functions and
+ * |UnixSocketIOBuffer| provides a protocol-neutral interface.
+ */
+class UnixSocketIOBuffer : public UnixSocketBuffer
+{
+public:
+  virtual ~UnixSocketIOBuffer();
+
+  /**
+   * Receives data from aFd at the end of the buffer. The returned value
+   * is the number of newly received bytes, or 0 if the peer shut down
+   * its connection, or a negative value on errors.
+   */
+  virtual ssize_t Receive(int aFd) = 0;
+
+  /**
+   * Sends data to aFd from the beginning of the buffer. The returned value
+   * is the number of bytes written, or a negative value on error.
+   */
+  virtual ssize_t Send(int aFd) = 0;
+
+protected:
+
+  /* This constructor copies aData of aSize bytes length into the
+   * new instance of |UnixSocketIOBuffer|.
+   */
+  UnixSocketIOBuffer(const void* aData, size_t aSize);
+
+  /* This constructor reserves aAvailableSpace bytes of space.
+   */
+  UnixSocketIOBuffer(size_t aAvailableSpace);
+};
+
+//
 // UnixSocketRawData
 //
 
@@ -186,13 +230,13 @@ public:
    * is the number of newly received bytes, or 0 if the peer shut down
    * its connection, or a negative value on errors.
    */
-  ssize_t Receive(int aFd);
+  ssize_t Receive(int aFd) override;
 
   /**
    * Sends data to aFd from the beginning of the buffer. The returned value
    * is the number of bytes written, or a negative value on error.
    */
-  ssize_t Send(int aFd);
+  ssize_t Send(int aFd) override;
 };
 
 enum SocketConnectionStatus {
@@ -264,34 +308,6 @@ private:
   SocketConnectionStatus mConnectionStatus;
   PRIntervalTime mConnectTimestamp;
   uint32_t mConnectDelayMs;
-};
-
-//
-// SocketConsumerBase
-//
-
-class SocketConsumerBase : public SocketBase
-{
-public:
-  virtual ~SocketConsumerBase();
-
-  /**
-   * Function to be called whenever data is received. This is only called on the
-   * main thread.
-   *
-   * @param aMessage Data received from the socket.
-   */
-  virtual void ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage) = 0;
-
-  /**
-   * Queue data to be sent to the socket on the IO thread. Can only be called on
-   * originating thread.
-   *
-   * @param aMessage Data to be sent to socket
-   *
-   * @return true if data is queued, false otherwise (i.e. not connected)
-   */
-  virtual bool SendSocketData(UnixSocketRawData* aMessage) = 0;
 };
 
 //
@@ -373,43 +389,6 @@ private:
   SocketEvent mEvent;
 };
 
-/* |SocketReceiveRunnable| transfers data received on the I/O thread
- * to the consumer on the main thread.
- */
-template <typename T>
-class SocketIOReceiveRunnable final : public SocketIORunnable<T>
-{
-public:
-  SocketIOReceiveRunnable(T* aIO, UnixSocketRawData* aData)
-  : SocketIORunnable<T>(aIO)
-  , mData(aData)
-  { }
-
-  NS_IMETHOD Run() override
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    T* io = SocketIORunnable<T>::GetIO();
-
-    if (io->IsShutdownOnMainThread()) {
-      NS_WARNING("mConsumer is null, aborting receive!");
-      // Since we've already explicitly closed and the close happened before
-      // this, this isn't really an error. Since we've warned, return OK.
-      return NS_OK;
-    }
-
-    SocketConsumerBase* consumer = io->GetConsumer();
-    MOZ_ASSERT(consumer);
-
-    consumer->ReceiveSocketData(mData);
-
-    return NS_OK;
-  }
-
-private:
-  nsAutoPtr<UnixSocketRawData> mData;
-};
-
 template <typename T>
 class SocketIORequestClosingRunnable final : public SocketIORunnable<T>
 {
@@ -465,91 +444,17 @@ private:
 // SocketIOBase
 //
 
-/* |SocketIOBase| is a base class for Socket I/O classes that
- * perform operations on the I/O thread. It provides methods
- * for the most common read and write scenarios.
+/**
+ * |SocketIOBase| is a base class for Socket I/O classes that
+ * perform operations on the I/O thread.
  */
 class SocketIOBase
 {
 public:
   virtual ~SocketIOBase();
 
-  void EnqueueData(UnixSocketRawData* aData);
-  bool HasPendingData() const;
-
-  template <typename T>
-  ssize_t ReceiveData(int aFd, T* aIO)
-  {
-    MOZ_ASSERT(aFd >= 0);
-    MOZ_ASSERT(aIO);
-
-    nsAutoPtr<UnixSocketRawData> incoming(
-      new UnixSocketRawData(mMaxReadSize));
-
-    ssize_t res = incoming->Receive(aFd);
-    if (res < 0) {
-      /* an I/O error occured */
-      nsRefPtr<nsRunnable> r = new SocketIORequestClosingRunnable<T>(aIO);
-      NS_DispatchToMainThread(r);
-      return -1;
-    } else if (!res) {
-      /* EOF or peer shut down sending */
-      nsRefPtr<nsRunnable> r = new SocketIORequestClosingRunnable<T>(aIO);
-      NS_DispatchToMainThread(r);
-      return 0;
-    }
-
-#ifdef MOZ_TASK_TRACER
-    // Make unix socket creation events to be the source events of TaskTracer,
-    // and originate the rest correlation tasks from here.
-    AutoSourceEvent taskTracerEvent(SourceEventType::Unixsocket);
-#endif
-
-    nsRefPtr<nsRunnable> r =
-      new SocketIOReceiveRunnable<T>(aIO, incoming.forget());
-    NS_DispatchToMainThread(r);
-
-    return res;
-  }
-
-  template <typename T>
-  nsresult SendPendingData(int aFd, T* aIO)
-  {
-    MOZ_ASSERT(aFd >= 0);
-    MOZ_ASSERT(aIO);
-
-    while (HasPendingData()) {
-      UnixSocketRawData* outgoing = mOutgoingQ.ElementAt(0);
-
-      ssize_t res = outgoing->Send(aFd);
-      if (res < 0) {
-        /* an I/O error occured */
-        nsRefPtr<nsRunnable> r = new SocketIORequestClosingRunnable<T>(aIO);
-        NS_DispatchToMainThread(r);
-        return NS_ERROR_FAILURE;
-      } else if (!res && outgoing->GetSize()) {
-        /* I/O is currently blocked; try again later */
-        return NS_OK;
-      }
-      if (!outgoing->GetSize()) {
-        mOutgoingQ.RemoveElementAt(0);
-        delete outgoing;
-      }
-    }
-
-    return NS_OK;
-  }
-
 protected:
-  SocketIOBase(size_t aMaxReadSize);
-
-private:
-  const size_t mMaxReadSize;
-
-  /**
-   * Raw data queue. Must be pushed/popped from I/O thread only.
-   */
-  nsTArray<UnixSocketRawData*> mOutgoingQ;
+  SocketIOBase();
 };
 
 //
@@ -590,36 +495,6 @@ protected:
 
 private:
   Tio* mIO;
-};
-
-/* |SocketIOSendTask| transfers an instance of |Tdata|, such as
- * |UnixSocketRawData|, to the I/O thread and queues it up for
- * sending the contained data.
- */
-template<typename Tio, typename Tdata>
-class SocketIOSendTask final : public SocketIOTask<Tio>
-{
-public:
-  SocketIOSendTask(Tio* aIO, Tdata* aData)
-  : SocketIOTask<Tio>(aIO)
-  , mData(aData)
-  {
-    MOZ_ASSERT(aData);
-  }
-
-  void Run() override
-  {
-    MOZ_ASSERT(!NS_IsMainThread());
-    MOZ_ASSERT(!SocketIOTask<Tio>::IsCanceled());
-
-    Tio* io = SocketIOTask<Tio>::GetIO();
-    MOZ_ASSERT(!io->IsShutdownOnIOThread());
-
-    io->Send(mData);
-  }
-
-private:
-  Tdata* mData;
 };
 
 /* |SocketIOShutdownTask| signals shutdown to the Socket I/O object on

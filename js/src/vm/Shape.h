@@ -385,6 +385,7 @@ class BaseShape : public gc::TenuredCell
     ShapeTable*      table_;
 
     BaseShape(const BaseShape& base) = delete;
+    BaseShape& operator=(const BaseShape& other) = delete;
 
   public:
     void finalize(FreeOp* fop);
@@ -403,23 +404,16 @@ class BaseShape : public gc::TenuredCell
     /* Not defined: BaseShapes must not be stack allocated. */
     ~BaseShape();
 
-    BaseShape& operator=(const BaseShape& other) {
-        clasp_ = other.clasp_;
-        flags = other.flags;
-        slotSpan_ = other.slotSpan_;
-        compartment_ = other.compartment_;
-        return *this;
-    }
-
     const Class* clasp() const { return clasp_; }
 
     bool isOwned() const { return !!(flags & OWNED_SHAPE); }
 
+    static void copyFromUnowned(BaseShape& dest, UnownedBaseShape& src);
     inline void adoptUnowned(UnownedBaseShape* other);
 
     void setOwned(UnownedBaseShape* unowned) {
         flags |= OWNED_SHAPE;
-        this->unowned_ = unowned;
+        unowned_ = unowned;
     }
 
     uint32_t getObjectFlags() const { return flags & OBJECT_FLAG_MASK; }
@@ -471,24 +465,6 @@ class BaseShape : public gc::TenuredCell
 
 class UnownedBaseShape : public BaseShape {};
 
-inline void
-BaseShape::adoptUnowned(UnownedBaseShape* other)
-{
-    // This is a base shape owned by a dictionary object, update it to reflect the
-    // unowned base shape of a new last property.
-    MOZ_ASSERT(isOwned());
-
-    uint32_t span = slotSpan();
-    ShapeTable* table = &this->table();
-
-    *this = *other;
-    setOwned(other);
-    setTable(table);
-    setSlotSpan(span);
-
-    assertConsistency();
-}
-
 UnownedBaseShape*
 BaseShape::unowned()
 {
@@ -498,13 +474,15 @@ BaseShape::unowned()
 UnownedBaseShape*
 BaseShape::toUnowned()
 {
-    MOZ_ASSERT(!isOwned() && !unowned_); return static_cast<UnownedBaseShape*>(this);
+    MOZ_ASSERT(!isOwned() && !unowned_);
+    return static_cast<UnownedBaseShape*>(this);
 }
 
 UnownedBaseShape*
 BaseShape::baseUnowned()
 {
-    MOZ_ASSERT(isOwned() && unowned_); return unowned_;
+    MOZ_ASSERT(isOwned() && unowned_);
+    return unowned_;
 }
 
 /* Entries for the per-compartment baseShapes set of unowned base shapes. */
@@ -542,15 +520,6 @@ struct StackBaseShape : public DefaultHasher<ReadBarrieredUnownedBaseShape>
     static inline HashNumber hash(const Lookup& lookup);
     static inline bool match(UnownedBaseShape* key, const Lookup& lookup);
 };
-
-inline
-BaseShape::BaseShape(const StackBaseShape& base)
-{
-    mozilla::PodZero(this);
-    this->clasp_ = base.clasp;
-    this->flags = base.flags;
-    this->compartment_ = base.compartment;
-}
 
 typedef HashSet<ReadBarrieredUnownedBaseShape,
                 StackBaseShape,
@@ -970,7 +939,7 @@ class Shape : public gc::TenuredCell
     inline Shape* searchLinear(jsid id);
 
     void fixupAfterMovingGC();
-    void fixupGetterSetterForBarrier(JSTracer *trc);
+    void fixupGetterSetterForBarrier(JSTracer* trc);
 
     /* For JIT usage */
     static inline size_t offsetOfBase() { return offsetof(Shape, base_); }
@@ -1252,14 +1221,14 @@ GetterSetterWriteBarrierPost(AccessorShape* shape)
 {
     MOZ_ASSERT(shape);
     if (shape->hasGetterObject()) {
-        gc::StoreBuffer *sb = reinterpret_cast<gc::Cell*>(shape->getterObject())->storeBuffer();
+        gc::StoreBuffer* sb = reinterpret_cast<gc::Cell*>(shape->getterObject())->storeBuffer();
         if (sb) {
             sb->putGeneric(ShapeGetterSetterRef(shape));
             return;
         }
     }
     if (shape->hasSetterObject()) {
-        gc::StoreBuffer *sb = reinterpret_cast<gc::Cell*>(shape->setterObject())->storeBuffer();
+        gc::StoreBuffer* sb = reinterpret_cast<gc::Cell*>(shape->setterObject())->storeBuffer();
         if (sb) {
             sb->putGeneric(ShapeGetterSetterRef(shape));
             return;
@@ -1348,21 +1317,6 @@ Shape::searchLinear(jsid id)
     }
 
     return nullptr;
-}
-
-inline void
-Shape::traceChildren(JSTracer* trc)
-{
-    TraceEdge(trc, &base_, "base");
-    TraceEdge(trc, &propidRef(), "propid");
-    if (parent)
-        TraceEdge(trc, &parent, "parent");
-
-    if (hasGetterObject())
-        TraceManuallyBarrieredEdge(trc, &asAccessorShape().getterObj, "getter");
-
-    if (hasSetterObject())
-        TraceManuallyBarrieredEdge(trc, &asAccessorShape().setterObj, "setter");
 }
 
 /*

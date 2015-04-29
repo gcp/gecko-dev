@@ -3008,12 +3008,25 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   TimeStamp startBuildDisplayList = TimeStamp::Now();
   nsDisplayListBuilder builder(aFrame, nsDisplayListBuilder::PAINTING,
                            !(aFlags & PAINT_HIDE_CARET));
+  if (aFlags & PAINT_IN_TRANSFORM) {
+    builder.SetInTransform(true);
+  }
+  if (aFlags & PAINT_SYNC_DECODE_IMAGES) {
+    builder.SetSyncDecodeImages(true);
+  }
+  if (aFlags & (PAINT_WIDGET_LAYERS | PAINT_TO_WINDOW)) {
+    builder.SetPaintingToWindow(true);
+  }
+  if (aFlags & PAINT_IGNORE_SUPPRESSION) {
+    builder.IgnorePaintSuppression();
+  }
 
   nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
   bool usingDisplayPort = false;
   nsRect displayport;
   if (rootScrollFrame && !aFrame->GetParent() &&
-      (aFlags & (PAINT_WIDGET_LAYERS | PAINT_TO_WINDOW))) {
+      (aFlags & (PAINT_WIDGET_LAYERS | PAINT_TO_WINDOW)) &&
+      gfxPrefs::LayoutUseContainersForRootFrames()) {
     nsRect displayportBase(
         nsPoint(0,0),
         nsLayoutUtils::CalculateCompositionSizeForFrame(rootScrollFrame));
@@ -3044,18 +3057,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   bool willFlushRetainedLayers = (aFlags & PAINT_HIDE_CARET) != 0;
 
   nsDisplayList list;
-  if (aFlags & PAINT_IN_TRANSFORM) {
-    builder.SetInTransform(true);
-  }
-  if (aFlags & PAINT_SYNC_DECODE_IMAGES) {
-    builder.SetSyncDecodeImages(true);
-  }
-  if (aFlags & (PAINT_WIDGET_LAYERS | PAINT_TO_WINDOW)) {
-    builder.SetPaintingToWindow(true);
-  }
-  if (aFlags & PAINT_IGNORE_SUPPRESSION) {
-    builder.IgnorePaintSuppression();
-  }
 
   // If the root has embedded plugins, flag the builder so we know we'll need
   // to update plugin geometry after painting.
@@ -6471,42 +6472,42 @@ nsLayoutUtils::GetTextRunFlagsForStyle(nsStyleContext* aStyleContext,
   default:
     break;
   }
+  return result | GetTextRunOrientFlagsForStyle(aStyleContext);
+}
+
+/* static */ uint32_t
+nsLayoutUtils::GetTextRunOrientFlagsForStyle(nsStyleContext* aStyleContext)
+{
   WritingMode wm(aStyleContext);
   if (wm.IsVertical()) {
     switch (aStyleContext->StyleVisibility()->mTextOrientation) {
     case NS_STYLE_TEXT_ORIENTATION_MIXED:
-      result |= gfxTextRunFactory::TEXT_ORIENT_VERTICAL_MIXED;
-      break;
+      return gfxTextRunFactory::TEXT_ORIENT_VERTICAL_MIXED;
     case NS_STYLE_TEXT_ORIENTATION_UPRIGHT:
-      result |= gfxTextRunFactory::TEXT_ORIENT_VERTICAL_UPRIGHT;
-      break;
+      return gfxTextRunFactory::TEXT_ORIENT_VERTICAL_UPRIGHT;
     case NS_STYLE_TEXT_ORIENTATION_SIDEWAYS:
       // This should depend on writing mode vertical-lr vs vertical-rl,
       // but until we support SIDEWAYS_LEFT, we'll treat this the same
       // as SIDEWAYS_RIGHT and simply fall through.
       /*
       if (wm.IsVerticalLR()) {
-        result |= gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_LEFT;
+        return gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_LEFT;
       } else {
-        result |= gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
+        return gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
       }
-      break;
       */
     case NS_STYLE_TEXT_ORIENTATION_SIDEWAYS_RIGHT:
-      result |= gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
-      break;
+      return gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
     case NS_STYLE_TEXT_ORIENTATION_SIDEWAYS_LEFT:
       // Not yet supported, so fall through to the default (error) case.
       /*
-      result |= gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_LEFT;
-      break;
+      return gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_LEFT;
       */
     default:
       NS_NOTREACHED("unknown text-orientation");
-      break;
     }
   }
-  return result;
+  return 0;
 }
 
 /* static */ void

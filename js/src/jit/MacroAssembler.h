@@ -802,8 +802,6 @@ class MacroAssembler : public MacroAssemblerSpecific
                         gc::InitialHeap initialHeap, Label* fail, bool initContents = true,
                         bool convertDoubleElements = false);
 
-    void newGCThing(Register result, Register temp, JSObject* templateObj,
-                     gc::InitialHeap initialHeap, Label* fail);
     void initGCThing(Register obj, Register temp, JSObject* templateObj,
                      bool initContents = true, bool convertDoubleElements = false);
 
@@ -970,15 +968,15 @@ class MacroAssembler : public MacroAssemblerSpecific
     // On ARM64, sp can function as the zero register depending on context.
     // Code shared across platforms must use these functions to be valid.
     template <typename T>
-    void branchTestStackPtr(Condition cond, T t, Label *label) {
+    void branchTestStackPtr(Condition cond, T t, Label* label) {
         branchTestPtr(cond, getStackPointer(), t, label);
     }
     template <typename T>
-    void branchStackPtr(Condition cond, T rhs, Label *label) {
+    void branchStackPtr(Condition cond, T rhs, Label* label) {
         branchPtr(cond, getStackPointer(), rhs, label);
     }
     template <typename T>
-    void branchStackPtrRhs(Condition cond, T lhs, Label *label) {
+    void branchStackPtrRhs(Condition cond, T lhs, Label* label) {
         branchPtr(cond, lhs, getStackPointer(), label);
     }
 #endif // !JS_CODEGEN_ARM64

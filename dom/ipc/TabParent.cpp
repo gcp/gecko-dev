@@ -13,7 +13,6 @@
 #include "mozilla/BrowserElementParent.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/DataTransfer.h"
-#include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/indexedDB/ActorsParent.h"
 #include "mozilla/plugins/PluginWidgetParent.h"
 #include "mozilla/EventStateManager.h"
@@ -24,6 +23,7 @@
 #include "mozilla/layers/CompositorParent.h"
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layout/RenderFrameParent.h"
+#include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/Preferences.h"
@@ -753,16 +753,10 @@ TabParent::SendLoadRemoteScript(const nsString& aURL,
 }
 
 bool
-TabParent::InitBrowserConfiguration(nsIURI* aURI,
+TabParent::InitBrowserConfiguration(const nsCString& aURI,
                                     BrowserConfiguration& aConfiguration)
 {
-  // Get the list of ServiceWorkerRegistation for this origin.
-  nsRefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
-  MOZ_ASSERT(swr);
-
-  swr->GetRegistrations(aConfiguration.serviceWorkerRegistrations());
-
-  return true;
+  return ContentParent::GetBrowserConfiguration(aURI, aConfiguration);
 }
 
 void
@@ -794,7 +788,7 @@ TabParent::LoadURL(nsIURI* aURI)
 
     // This object contains the configuration for this new app.
     BrowserConfiguration configuration;
-    if (NS_WARN_IF(!InitBrowserConfiguration(aURI, configuration))) {
+    if (NS_WARN_IF(!InitBrowserConfiguration(spec, configuration))) {
       return;
     }
 
@@ -989,6 +983,19 @@ TabParent::UIResolutionChanged()
     // mDPI being greater than 0, so this invalidates it.
     mDPI = -1;
     unused << SendUIResolutionChanged();
+  }
+}
+
+void
+TabParent::ThemeChanged()
+{
+  if (!mIsDestroyed) {
+    // The theme has changed, and any cached values we had sent down
+    // to the child have been invalidated. When this method is called,
+    // LookAndFeel should have the up-to-date values, which we now
+    // send down to the child. We do this for every remote tab for now,
+    // but bug 1156934 has been filed to do it once per content process.
+    unused << SendThemeChanged(LookAndFeel::GetIntCache());
   }
 }
 

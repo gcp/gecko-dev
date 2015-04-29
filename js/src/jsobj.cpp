@@ -2784,19 +2784,10 @@ js::LookupPropertyPure(ExclusiveContext* cx, JSObject* obj, jsid id, JSObject** 
                 return true;
             }
 
-            // Fail if there's a resolve hook. We allow the JSFunction resolve hook
-            // if we know it will never add a property with this name or str_resolve
-            // with a non-integer property.
-            do {
-                const Class* clasp = obj->getClass();
-                if (!clasp->resolve)
-                    break;
-                if (clasp->resolve == fun_resolve && !FunctionHasResolveHook(cx->names(), id))
-                    break;
-                if (clasp->resolve == str_resolve && !JSID_IS_INT(id))
-                    break;
+            // Fail if there's a resolve hook, unless the mayResolve hook tells
+            // us the resolve hook won't define a property with this id.
+            if (ClassMayResolveId(cx->names(), obj->getClass(), id, obj))
                 return false;
-            } while (0);
         } else if (obj->is<UnboxedPlainObject>()) {
             if (obj->as<UnboxedPlainObject>().containsUnboxedOrExpandoProperty(cx, id)) {
                 *objp = obj;
@@ -3015,19 +3006,18 @@ js::GetOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
     }
 #endif
 
+    RootedNativeObject nobj(cx, obj.as<NativeObject>());
     RootedShape shape(cx);
-    if (!NativeLookupOwnProperty<CanGC>(cx, obj.as<NativeObject>(), id, &shape))
+    if (!NativeLookupOwnProperty<CanGC>(cx, nobj, id, &shape))
         return false;
     if (!shape) {
         desc.object().set(nullptr);
         return true;
     }
 
-    bool doGet = true;
     desc.setAttributes(GetShapeAttributes(obj, shape));
     if (desc.isAccessorDescriptor()) {
         MOZ_ASSERT(desc.isShared());
-        doGet = false;
 
         // The result of GetOwnPropertyDescriptor() must be either undefined or
         // a complete property descriptor (per ES6 draft rev 32 (2015 Feb 2)
@@ -3049,20 +3039,24 @@ js::GetOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
             desc.setSetterObject(nullptr);
             desc.attributesRef() |= JSPROP_SETTER;
         }
+
+        desc.value().setUndefined();
     } else {
         // This is either a straight-up data property or (rarely) a
         // property with a JSGetterOp/JSSetterOp. The latter must be
         // reported to the caller as a plain data property, so don't
         // populate desc.getter/setter, and mask away the SHARED bit.
         desc.attributesRef() &= ~JSPROP_SHARED;
+
+        if (IsImplicitDenseOrTypedArrayElement(shape)) {
+            desc.value().set(nobj->getDenseOrTypedArrayElement(JSID_TO_INT(id)));
+        } else {
+            if (!NativeGetExistingProperty(cx, nobj, nobj, shape, desc.value()))
+                return false;
+        }
     }
 
-    RootedValue value(cx);
-    if (doGet && !GetProperty(cx, obj, obj, id, &value))
-        return false;
-
-    desc.value().set(value);
-    desc.object().set(obj);
+    desc.object().set(nobj);
     desc.assertComplete();
     return true;
 }
@@ -4041,17 +4035,17 @@ JSObject::sizeOfIncludingThisInNursery() const
 
     MOZ_ASSERT(!isTenured());
 
-    const Nursery &nursery = compartment()->runtimeFromAnyThread()->gc.nursery;
+    const Nursery& nursery = compartment()->runtimeFromAnyThread()->gc.nursery;
     size_t size = Arena::thingSize(allocKindForTenure(nursery));
 
     if (is<NativeObject>()) {
-        const NativeObject &native = as<NativeObject>();
+        const NativeObject& native = as<NativeObject>();
 
         size += native.numFixedSlots() * sizeof(Value);
         size += native.numDynamicSlots() * sizeof(Value);
 
         if (native.hasDynamicElements()) {
-            js::ObjectElements &elements = *native.getElementsHeader();
+            js::ObjectElements& elements = *native.getElementsHeader();
             if (!elements.isCopyOnWrite() || elements.ownerObject() == this)
                 size += elements.capacity * sizeof(HeapSlot);
         }
@@ -4063,7 +4057,7 @@ JSObject::sizeOfIncludingThisInNursery() const
 size_t
 JS::ubi::Concrete<JSObject>::size(mozilla::MallocSizeOf mallocSizeOf) const
 {
-    JSObject &obj = get();
+    JSObject& obj = get();
 
     if (!obj.isTenured())
         return obj.sizeOfIncludingThisInNursery();
@@ -4111,4 +4105,33 @@ JSObject::traceChildren(JSTracer* trc)
                        "objectElements");
         } while (false);
     }
+}
+
+static JSAtom*
+displayAtomFromObjectGroup(ObjectGroup& group)
+{
+    TypeNewScript* script = group.newScript();
+    if (!script)
+        return nullptr;
+
+    return script->function()->displayAtom();
+}
+
+bool
+JSObject::constructorDisplayAtom(JSContext* cx, js::MutableHandleAtom name)
+{
+    ObjectGroup *g = getGroup(cx);
+    if (!g)
+        return false;
+
+    name.set(displayAtomFromObjectGroup(*g));
+    return true;
+}
+
+JSAtom*
+JSObject::maybeConstructorDisplayAtom() const
+{
+    if (hasLazyGroup())
+        return nullptr;
+    return displayAtomFromObjectGroup(*group());
 }

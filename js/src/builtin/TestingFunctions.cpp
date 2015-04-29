@@ -211,7 +211,7 @@ GetBuildConfiguration(JSContext* cx, unsigned argc, jsval* vp)
     if (!JS_SetProperty(cx, info, "moz-memory", value))
         return false;
 
-    value.setInt32(sizeof(void *));
+    value.setInt32(sizeof(void*));
     if (!JS_SetProperty(cx, info, "pointer-byte-size", value))
         return false;
 
@@ -1154,6 +1154,7 @@ static const JSClass FinalizeCounterClass = {
     nullptr, /* setProperty */
     nullptr, /* enumerate */
     nullptr, /* resolve */
+    nullptr, /* mayResolve */
     nullptr, /* convert */
     finalize_counter_finalize
 };
@@ -1835,6 +1836,7 @@ const Class CloneBufferObject::class_ = {
     nullptr, /* setProperty */
     nullptr, /* enumerate */
     nullptr, /* resolve */
+    nullptr, /* mayResolve */
     nullptr, /* convert */
     Finalize
 };
@@ -2552,6 +2554,32 @@ SetDiscardSource(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+static bool
+GetConstructorName(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (!args.requireAtLeast(cx, "getConstructorName", 1))
+        return false;
+
+    if (!args[0].isObject()) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
+                             "getConstructorName", "Object",
+                             InformalValueTypeName(args[0]));
+        return false;
+    }
+
+    RootedAtom name(cx);
+    if (!args[0].toObject().constructorDisplayAtom(cx, &name))
+        return false;
+
+    if (name) {
+        args.rval().setString(name);
+    } else {
+        args.rval().setNull();
+    }
+    return true;
+}
+
 static const JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("gc", ::GC, 0, 0,
 "gc([obj] | 'compartment' [, 'shrinking'])",
@@ -2957,6 +2985,11 @@ gc::ZealModeHelpText),
 "setDiscardSource(bool)",
 "  Explicitly enable source discarding in the current compartment.  The default is that "
 "  source discarding is not explicitly enabled."),
+
+    JS_FN_HELP("getConstructorName", GetConstructorName, 1, 0,
+"getConstructorName(object)",
+"  If the given object was created with `new Ctor`, return the constructor's display name. "
+"  Otherwise, return null."),
 
     JS_FS_HELP_END
 };

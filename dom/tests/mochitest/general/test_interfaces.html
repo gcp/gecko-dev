@@ -61,7 +61,7 @@ var ecmaGlobals =
     "Int32Array",
     "Int8Array",
     "InternalError",
-    {name: "Intl", desktop: true},
+    {name: "Intl", android: false},
     "Iterator",
     "JSON",
     "Map",
@@ -271,8 +271,6 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "CSS2Properties",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSCharsetRule",
-// IMPORTANT: Do not change this list without review from a DOM peer!
     "CSSConditionRule",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "CSSCounterStyleRule",
@@ -340,6 +338,8 @@ var interfaceNamesInGlobalScope =
     "DeviceOrientationEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "DeviceProximityEvent",
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    { name: "DeviceStorageAreaChangedEvent", pref: "device.storage.enabled" },
 // IMPORTANT: Do not change this list without review from a DOM peer!
     { name: "DeviceStorage", pref: "device.storage.enabled" },
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1391,6 +1391,7 @@ function createInterfaceMap(isXBLScope) {
   var isRelease = !version.contains("a");
   var isDesktop = !/Mobile|Tablet/.test(navigator.userAgent);
   var isB2G = !isDesktop && !navigator.userAgent.contains("Android");
+  var isAndroid = navigator.userAgent.contains("Android");
   var hasPermission = function (aPermissions) {
     var result = false;
     for (var p of aPermissions) {
@@ -1410,6 +1411,7 @@ function createInterfaceMap(isXBLScope) {
                  (entry.xbl === !isXBLScope) ||
                  (entry.desktop === !isDesktop) ||
                  (entry.b2g === !isB2G) ||
+                 (entry.android === !isAndroid) ||
                  (entry.release === !isRelease) ||
                  (entry.pref && !prefs.getBoolPref(entry.pref))  ||
                  (entry.permission && !hasPermission(entry.permission))) {

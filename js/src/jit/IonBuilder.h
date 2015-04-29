@@ -353,9 +353,6 @@ class IonBuilder
     MConstant* constant(const Value& v);
     MConstant* constantInt(int32_t i);
 
-    // Note: This function might return nullptr in case of failure.
-    MConstant* constantMaybeAtomize(const Value& v);
-
     // Improve the type information at tests
     bool improveTypesAtTest(MDefinition* ins, bool trueBranch, MTest* test);
     bool improveTypesAtCompare(MCompare* ins, bool trueBranch, MTest* test);
@@ -422,6 +419,7 @@ class IonBuilder
                    MIRType slotType = MIRType_None);
     bool storeSlot(MDefinition* obj, Shape* shape, MDefinition* value, bool needsBarrier,
                    MIRType slotType = MIRType_None);
+    bool shouldAbortOnPreliminaryGroups(MDefinition *obj);
 
     MDefinition* tryInnerizeWindow(MDefinition* obj);
 
@@ -803,8 +801,12 @@ class IonBuilder
                                                MIRType knownValueType);
 
     // TypedArray intrinsics.
+    enum WrappingBehavior { AllowWrappedTypedArrays, RejectWrappedTypedArrays };
+    InliningStatus inlineIsTypedArrayHelper(CallInfo& callInfo, WrappingBehavior wrappingBehavior);
     InliningStatus inlineIsTypedArray(CallInfo& callInfo);
+    InliningStatus inlineIsPossiblyWrappedTypedArray(CallInfo& callInfo);
     InliningStatus inlineTypedArrayLength(CallInfo& callInfo);
+    InliningStatus inlineSetDisjointTypedElements(CallInfo& callInfo);
 
     // TypedObject intrinsics and natives.
     InliningStatus inlineObjectIsTypeDescr(CallInfo& callInfo);
