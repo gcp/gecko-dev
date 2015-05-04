@@ -13,7 +13,7 @@
 #include "gfxPoint.h"                   // for gfxPoint, gfxSize
 #include "mozilla/StyleAnimationValue.h" // for StyleAnimationValue, etc
 #include "mozilla/WidgetUtils.h"        // for ComputeTransformForRotation
-#include "mozilla/dom/KeyframeEffect.h" // for KeyframeEffectReadonly
+#include "mozilla/dom/KeyframeEffect.h" // for KeyframeEffectReadOnly
 #include "mozilla/gfx/BaseRect.h"       // for BaseRect
 #include "mozilla/gfx/Point.h"          // for RoundedToInt, PointTyped
 #include "mozilla/gfx/Rect.h"           // for RoundedToInt, RectTyped
@@ -474,7 +474,7 @@ SampleAnimations(Layer* aLayer, TimeStamp aPoint)
     timing.mFillMode = NS_STYLE_ANIMATION_FILL_MODE_BOTH;
 
     ComputedTiming computedTiming =
-      dom::KeyframeEffectReadonly::GetComputedTimingAt(
+      dom::KeyframeEffectReadOnly::GetComputedTimingAt(
         Nullable<TimeDuration>(elapsedDuration), timing);
 
     MOZ_ASSERT(0.0 <= computedTiming.mTimeFraction &&
@@ -605,6 +605,17 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer)
     // TODO: When we enable APZ on Fennec, we'll need to call SyncFrameMetrics here.
     // When doing so, it might be useful to look at how it was called here before
     // bug 1036967 removed the (dead) call.
+
+#if defined(MOZ_ANDROID_APZ)
+    if (mIsFirstPaint) {
+      CSSToLayerScale geckoZoom = metrics.LayersPixelsPerCSSPixel().ToScaleFactor();
+      LayerIntPoint scrollOffsetLayerPixels = RoundedToInt(metrics.GetScrollOffset() * geckoZoom);
+      mContentRect = metrics.GetScrollableRect();
+      SetFirstPaintViewport(scrollOffsetLayerPixels,
+                            geckoZoom,
+                            mContentRect);
+    }
+#endif
 
     mIsFirstPaint = false;
     mLayersUpdated = false;
