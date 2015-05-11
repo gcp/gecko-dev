@@ -64,7 +64,10 @@ CallbackHelper::FrameSizeChange(unsigned int w, unsigned int h,
   LOG(("Video FrameSizeChange: %ux%u", w, h));
   nsRefPtr<FrameSizeChangeRunnable> runnable =
     new FrameSizeChangeRunnable(mCapEngine, mCapturerId, w, h);
-  sCamerasParent->GetBackgroundThread()->Dispatch(runnable, NS_DISPATCH_SYNC);
+  MOZ_ASSERT(sCamerasParent != nullptr);
+  nsIThread * thread = sCamerasParent->GetBackgroundThread();
+  MOZ_ASSERT(thread != nullptr);
+  thread->Dispatch(runnable, NS_DISPATCH_SYNC);
   return runnable->GetResult();
 }
 
@@ -160,7 +163,10 @@ CallbackHelper::DeliverFrame(unsigned char* buffer,
   nsRefPtr<DeliverFrameRunnable> runnable =
     new DeliverFrameRunnable(mCapEngine, mCapturerId,
                              buffer, size, time_stamp, ntp_time, render_time);
-  sCamerasParent->GetBackgroundThread()->Dispatch(runnable, NS_DISPATCH_SYNC);
+  MOZ_ASSERT(sCamerasParent != nullptr);
+  nsIThread * thread = sCamerasParent->GetBackgroundThread();
+  MOZ_ASSERT(thread != nullptr);
+  thread->Dispatch(runnable, NS_DISPATCH_SYNC);
   return runnable->GetResult();
 }
 
@@ -513,42 +519,15 @@ CamerasParent::RecvStopCapture(const int& aCapEngine,
   return true;
 }
 
-void
-CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
+void CamerasParent::DoShutdown()
 {
-  // No more IPC from here
-  LOG((__PRETTY_FUNCTION__));
-}
-
-CamerasParent::CamerasParent()
-  : mActiveEngine(InvalidEngine),
-    mPtrViEBase(nullptr),
-    mPtrViECapture(nullptr),
-    mPtrViERender(nullptr),
-    mCameraEngine(nullptr),
-    mScreenEngine(nullptr),
-    mBrowserEngine(nullptr),
-    mWinEngine(nullptr),
-    mAppEngine(nullptr),
-    mShmemInitialized(false)
-{
-#if defined(PR_LOGGING)
-  if (!gCamerasParentLog)
-    gCamerasParentLog = PR_NewLogModule("CamerasParent");
-#endif
-  LOG(("CamerasParent: %p", this));
-
-  mPBackgroundThread = NS_GetCurrentThread();
-  sCamerasParent = this;
-
-  MOZ_COUNT_CTOR(CamerasParent);
-}
-
-CamerasParent::~CamerasParent()
-{
-  LOG(("~CamerasParent: %p", this));
-
-  MOZ_COUNT_DTOR(CamerasParent);
+  // Stop the callers
+  while (mCallbacks.Length()) {
+    auto capEngine = mCallbacks[0]->mCapEngine;
+    auto capNum = mCallbacks[0]->mCapturerId;
+    RecvStopCapture(capEngine, capNum);
+    RecvReleaseCaptureDevice(capEngine, capNum);
+  }
 
   CloseEngines();
 
@@ -581,9 +560,51 @@ CamerasParent::~CamerasParent()
   mBrowserEngine = nullptr;
   mAppEngine = nullptr;
 
-  for (unsigned int i = 0; i < mCallbacks.Length(); i++) {
-    delete mCallbacks[i];
-  }
+  sCamerasParent = nullptr;
+  mPBackgroundThread = nullptr;
+}
+
+void
+CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
+{
+  // No more IPC from here
+  LOG((__PRETTY_FUNCTION__));
+  // We don't want to receive callbacks or anything if we can't
+  // forward them anymore anyway.
+  DoShutdown();
+}
+
+CamerasParent::CamerasParent()
+  : mActiveEngine(InvalidEngine),
+    mPtrViEBase(nullptr),
+    mPtrViECapture(nullptr),
+    mPtrViERender(nullptr),
+    mCameraEngine(nullptr),
+    mScreenEngine(nullptr),
+    mBrowserEngine(nullptr),
+    mWinEngine(nullptr),
+    mAppEngine(nullptr),
+    mShmemInitialized(false)
+{
+#if defined(PR_LOGGING)
+  if (!gCamerasParentLog)
+    gCamerasParentLog = PR_NewLogModule("CamerasParent");
+#endif
+  LOG(("CamerasParent: %p", this));
+
+  mPBackgroundThread = NS_GetCurrentThread();
+  MOZ_ASSERT(mPBackgroundThread != nullptr, "GetCurrentThread failed");
+  sCamerasParent = this;
+
+  MOZ_COUNT_CTOR(CamerasParent);
+}
+
+CamerasParent::~CamerasParent()
+{
+  LOG(("~CamerasParent: %p", this));
+
+  MOZ_COUNT_DTOR(CamerasParent);
+  DoShutdown();
 }
 
 PCamerasParent* CreateCamerasParent() {

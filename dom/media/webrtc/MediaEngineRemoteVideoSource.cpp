@@ -85,6 +85,7 @@ MediaEngineRemoteVideoSource::Shutdown() {
   }
 
   mozilla::camera::Shutdown();
+  mInitDone = false;
   return;
 }
 

@@ -83,6 +83,7 @@ protected:
   bool SetupEngine(CaptureEngine aCapEngine);
   void CloseEngines();
   bool EnsureInitialized(int aEngine);
+  void DoShutdown();
 
   // Kept active as long as the engine doesn't change
   CaptureEngine mActiveEngine;
