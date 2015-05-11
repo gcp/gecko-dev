@@ -252,6 +252,9 @@ class Bindings
                                          uint32_t numUnaliasedVars, uint32_t numUnaliasedBodyLevelLexicals,
                                          Binding* bindingArray);
 
+    // Initialize a trivial Bindings with no slots and an empty callObjShape.
+    bool initTrivial(ExclusiveContext* cx);
+
     // CompileScript parses and compiles one statement at a time, but the result
     // is one Script object.  There will be no vars or bindings, because those
     // go on the global, but there may be block-scoped locals, and the number of
@@ -1906,8 +1909,9 @@ class LazyScript : public gc::TenuredCell
 
   private:
     // If non-nullptr, the script has been compiled and this is a forwarding
-    // pointer to the result.
-    HeapPtrScript script_;
+    // pointer to the result. This is a weak pointer: after relazification, we
+    // can collect the script if there are no other pointers to it.
+    ReadBarrieredScript script_;
 
     // Original function with which the lazy script is associated.
     HeapPtrFunction function_;
@@ -2005,8 +2009,14 @@ class LazyScript : public gc::TenuredCell
 
     void initScript(JSScript* script);
     void resetScript();
+
     JSScript* maybeScript() {
+        if (script_.unbarrieredGet() && gc::IsAboutToBeFinalized(&script_))
+            script_.set(nullptr);
         return script_;
+    }
+    JSScript* maybeScriptUnbarriered() const {
+        return script_.unbarrieredGet();
     }
 
     JSObject* enclosingScope() const {

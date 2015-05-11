@@ -19,45 +19,65 @@ public:
   virtual void Output(MediaData* aData) override
   {
     if (mManager->mActiveCallback) {
+      AssertHaveActiveProxy();
       mManager->mActiveCallback->Output(aData);
     }
   }
   virtual void Error() override
   {
     if (mManager->mActiveCallback) {
+      AssertHaveActiveProxy();
       mManager->mActiveCallback->Error();
     }
   }
   virtual void InputExhausted() override
   {
     if (mManager->mActiveCallback) {
+      AssertHaveActiveProxy();
       mManager->mActiveCallback->InputExhausted();
     }
   }
   virtual void DrainComplete() override
   {
     if (mManager->mActiveCallback) {
+      AssertHaveActiveProxy();
       mManager->DrainComplete();
     }
   }
   virtual void NotifyResourcesStatusChanged() override
   {
     if (mManager->mActiveCallback) {
+      AssertHaveActiveProxy();
       mManager->mActiveCallback->NotifyResourcesStatusChanged();
     }
   }
   virtual void ReleaseMediaResources() override
   {
     if (mManager->mActiveCallback) {
+      AssertHaveActiveProxy();
       mManager->mActiveCallback->ReleaseMediaResources();
     }
+  }
+  virtual bool OnReaderTaskQueue() override
+  {
+    MOZ_ASSERT(mManager->mActiveCallback);
+    return mManager->mActiveCallback->OnReaderTaskQueue();
+  }
+
+private:
+  void AssertHaveActiveProxy() {
+#ifdef MOZ_FFMPEG // bug 1161895
+    NS_WARN_IF_FALSE(mManager->mActiveProxy, "callback not active proxy");
+#else
+    MOZ_DIAGNOSTIC_ASSERT(mManager->mActiveProxy);
+#endif
   }
 
   SharedDecoderManager* mManager;
 };
 
 SharedDecoderManager::SharedDecoderManager()
-  : mTaskQueue(new FlushableMediaTaskQueue(GetMediaThreadPool()))
+  : mTaskQueue(new FlushableMediaTaskQueue(GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER)))
   , mActiveProxy(nullptr)
   , mActiveCallback(nullptr)
   , mWaitForInternalDrain(false)
@@ -98,9 +118,12 @@ SharedDecoderManager::CreateVideoDecoder(
       mPDM = nullptr;
       return nullptr;
     }
-    mPDM = aPDM;
     nsresult rv = mDecoder->Init();
-    NS_ENSURE_SUCCESS(rv, nullptr);
+    if (NS_FAILED(rv)) {
+      mDecoder = nullptr;
+      return nullptr;
+    }
+    mPDM = aPDM;
   }
 
   nsRefPtr<SharedDecoderProxy> proxy(new SharedDecoderProxy(this, aCallback));
@@ -147,11 +170,19 @@ void
 SharedDecoderManager::SetIdle(MediaDataDecoder* aProxy)
 {
   if (aProxy && mActiveProxy == aProxy) {
-    mWaitForInternalDrain = true;
-    mActiveProxy->Drain();
     MonitorAutoLock mon(mMonitor);
-    while (mWaitForInternalDrain) {
-      mon.Wait();
+    mWaitForInternalDrain = true;
+    nsresult rv;
+    {
+      // We don't want to hold the lock while calling Drain() has some
+      // platform implementations call DrainComplete() immediately.
+      MonitorAutoUnlock mon(mMonitor);
+      rv = mActiveProxy->Drain();
+    }
+    if (NS_SUCCEEDED(rv)) {
+      while (mWaitForInternalDrain) {
+        mon.Wait();
+      }
     }
     mActiveProxy->Flush();
     mActiveProxy = nullptr;
@@ -161,18 +192,23 @@ SharedDecoderManager::SetIdle(MediaDataDecoder* aProxy)
 void
 SharedDecoderManager::DrainComplete()
 {
-  if (mWaitForInternalDrain) {
+  {
     MonitorAutoLock mon(mMonitor);
-    mWaitForInternalDrain = false;
-    mon.NotifyAll();
-  } else {
-    mActiveCallback->DrainComplete();
+    if (mWaitForInternalDrain) {
+      mWaitForInternalDrain = false;
+      mon.NotifyAll();
+      return;
+    }
   }
+  mActiveCallback->DrainComplete();
 }
 
 void
 SharedDecoderManager::Shutdown()
 {
+  // Shutdown() should have been called on any proxies.
+  MOZ_ASSERT(!mActiveProxy);
+
   if (mDecoder) {
     mDecoder->Shutdown();
     mDecoder = nullptr;
@@ -237,12 +273,6 @@ SharedDecoderProxy::Shutdown()
 {
   mManager->SetIdle(this);
   return NS_OK;
-}
-
-bool
-SharedDecoderProxy::IsWaitingMediaResources()
-{
-  return mManager->mDecoder->IsWaitingMediaResources();
 }
 
 bool

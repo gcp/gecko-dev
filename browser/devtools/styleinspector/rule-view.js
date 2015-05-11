@@ -25,6 +25,7 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const PREF_UA_STYLES = "devtools.inspector.showUserAgentStyles";
 const PREF_DEFAULT_COLOR_UNIT = "devtools.defaultColorUnit";
+const PREF_ENABLE_MDN_DOCS_TOOLTIP = "devtools.inspector.mdnDocsTooltip.enabled";
 const PROPERTY_NAME_CLASS = "ruleview-propertyname";
 const FILTER_CHANGED_TIMEOUT = 150;
 
@@ -1116,7 +1117,7 @@ function CssRuleView(aInspector, aDoc, aStore, aPageStyle) {
   this.store = aStore || {};
   this.pageStyle = aPageStyle;
 
-  this._highlightedElements = [];
+  this._editorsExpandedForFilter = [];
   this._outputParser = new OutputParser();
 
   this._buildContextMenu = this._buildContextMenu.bind(this);
@@ -1129,6 +1130,7 @@ function CssRuleView(aInspector, aDoc, aStore, aPageStyle) {
   this._onToggleOrigSources = this._onToggleOrigSources.bind(this);
   this._onShowMdnDocs = this._onShowMdnDocs.bind(this);
   this._onFilterStyles = this._onFilterStyles.bind(this);
+  this._onFilterKeyPress = this._onFilterKeyPress.bind(this);
   this._onClearSearch = this._onClearSearch.bind(this);
   this._onFilterTextboxContextMenu = this._onFilterTextboxContextMenu.bind(this);
 
@@ -1141,6 +1143,7 @@ function CssRuleView(aInspector, aDoc, aStore, aPageStyle) {
   this.element.addEventListener("copy", this._onCopy);
   this.element.addEventListener("contextmenu", this._onContextMenu);
   this.searchField.addEventListener("input", this._onFilterStyles);
+  this.searchField.addEventListener("keypress", this._onFilterKeyPress);
   this.searchField.addEventListener("contextmenu", this._onFilterTextboxContextMenu);
   this.searchClearButton.addEventListener("click", this._onClearSearch);
 
@@ -1151,8 +1154,10 @@ function CssRuleView(aInspector, aDoc, aStore, aPageStyle) {
   this._prefObserver.on(PREF_ORIG_SOURCES, this._onSourcePrefChanged);
   this._prefObserver.on(PREF_UA_STYLES, this._handlePrefChange);
   this._prefObserver.on(PREF_DEFAULT_COLOR_UNIT, this._handlePrefChange);
+  this._prefObserver.on(PREF_ENABLE_MDN_DOCS_TOOLTIP, this._handlePrefChange);
 
   this.showUserAgentStyles = Services.prefs.getBoolPref(PREF_UA_STYLES);
+  this.enableMdnDocsTooltip = Services.prefs.getBoolPref(PREF_ENABLE_MDN_DOCS_TOOLTIP);
 
   let options = {
     autoSelect: true,
@@ -1350,7 +1355,8 @@ CssRuleView.prototype = {
     var showOrig = Services.prefs.getBoolPref(PREF_ORIG_SOURCES);
     this.menuitemSources.setAttribute("checked", showOrig);
 
-    this.menuitemShowMdnDocs.hidden = !this.doc.popupNode.parentNode
+    this.menuitemShowMdnDocs.hidden = !this.enableMdnDocsTooltip ||
+                                      !this.doc.popupNode.parentNode
                                       .classList.contains(PROPERTY_NAME_CLASS);
 
     this.menuitemAddRule.disabled = this.inspector.selection.isAnonymousNode();
@@ -1593,6 +1599,10 @@ CssRuleView.prototype = {
       this.showUserAgentStyles = Services.prefs.getBoolPref(pref);
     }
 
+    if (pref === PREF_ENABLE_MDN_DOCS_TOOLTIP) {
+      this.enableMdnDocsTooltip = Services.prefs.getBoolPref(pref);
+    }
+
     // Reselect the currently selected element
     let refreshOnPrefs = [PREF_UA_STYLES, PREF_DEFAULT_COLOR_UNIT];
     if (refreshOnPrefs.indexOf(pref) > -1) {
@@ -1638,6 +1648,7 @@ CssRuleView.prototype = {
         this.searchField.removeAttribute("filled");
       }
 
+      this._clearHighlights();
       this._clearRules();
       this._createEditors();
 
@@ -1645,6 +1656,18 @@ CssRuleView.prototype = {
 
       this._filterChangeTimeout = null;
     }, filterTimeout);
+  },
+
+  /**
+   * Handle the search box's keypress event. If the escape key is pressed,
+   * clear the search box field.
+   */
+  _onFilterKeyPress: function(event) {
+    if (event.keyCode === Ci.nsIDOMKeyEvent.DOM_VK_ESCAPE &&
+        this._onClearSearch()) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
   },
 
   /**
@@ -1662,12 +1685,17 @@ CssRuleView.prototype = {
 
   /**
    * Called when the user clicks on the clear button in the filter style search
-   * box.
+   * box. Returns true if the search box is cleared and false otherwise.
    */
   _onClearSearch: function() {
-    this.searchField.value = "";
-    this.searchField.focus();
-    this._onFilterStyles();
+    if (this.searchField.value) {
+      this.searchField.value = "";
+      this.searchField.focus();
+      this._onFilterStyles();
+      return true;
+    }
+
+    return false;
   },
 
   destroy: function() {
@@ -1679,10 +1707,11 @@ CssRuleView.prototype = {
     this._prefObserver.off(PREF_ORIG_SOURCES, this._onSourcePrefChanged);
     this._prefObserver.off(PREF_UA_STYLES, this._handlePrefChange);
     this._prefObserver.off(PREF_DEFAULT_COLOR_UNIT, this._handlePrefChange);
+    this._prefObserver.off(PREF_ENABLE_MDN_DOCS_TOOLTIP, this._handlePrefChange);
     this._prefObserver.destroy();
 
     this._outputParser = null;
-    this._highlightedElements = null;
+    this._editorsExpandedForFilter = null;
 
     // Remove context menu
     if (this._contextmenu) {
@@ -1721,6 +1750,7 @@ CssRuleView.prototype = {
     this.element.removeEventListener("copy", this._onCopy);
     this.element.removeEventListener("contextmenu", this._onContextMenu);
     this.searchField.removeEventListener("input", this._onFilterStyles);
+    this.searchField.removeEventListener("keypress", this._onFilterKeyPress);
     this.searchField.removeEventListener("contextmenu",
       this._onFilterTextboxContextMenu);
     this.searchClearButton.removeEventListener("click", this._onClearSearch);
@@ -1975,10 +2005,6 @@ CssRuleView.prototype = {
       return;
     }
 
-    if (this._highlightedElements.length > 0) {
-      this.clearHighlight();
-    }
-
     for (let rule of this._elementStyle.rules) {
       if (rule.domRule.system) {
         continue;
@@ -2067,7 +2093,6 @@ CssRuleView.prototype = {
     for (let selectorNode of selectorNodes) {
       if (selectorNode.textContent.toLowerCase().includes(aValue)) {
         selectorNode.classList.add("ruleview-highlight");
-        this._highlightedElements.push(selectorNode);
         isHighlighted = true;
       }
     }
@@ -2085,22 +2110,44 @@ CssRuleView.prototype = {
       let propertyValue = textProp.editor.valueSpan.textContent.toLowerCase();
       let propertyName = textProp.name.toLowerCase();
 
-      // If the input value matches a property line like `font-family: arial`,
-      // then check to make sure the name and value match.  Otherwise, just
-      // compare the input string directly against the name and value elements.
-      let matches = false;
-      if (propertyMatch && name && value) {
-        matches = propertyName.includes(name) && propertyValue.includes(value);
-      } else {
-        matches = (name && propertyName.includes(name)) ||
-                  (value && propertyValue.includes(value));
+      let editor = textProp.editor;
+
+      let isPropertyHighlighted = this._highlightMatches(editor.container, {
+        searchName: name,
+        searchValue: value,
+        propertyName: propertyName,
+        propertyValue: propertyValue,
+        propertyMatch: propertyMatch
+      });
+
+      let isComputedHighlighted = false;
+
+      // Highlight search matches in the computed list of properties
+      for (let computed of textProp.computed) {
+        if (computed.element) {
+          let computedName = computed.name;
+          let computedValue = computed.value;
+
+          isComputedHighlighted = this._highlightMatches(computed.element, {
+            searchName: name,
+            searchValue: value,
+            propertyName: computedName,
+            propertyValue: computedValue,
+            propertyMatch: propertyMatch
+          }) ? true : isComputedHighlighted;
+        }
       }
 
-      if (matches) {
-      // if (matchTextProperty || matchNameOrValue) {
-        textProp.editor.element.classList.add("ruleview-highlight");
-        this._highlightedElements.push(textProp.editor.element);
+      if (isPropertyHighlighted || isComputedHighlighted) {
         isHighlighted = true;
+      }
+
+      // Expand the computed list if a computed rule is highlighted and the
+      // property rule is not highlighted
+      if (!isPropertyHighlighted && isComputedHighlighted &&
+          !editor.computed.hasAttribute("user-open")) {
+        editor.expandForFilter();
+        this._editorsExpandedForFilter.push(editor);
       }
     }
 
@@ -2108,14 +2155,61 @@ CssRuleView.prototype = {
   },
 
   /**
-   * Clear all search filter highlights in the panel.
+   * Helper function for highlightRules that carries out highlighting the given
+   * element if the provided search terms match the property, and returns
+   * a boolean indicating whether or not the search terms match.
+   *
+   * @param {DOMNode} aElement
+   *        The node to highlight if search terms match
+   * @param {String} searchName
+   *        The parsed search name
+   * @param {String} searchValue
+   *        The parsed search value
+   * @param {String} propertyName
+   *        The property name of a rule
+   * @param {String} propertyValue
+   *        The property value of a rule
+   * @param {Boolean} propertyMatch
+   *        Whether or not the search term matches a property line like
+   *        `font-family: arial`
    */
-  clearHighlight: function() {
-    for (let element of this._highlightedElements) {
+  _highlightMatches: function(aElement, { searchName, searchValue, propertyName,
+      propertyValue, propertyMatch }) {
+    let matches = false;
+
+    // If the inputted search value matches a property line like
+    // `font-family: arial`, then check to make sure the name and value match.
+    // Otherwise, just compare the inputted search string directly against the
+    // name and value of the rule property.
+    if (propertyMatch && searchName && searchValue) {
+      matches = propertyName.includes(searchName) &&
+                propertyValue.includes(searchValue);
+    } else {
+      matches = (searchName && propertyName.includes(searchName)) ||
+                (searchValue && propertyValue.includes(searchValue));
+    }
+
+    if (matches) {
+      aElement.classList.add("ruleview-highlight");
+    }
+
+    return matches;
+  },
+
+  /**
+   * Clear all search filter highlights in the panel, and close the computed
+   * list if toggled opened
+   */
+  _clearHighlights: function() {
+    for (let element of this.element.querySelectorAll(".ruleview-highlight")) {
       element.classList.remove("ruleview-highlight");
     }
 
-    this._highlightedElements = [];
+    for (let editor of this._editorsExpandedForFilter) {
+      editor.collapseForFilter();
+    }
+
+    this._editorsExpandedForFilter = [];
   }
 };
 
@@ -2573,19 +2667,23 @@ TextPropertyEditor.prototype = {
     this.element = this.doc.createElementNS(HTML_NS, "li");
     this.element.classList.add("ruleview-property");
 
+    this.container = createChild(this.element, "div", {
+      class: "ruleview-propertycontainer"
+    });
+
     // The enable checkbox will disable or enable the rule.
-    this.enable = createChild(this.element, "div", {
+    this.enable = createChild(this.container, "div", {
       class: "ruleview-enableproperty theme-checkbox",
       tabindex: "-1"
     });
 
     // Click to expand the computed properties of the text property.
-    this.expander = createChild(this.element, "span", {
+    this.expander = createChild(this.container, "span", {
       class: "ruleview-expander theme-twisty"
     });
     this.expander.addEventListener("click", this._onExpandClicked, true);
 
-    this.nameContainer = createChild(this.element, "span", {
+    this.nameContainer = createChild(this.container, "span", {
       class: "ruleview-namecontainer"
     });
 
@@ -2601,8 +2699,8 @@ TextPropertyEditor.prototype = {
     // Create a span that will hold the property and semicolon.
     // Use this span to create a slightly larger click target
     // for the value.
-    let propertyContainer = createChild(this.element, "span", {
-      class: "ruleview-propertycontainer"
+    let propertyContainer = createChild(this.container, "span", {
+      class: "ruleview-propertyvaluecontainer"
     });
 
 
@@ -2635,7 +2733,7 @@ TextPropertyEditor.prototype = {
 
     appendText(propertyContainer, ";");
 
-    this.warning = createChild(this.element, "div", {
+    this.warning = createChild(this.container, "div", {
       class: "ruleview-warning",
       hidden: "",
       title: CssLogic.l10n("rule.warning.title"),
@@ -2928,6 +3026,10 @@ TextPropertyEditor.prototype = {
       });
 
       appendText(li, ";");
+
+      // Store the computed style element for easy access when highlighting
+      // styles
+      computed.element = li;
     }
 
     // Show or hide the expander as needed.
@@ -2953,16 +3055,47 @@ TextPropertyEditor.prototype = {
   },
 
   /**
-   * Handles clicks on the computed property expander.
+   * Handles clicks on the computed property expander. If the computed list is
+   * open due to user expanding or style filtering, collapse the computed list
+   * and close the expander. Otherwise, add user-open attribute which is used to
+   * expand the computed list and tracks whether or not the computed list is
+   * expanded by manually by the user.
    */
   _onExpandClicked: function(aEvent) {
-    this.computed.classList.toggle("styleinspector-open");
-    if (this.computed.classList.contains("styleinspector-open")) {
-      this.expander.setAttribute("open", "true");
+    if (this.computed.hasAttribute("filter-open") ||
+        this.computed.hasAttribute("user-open")) {
+      this.expander.removeAttribute("open");
+      this.computed.removeAttribute("filter-open");
+      this.computed.removeAttribute("user-open");
     } else {
+      this.expander.setAttribute("open", "true");
+      this.computed.setAttribute("user-open", "");
+    }
+
+    aEvent.stopPropagation();
+  },
+
+  /**
+   * Expands the computed list when a computed property is matched by the style
+   * filtering. The filter-open attribute is used to track whether or not the
+   * computed list was toggled opened by the filter.
+   */
+  expandForFilter: function() {
+    if (!this.computed.hasAttribute("user-open")) {
+      this.expander.setAttribute("open", "true");
+      this.computed.setAttribute("filter-open", "");
+    }
+  },
+
+  /**
+   * Collapses the computed list that was expanded by style filtering.
+   */
+  collapseForFilter: function() {
+    this.computed.removeAttribute("filter-open");
+
+    if (!this.computed.hasAttribute("user-open")) {
       this.expander.removeAttribute("open");
     }
-    aEvent.stopPropagation();
   },
 
   /**

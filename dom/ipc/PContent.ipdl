@@ -505,6 +505,10 @@ child:
 
     async UpdateServiceWorkerRegistrations();
 
+    async RemoveServiceWorkerRegistrationsForDomain(nsString aDomain);
+
+    async RemoveServiceWorkerRegistrations();
+
     async DataStoreNotify(uint32_t aAppId, nsString aName,
                           nsString aManifestURL);
 
@@ -573,6 +577,9 @@ child:
                      int32_t mountGeneration, bool isMediaPresent,
                      bool isSharing, bool isFormatting, bool isFake,
                      bool isUnmounting, bool isRemovable, bool isHotSwappable);
+
+    // Notify volume is removed.
+    VolumeRemoved(nsString fsName);
 
     // Ask the Nuwa process to create a new child process.
     NuwaFork();
@@ -898,6 +905,7 @@ parent:
     // called by the child (test code only) to propagate volume changes to the parent
     async CreateFakeVolume(nsString fsName, nsString mountPoint);
     async SetFakeVolumeState(nsString fsName, int32_t fsState);
+    async RemoveFakeVolume(nsString fsName);
 
     sync KeywordToURI(nsCString keyword)
         returns (nsString providerName, OptionalInputStreamParams postData, OptionalURIParams uri);

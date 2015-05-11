@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -82,9 +82,9 @@ public:
                                      BluetoothReplyRunnable* aRunnable) override;
 #endif
 
-  virtual nsresult StartDiscoveryInternal(BluetoothReplyRunnable* aRunnable) override;
+  virtual void StartDiscoveryInternal(BluetoothReplyRunnable* aRunnable) override;
 
-  virtual nsresult StopDiscoveryInternal(BluetoothReplyRunnable* aRunnable) override;
+  virtual void StopDiscoveryInternal(BluetoothReplyRunnable* aRunnable) override;
 
   virtual nsresult
   SetProperty(BluetoothObjectType aType,
@@ -234,6 +234,14 @@ public:
                    const nsAString& aMessage) override;
 
 #ifdef MOZ_B2G_BT_API_V2
+  virtual void
+  StartLeScanInternal(const nsTArray<nsString>& aServiceUuids,
+                      BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  StopLeScanInternal(const nsAString& aAppUuid,
+                     BluetoothReplyRunnable* aRunnable) override;
+
   virtual void
   ConnectGattClientInternal(const nsAString& aAppUuid,
                             const nsAString& aDeviceAddress,

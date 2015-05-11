@@ -82,12 +82,18 @@ let gEditItemOverlay = {
 
   // Check if the pane is initialized to show only read-only fields.
   get readOnly() {
-    // Bug 1120314 - Folder shortcuts are read-only due to some quirky implementation
-    // details (the most important being the "smart" semantics of node.title).
-    return (!this.initialized ||
-            (!this._paneInfo.visibleRows.has("tagsRow") &&
-             (this._paneInfo.isFolderShortcut ||
-              this._paneInfo.isParentReadOnly)));
+    // TODO (Bug 1120314): Folder shortcuts are currently read-only due to some
+    // quirky implementation details (the most important being the "smart"
+    // semantics of node.title that makes hard to edit the right entry).
+    // This pane is read-only if:
+    //  * the panel is not initialized
+    //  * the node is a folder shortcut
+    //  * the node is not bookmarked
+    //  * the node is child of a read-only container and is not a bookmarked URI
+    return !this.initialized ||
+           this._paneInfo.isFolderShortcut ||
+           !this._paneInfo.isItem ||
+           (this._paneInfo.isParentReadOnly && !this._paneInfo.isBookmark);
   },
 
   // the first field which was edited after this panel was initialized for
@@ -184,19 +190,25 @@ let gEditItemOverlay = {
       this._namePicker.readOnly = this.readOnly;
     }
 
-    if (showOrCollapse("locationRow", isURI, "location")) {
+    // In some cases we want to hide the location field, since it's not
+    // human-readable, but we still want to initialize it.
+    showOrCollapse("locationRow", isURI, "location");
+    if (isURI) {
       this._initLocationField();
-      this._locationField.readOnly = !this._paneInfo.isItem;
+      this._locationField.readOnly = !this.readOnly;
     }
 
-    if (showOrCollapse("descriptionRow",
-                       this._paneInfo.isItem && !this.readOnly,
+    // hide the description field for
+    if (showOrCollapse("descriptionRow", isItem && !this.readOnly,
                        "description")) {
       this._initDescriptionField();
+      this._descriptionField.readOnly = this.readOnly;
     }
 
-    if (showOrCollapse("keywordRow", isBookmark, "keyword"))
+    if (showOrCollapse("keywordRow", isBookmark, "keyword")) {
       this._initKeywordField();
+      this._keywordField.readOnly = this.readOnly;
+    }
 
     // Collapse the tag selector if the item does not accept tags.
     if (showOrCollapse("tagsRow", isURI || bulkTagging, "tags"))
@@ -355,7 +367,7 @@ let gEditItemOverlay = {
 
     // Hide the folders-separator if no folder is annotated as recently-used
     this._element("foldersSeparator").hidden = (menupopup.childNodes.length <= 6);
-    this._folderMenuList.disabled = this._readOnly;
+    this._folderMenuList.disabled = this.readOnly;
   },
 
   QueryInterface:
@@ -387,7 +399,7 @@ let gEditItemOverlay = {
   },
 
   onTagsFieldChange() {
-    if (!this.readOnly) {
+    if (this._paneInfo.isURI || this._paneInfo.bulkTagging) {
       this._updateTags().then(
         anyChanges => {
           if (anyChanges)
@@ -468,10 +480,14 @@ let gEditItemOverlay = {
     if (!anyChanges)
       return false;
 
+    // The panel could have been closed in the meanwhile.
+    if (!this._paneInfo)
+      return false;
+
     // Ensure the tagsField is in sync, clean it up from empty tags
     currentTags = this._paneInfo.bulkTagging ?
                     this._getCommonTags() :
-                    PlacesUtils.tagging.getTagsForURI(this._uri);
+                    PlacesUtils.tagging.getTagsForURI(this._paneInfo.uri);
     this._initTextField(this._tagsField, currentTags.join(", "), false);
     return true;
   }),
@@ -505,7 +521,7 @@ let gEditItemOverlay = {
     // Here we update either the item title or its cached static title
     let newTitle = this._namePicker.value;
     if (!newTitle &&
-        PlacesUtils.bookmarks.getFolderIdForItem(itemId) == PlacesUtils.tagsFolderId) {
+        PlacesUtils.bookmarks.getFolderIdForItem(this._paneInfo.itemId) == PlacesUtils.tagsFolderId) {
       // We don't allow setting an empty title for a tag, restore the old one.
       this._initNamePicker();
     }
@@ -656,17 +672,17 @@ let gEditItemOverlay = {
    *        The identifier of the bookmarks folder.
    */
   _getFolderMenuItem(aFolderId) {
-    let menuPopup = this._folderMenuList.menupopup;
+    let menupopup = this._folderMenuList.menupopup;
     let menuItem = Array.prototype.find.call(
-      menuPopup.childNodes, menuItem => menuItem.folderId === aFolderId);
+      menupopup.childNodes, menuItem => menuItem.folderId === aFolderId);
     if (menuItem !== undefined)
       return menuItem;
 
     // 3 special folders + separator + folder-items-count limit
     if (menupopup.childNodes.length == 4 + MAX_FOLDER_ITEM_IN_MENU_LIST)
-      menupopup.removeChild(menuPopup.lastChild);
+      menupopup.removeChild(menupopup.lastChild);
 
-    return this._appendFolderItemToMenupopup(menuPopup, aFolderId);
+    return this._appendFolderItemToMenupopup(menupopup, aFolderId);
   },
 
   onFolderMenuListCommand(aEvent) {
@@ -688,7 +704,8 @@ let gEditItemOverlay = {
 
     // Move the item
     let containerId = this._getFolderIdFromMenuList();
-    if (PlacesUtils.bookmarks.getFolderIdForItem(this._paneInfo.itemId) != containerId) {
+    if (PlacesUtils.bookmarks.getFolderIdForItem(this._paneInfo.itemId) != containerId &&
+        this._paneInfo.itemId != containerId) {
       if (PlacesUIUtils.useAsyncTransactions) {
         Task.spawn(function* () {
           let newParentGuid = yield PlacesUtils.promiseItemGuid(containerId);
@@ -708,7 +725,7 @@ let gEditItemOverlay = {
       if (containerId != PlacesUtils.unfiledBookmarksFolderId &&
           containerId != PlacesUtils.toolbarFolderId &&
           containerId != PlacesUtils.bookmarksMenuFolderId) {
-        this._markFolderAsRecentlyUsed(container)
+        this._markFolderAsRecentlyUsed(containerId)
             .catch(Components.utils.reportError);
       }
     }
@@ -718,8 +735,8 @@ let gEditItemOverlay = {
     if (!folderTreeRow.collapsed) {
       var selectedNode = this._folderTree.selectedNode;
       if (!selectedNode ||
-          PlacesUtils.getConcreteItemId(selectedNode) != container)
-        this._folderTree.selectItems([container]);
+          PlacesUtils.getConcreteItemId(selectedNode) != containerId)
+        this._folderTree.selectItems([containerId]);
     }
   },
 
@@ -750,13 +767,15 @@ let gEditItemOverlay = {
       let annotation = this._getLastUsedAnnotationObject(false);
       while (this._recentFolders.length > MAX_FOLDER_ITEM_IN_MENU_LIST) {
         let folderId = this._recentFolders.pop().folderId;
-        let annoTxn = new PlacesSetItemAnnotationTransaction(folderId, anno);
+        let annoTxn = new PlacesSetItemAnnotationTransaction(folderId,
+                                                             annotation);
         txns.push(annoTxn);
       }
 
       // Mark folder as recently used
       annotation = this._getLastUsedAnnotationObject(true);
-      let annoTxn = new PlacesSetItemAnnotationTransaction(aFolderId, anno);
+      let annoTxn = new PlacesSetItemAnnotationTransaction(aFolderId,
+                                                           annotation);
       txns.push(annoTxn);
 
       let aggregate =
@@ -983,7 +1002,7 @@ let gEditItemOverlay = {
       return;
     if (aItemId == this._paneInfo.itemId) {
       this._paneInfo.title = aNewTitle;
-      this._initTextField(this._namePicker);
+      this._initTextField(this._namePicker, aNewTitle);
     }
     else if (this._paneInfo.visibleRows.has("folderRow")) {
       // If the title of a folder which is listed within the folders
@@ -991,7 +1010,7 @@ let gEditItemOverlay = {
       // representing element.
       let menupopup = this._folderMenuList.menupopup;
       for (menuitem of menupopup.childNodes) {
-        if ("folderId" in menuItem && menuItem.folderId == aItemId) {
+        if ("folderId" in menuitem && menuitem.folderId == aItemId) {
           menuitem.label = aNewTitle;
           break;
         }
@@ -1002,16 +1021,18 @@ let gEditItemOverlay = {
   // nsINavBookmarkObserver
   onItemChanged(aItemId, aProperty, aIsAnnotationProperty, aValue,
                 aLastModified, aItemType) {
-    if (aProperty == "tags" && this._paneInfo.visibleRows.has("tagsRow"))
+    if (aProperty == "tags" && this._paneInfo.visibleRows.has("tagsRow")) {
       this._onTagsChange(aItemId);
-    else if (!this._paneInfo.isItem || this._paneInfo.itemId != aItemId)
+    }
+    else if (aProperty == "title" && this._paneInfo.isItem) {
+      // This also updates titles of folders in the folder menu list.
+      this._onItemTitleChange(aItemId, aValue);
+    }
+    else if (!this._paneInfo.isItem || this._paneInfo.itemId != aItemId) {
       return;
+    }
 
     switch (aProperty) {
-    case "title":
-      if (this._paneInfo.isItem)
-        this._onItemTitleChange(aItemId, aValue);
-      break;
     case "uri":
       let newURI = NetUtil.newURI(aValue);
       if (!newURI.equals(this._paneInfo.uri)) {

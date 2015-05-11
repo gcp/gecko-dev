@@ -839,7 +839,6 @@ HashableValue
 HashableValue::mark(JSTracer* trc) const
 {
     HashableValue hv(*this);
-    JS::AutoOriginalTraceLocation reloc(trc, (void**)this);
     TraceEdge(trc, &hv.value, "key");
     return hv;
 }
@@ -1133,7 +1132,7 @@ class OrderedHashTableRef : public gc::BufferableRef
   public:
     explicit OrderedHashTableRef(TableType* t, const Value& k) : table(t), key(k) {}
 
-    void mark(JSTracer* trc) {
+    void trace(JSTracer* trc) override {
         MOZ_ASSERT(UnbarrieredHashPolicy::hash(key) ==
                    HashableValue::Hasher::hash(*reinterpret_cast<HashableValue*>(&key)));
         Value prior = key;

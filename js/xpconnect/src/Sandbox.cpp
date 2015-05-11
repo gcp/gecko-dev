@@ -49,7 +49,20 @@ using namespace xpc;
 using mozilla::dom::DestroyProtoAndIfaceCache;
 using mozilla::dom::indexedDB::IndexedDatabaseManager;
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(SandboxPrivate)
+NS_IMPL_CYCLE_COLLECTION_CLASS(SandboxPrivate)
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(SandboxPrivate)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
+  tmp->UnlinkHostObjectURIs();
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(SandboxPrivate)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+  tmp->TraverseHostObjectURIs(cb);
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(SandboxPrivate)
+
 NS_IMPL_CYCLE_COLLECTING_ADDREF(SandboxPrivate)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(SandboxPrivate)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SandboxPrivate)
@@ -945,7 +958,11 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
                 return NS_ERROR_XPC_UNEXPECTED;
 
             // Now check what sort of thing we've got in |proto|
-            JSObject* unwrappedProto = js::UncheckedUnwrap(options.proto, false);
+            JSObject* unwrappedProto = js::CheckedUnwrap(options.proto, false);
+            if (!unwrappedProto) {
+                JS_ReportError(cx, "Sandbox must subsume sandboxPrototype");
+                return NS_ERROR_INVALID_ARG;
+            }
             const js::Class* unwrappedClass = js::GetObjectClass(unwrappedProto);
             if (IS_WN_CLASS(unwrappedClass) ||
                 mozilla::dom::IsDOMClass(Jsvalify(unwrappedClass))) {

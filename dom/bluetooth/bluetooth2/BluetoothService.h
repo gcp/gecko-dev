@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -176,19 +176,29 @@ public:
 
   /**
    * Stop device discovery (platform specific implementation)
-   *
-   * @return NS_OK if discovery stopped correctly, false otherwise
    */
-  virtual nsresult
+  virtual void
   StopDiscoveryInternal(BluetoothReplyRunnable* aRunnable) = 0;
 
   /**
    * Start device discovery (platform specific implementation)
-   *
-   * @return NS_OK if discovery stopped correctly, false otherwise
    */
-  virtual nsresult
+  virtual void
   StartDiscoveryInternal(BluetoothReplyRunnable* aRunnable) = 0;
+
+  /**
+   * Stops an ongoing Bluetooth LE device scan.
+   */
+  virtual void
+  StopLeScanInternal(const nsAString& aScanUuid,
+                     BluetoothReplyRunnable* aRunnable) = 0;
+
+  /**
+   * Starts a Bluetooth LE device scan.
+   */
+  virtual void
+  StartLeScanInternal(const nsTArray<nsString>& aServiceUuids,
+                      BluetoothReplyRunnable* aRunnable) = 0;
 
   /**
    * Set a property for the specified object

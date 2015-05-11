@@ -328,6 +328,7 @@ pref("media.eme.apiVisible", true);
 pref("media.video-queue.default-size", 3);
 
 // optimize images' memory usage
+pref("image.downscale-during-decode.enabled", true);
 pref("image.decode-only-on-draw.enabled", false);
 pref("image.mem.allow_locking_in_content_processes", true);
 // Limit the surface cache to 1/8 of main memory or 128MB, whichever is smaller.
@@ -1131,6 +1132,10 @@ pref("dom.requestSync.enabled", true);
 
 // Resample touch events on b2g
 pref("gfx.touch.resample", true);
+
+// Comma separated list of activity names that can only be provided by
+// the system app in dev mode.
+pref("dom.activities.developer_mode_only", "import-app");
 
 // mulet apparently loads firefox.js as well as b2g.js, so we have to explicitly
 // disable serviceworkers here to get them disabled in mulet.

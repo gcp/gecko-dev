@@ -90,8 +90,16 @@ const DIRECTORY_FRECENCY = 1000;
 // The frecency of a suggested link
 const SUGGESTED_FRECENCY = Infinity;
 
-// Default number of times to show a link
-const DEFAULT_FREQUENCY_CAP = 5;
+// The filename where frequency cap data stored locally
+const FREQUENCY_CAP_FILE = "frequencyCap.json";
+
+// Default settings for daily and total frequency caps
+const DEFAULT_DAILY_FREQUENCY_CAP = 3;
+const DEFAULT_TOTAL_FREQUENCY_CAP = 10;
+
+// Default timeDelta to prune unused frequency cap objects
+// currently set to 10 days in milliseconds
+const DEFAULT_PRUNE_TIME_DELTA = 10*24*60*60*1000;
 
 // The min number of visible (not blocked) history tiles to have before showing suggested tiles
 const MIN_VISIBLE_HISTORY_TILES = 8;
@@ -125,14 +133,14 @@ let DirectoryLinksProvider = {
   _enhancedLinks: new Map(),
 
   /**
-   * A mapping from site to remaining number of views
-   */
-  _frequencyCaps: new Map(),
-
-  /**
    * A mapping from site to a list of suggested link objects
    */
   _suggestedLinks: new Map(),
+
+  /**
+   * Frequency Cap object - maintains daily and total tile counts, and frequency cap settings
+   */
+  _frequencyCaps: {},
 
   /**
    * A set of top sites that we can provide suggested links for
@@ -250,6 +258,7 @@ let DirectoryLinksProvider = {
     for (let suggestedSite of link.frecent_sites) {
       let suggestedMap = this._suggestedLinks.get(suggestedSite) || new Map();
       suggestedMap.set(link.url, link);
+      this._setupStartEndTime(link);
       this._suggestedLinks.set(suggestedSite, suggestedMap);
     }
   },
@@ -366,6 +375,97 @@ let DirectoryLinksProvider = {
   },
 
   /**
+   * Translates link.time_limits to UTC miliseconds and sets
+   * link.startTime and link.endTime properties in link object
+   */
+  _setupStartEndTime: function DirectoryLinksProvider_setupStartEndTime(link) {
+    // set start/end limits. Use ISO_8601 format: '2014-01-10T20:20:20.600Z'
+    // (details here http://en.wikipedia.org/wiki/ISO_8601)
+    // Note that if timezone is missing, FX will interpret as local time
+    // meaning that the server can sepecify any time, but if the capmaign
+    // needs to start at same time across multiple timezones, the server
+    // omits timezone indicator
+    if (!link.time_limits) {
+      return;
+    }
+
+    let parsedTime;
+    if (link.time_limits.start) {
+      parsedTime = Date.parse(link.time_limits.start);
+      if (parsedTime && !isNaN(parsedTime)) {
+        link.startTime = parsedTime;
+      }
+    }
+    if (link.time_limits.end) {
+      parsedTime = Date.parse(link.time_limits.end);
+      if (parsedTime && !isNaN(parsedTime)) {
+        link.endTime = parsedTime;
+      }
+    }
+  },
+
+  /*
+   * Handles campaign timeout
+   */
+  _onCampaignTimeout: function DirectoryLinksProvider_onCampaignTimeout() {
+    // _campaignTimeoutID is invalid here, so just set it to null
+    this._campaignTimeoutID = null;
+    this._updateSuggestedTile();
+  },
+
+  /*
+   * Clears capmpaign timeout
+   */
+  _clearCampaignTimeout: function DirectoryLinksProvider_clearCampaignTimeout() {
+    if (this._campaignTimeoutID) {
+      clearTimeout(this._campaignTimeoutID);
+      this._campaignTimeoutID = null;
+    }
+  },
+
+  /**
+   * Setup capmpaign timeout to recompute suggested tiles upon
+   * reaching soonest start or end time for the campaign
+   * @param timeout in milliseconds
+   */
+  _setupCampaignTimeCheck: function DirectoryLinksProvider_setupCampaignTimeCheck(timeout) {
+    // sanity check
+    if (!timeout || timeout <= 0) {
+      return;
+    }
+    this._clearCampaignTimeout();
+    // setup next timeout
+    this._campaignTimeoutID = setTimeout(this._onCampaignTimeout.bind(this), timeout);
+  },
+
+  /**
+   * Test link for campaign time limits: checks if link falls within start/end time
+   * and returns an object containing a use flag and the timeoutDate milliseconds
+   * when the link has to be re-checked for campaign start-ready or end-reach
+   * @param link
+   * @return object {use: true or false, timeoutDate: milliseconds or null}
+   */
+  _testLinkForCampaignTimeLimits: function DirectoryLinksProvider_testLinkForCampaignTimeLimits(link) {
+    let currentTime = Date.now();
+    // test for start time first
+    if (link.startTime && link.startTime > currentTime) {
+      // not yet ready for start
+      return {use: false, timeoutDate: link.startTime};
+    }
+    // otherwise check for end time
+    if (link.endTime) {
+      // passed end time
+      if (link.endTime <= currentTime) {
+        return {use: false};
+      }
+      // otherwise link is still ok, but we need to set timeoutDate
+      return {use: true, timeoutDate: link.endTime};
+    }
+    // if we are here, the link is ok and no timeoutDate needed
+    return {use: true};
+  },
+
+  /**
    * Report some action on a newtab page (view, click)
    * @param sites Array of sites shown on newtab page
    * @param action String of the behavior to report
@@ -378,7 +478,7 @@ let DirectoryLinksProvider = {
       sites.slice(0, triggeringSiteIndex + 1).forEach(site => {
         let {targetedSite, url} = site.link;
         if (targetedSite) {
-          this._decreaseFrequencyCap(url, 1);
+          this._addFrequencyCapView(url);
         }
       });
     }
@@ -386,7 +486,7 @@ let DirectoryLinksProvider = {
     else if (action == "click") {
       let {targetedSite, url} = sites[triggeringSiteIndex].link;
       if (targetedSite) {
-        this._decreaseFrequencyCap(url, DEFAULT_FREQUENCY_CAP);
+        this._setFrequencyCapClick(url);
       }
     }
 
@@ -441,8 +541,12 @@ let DirectoryLinksProvider = {
     ping.open("POST", pingEndPoint + (action == "view" ? "view" : "click"));
     ping.send(JSON.stringify(data));
 
-    // Use this as an opportunity to potentially fetch new links
-    return this._fetchAndCacheLinksIfNecessary();
+    return Task.spawn(function* () {
+      // since we updated views/clicks we need write _frequencyCaps to disk
+      yield this._writeFrequencyCapFile();
+      // Use this as an opportunity to potentially fetch new links
+      yield this._fetchAndCacheLinksIfNecessary();
+    }.bind(this));
   },
 
   /**
@@ -488,8 +592,8 @@ let DirectoryLinksProvider = {
     this._readDirectoryLinksFile().then(rawLinks => {
       // Reset the cache of suggested tiles and enhanced images for this new set of links
       this._enhancedLinks.clear();
-      this._frequencyCaps.clear();
       this._suggestedLinks.clear();
+      this._clearCampaignTimeout();
 
       let validityFilter = function(link) {
         // Make sure the link url is allowed and images too if they exist
@@ -511,7 +615,7 @@ let DirectoryLinksProvider = {
         // We cache suggested tiles here but do not push any of them in the links list yet.
         // The decision for which suggested tile to include will be made separately.
         this._cacheSuggestedLinks(link);
-        this._frequencyCaps.set(link.url, DEFAULT_FREQUENCY_CAP);
+        this._updateFrequencyCapSettings(link);
       });
 
       rawLinks.enhanced.filter(validityFilter).forEach((link, position) => {
@@ -532,6 +636,11 @@ let DirectoryLinksProvider = {
       // Allow for one link suggestion on top of the default directory links
       this.maxNumLinks = links.length + 1;
 
+      // prune frequency caps of outdated urls
+      this._pruneFrequencyCapUrls();
+      // write frequency caps object to disk asynchronously
+      this._writeFrequencyCapFile();
+
       return links;
     }).catch(ex => {
       Cu.reportError(ex);
@@ -549,6 +658,9 @@ let DirectoryLinksProvider = {
     this._directoryFilePath = OS.Path.join(OS.Constants.Path.localProfileDir, DIRECTORY_LINKS_FILE);
     this._lastDownloadMS = 0;
 
+    // setup frequency cap file path
+    this._frequencyCapFilePath = OS.Path.join(OS.Constants.Path.localProfileDir, FREQUENCY_CAP_FILE);
+
     NewTabUtils.placesProvider.addObserver(this);
     NewTabUtils.links.addObserver(this);
 
@@ -559,6 +671,8 @@ let DirectoryLinksProvider = {
         let fileInfo = yield OS.File.stat(this._directoryFilePath);
         this._lastDownloadMS = Date.parse(fileInfo.lastModificationDate);
       }
+      // read frequency cap file
+      yield this._readFrequencyCapFile();
       // fetch directory on startup without force
       yield this._fetchAndCacheLinksIfNecessary();
     }.bind(this));
@@ -602,6 +716,22 @@ let DirectoryLinksProvider = {
     });
   },
 
+  onDeleteURI: function(aProvider, aLink) {
+    let {url} = aLink;
+    // remove clicked flag for that url and
+    // call observer upon disk write completion
+    this._removeTileClick(url).then(() => {
+      this._callObservers("onDeleteURI", url);
+    });
+  },
+
+  onClearHistory: function() {
+    // remove all clicked flags and call observers upon file write
+    this._removeAllTileClicks().then(() => {
+      this._callObservers("onClearHistory");
+    });
+  },
+
   onLinkChanged: function (aProvider, aLink) {
     // Make sure NewTabUtils.links handles the notification first.
     setTimeout(() => {
@@ -616,21 +746,6 @@ let DirectoryLinksProvider = {
     setTimeout(() => {
       this._handleManyLinksChanged();
     }, 0);
-  },
-
-  /**
-   * Record for a url that some number of views have been used
-   * @param url String url of the suggested link
-   * @param amount Number of equivalent views to decrease
-   */
-  _decreaseFrequencyCap(url, amount) {
-    let remainingViews = this._frequencyCaps.get(url) - amount;
-    this._frequencyCaps.set(url, remainingViews);
-
-    // Reached the number of views, so pick a new one.
-    if (remainingViews <= 0) {
-      this._updateSuggestedTile();
-    }
   },
 
   _getCurrentTopSiteCount: function() {
@@ -705,13 +820,26 @@ let DirectoryLinksProvider = {
     // want to count each suggested link once (based on url), thus possibleLinks is a map
     // from url to suggestedLink. Thus, each link has an equal chance of being chosen at
     // random from flattenedLinks if it appears only once.
+    let nextTimeout;
     let possibleLinks = new Map();
     let targetedSites = new Map();
     this._topSitesWithSuggestedLinks.forEach(topSiteWithSuggestedLink => {
       let suggestedLinksMap = this._suggestedLinks.get(topSiteWithSuggestedLink);
       suggestedLinksMap.forEach((suggestedLink, url) => {
         // Skip this link if we've shown it too many times already
-        if (this._frequencyCaps.get(url) <= 0) {
+        if (!this._testFrequencyCapLimits(url)) {
+          return;
+        }
+
+        // as we iterate suggestedLinks, check for campaign start/end
+        // time limits, and set nextTimeout to the closest timestamp
+        let {use, timeoutDate} = this._testLinkForCampaignTimeLimits(suggestedLink);
+        // update nextTimeout is necessary
+        if (timeoutDate && (!nextTimeout || nextTimeout > timeoutDate)) {
+          nextTimeout = timeoutDate;
+        }
+        // Skip link if it falls outside campaign time limits
+        if (!use) {
           return;
         }
 
@@ -725,6 +853,11 @@ let DirectoryLinksProvider = {
         targetedSites.get(url).push(topSiteWithSuggestedLink);
       })
     });
+
+    // setup timeout check for starting or ending campaigns
+    if (nextTimeout) {
+      this._setupCampaignTimeCheck(nextTimeout - Date.now());
+    }
 
     // We might have run out of possible links to show
     let numLinks = possibleLinks.size;
@@ -750,6 +883,209 @@ let DirectoryLinksProvider = {
     }, chosenSuggestedLink));
     return chosenSuggestedLink;
    },
+
+  /**
+   * Reads json file, parses its content, and returns resulting object
+   * @param json file path
+   * @param json object to return in case file read or parse fails
+   * @return a promise resolved to a valid object or undefined upon error
+   */
+  _readJsonFile: Task.async(function* (filePath, nullObject) {
+    let jsonObj;
+    try {
+      let binaryData = yield OS.File.read(filePath);
+      let json = gTextDecoder.decode(binaryData);
+      jsonObj = JSON.parse(json);
+    }
+    catch (e) {}
+    return jsonObj || nullObject;
+  }),
+
+  /**
+   * Loads frequency cap object from file and parses its content
+   * @return a promise resolved upon load completion
+   *         on error or non-exstent file _frequencyCaps is set to empty object
+   */
+  _readFrequencyCapFile: Task.async(function* () {
+    // set _frequencyCaps object to file's content or empty object
+    this._frequencyCaps = yield this._readJsonFile(this._frequencyCapFilePath, {});
+  }),
+
+  /**
+   * Saves frequency cap object to file
+   * @return a promise resolved upon file i/o completion
+   */
+  _writeFrequencyCapFile: function DirectoryLinksProvider_writeFrequencyCapFile() {
+    let json = JSON.stringify(this._frequencyCaps || {});
+    return OS.File.writeAtomic(this._frequencyCapFilePath, json, {tmpPath: this._frequencyCapFilePath + ".tmp"});
+  },
+
+  /**
+   * Clears frequency cap object and writes empty json to file
+   * @return a promise resolved upon file i/o completion
+   */
+  _clearFrequencyCap: function DirectoryLinksProvider_clearFrequencyCap() {
+    this._frequencyCaps = {};
+    return this._writeFrequencyCapFile();
+  },
+
+  /**
+   * updates frequency cap configuration for a link
+   */
+  _updateFrequencyCapSettings: function DirectoryLinksProvider_updateFrequencyCapSettings(link) {
+    let capsObject = this._frequencyCaps[link.url];
+    if (!capsObject) {
+      // create an object with empty counts
+      capsObject = {
+        dailyViews: 0,
+        totalViews: 0,
+        lastShownDate: 0,
+      };
+      this._frequencyCaps[link.url] = capsObject;
+    }
+    // set last updated timestamp
+    capsObject.lastUpdated = Date.now();
+    // check for link configuration
+    if (link.frequency_caps) {
+      capsObject.dailyCap = link.frequency_caps.daily || DEFAULT_DAILY_FREQUENCY_CAP;
+      capsObject.totalCap = link.frequency_caps.total || DEFAULT_TOTAL_FREQUENCY_CAP;
+    }
+    else {
+      // fallback to defaults
+      capsObject.dailyCap = DEFAULT_DAILY_FREQUENCY_CAP;
+      capsObject.totalCap = DEFAULT_TOTAL_FREQUENCY_CAP;
+    }
+  },
+
+  /**
+   * Prunes frequency cap objects for outdated links
+   * @param timeDetla milliseconds
+   *        all cap objects with lastUpdated less than (now() - timeDelta)
+   *        will be removed. This is done to remove frequency cap objects
+   *        for unused tile urls
+   */
+  _pruneFrequencyCapUrls: function DirectoryLinksProvider_pruneFrequencyCapUrls(timeDelta = DEFAULT_PRUNE_TIME_DELTA) {
+    let timeThreshold = Date.now() - timeDelta;
+    Object.keys(this._frequencyCaps).forEach(url => {
+      if (this._frequencyCaps[url].lastUpdated <= timeThreshold) {
+        delete this._frequencyCaps[url];
+      }
+    });
+  },
+
+  /**
+   * Checks if supplied timestamp happened today
+   * @param timestamp in milliseconds
+   * @return true if the timestamp was made today, false otherwise
+   */
+  _wasToday: function DirectoryLinksProvider_wasToday(timestamp) {
+    let showOn = new Date(timestamp);
+    let today = new Date();
+    // call timestamps identical if both day and month are same
+    return showOn.getDate() == today.getDate() &&
+           showOn.getMonth() == today.getMonth() &&
+           showOn.getYear() == today.getYear();
+  },
+
+  /**
+   * adds some number of views for a url
+   * @param url String url of the suggested link
+   */
+  _addFrequencyCapView: function DirectoryLinksProvider_addFrequencyCapView(url) {
+    let capObject = this._frequencyCaps[url];
+    // sanity check
+    if (!capObject) {
+      return;
+    }
+
+    // if the day is new: reset the daily counter and lastShownDate
+    if (!this._wasToday(capObject.lastShownDate)) {
+      capObject.dailyViews = 0;
+      // update lastShownDate
+      capObject.lastShownDate = Date.now();
+    }
+
+    // bump both dialy and total counters
+    capObject.totalViews++;
+    capObject.dailyViews++;
+
+    // if any of the caps is reached - update suggested tiles
+    if (capObject.totalViews >= capObject.totalCap ||
+        capObject.dailyViews >= capObject.dailyCap) {
+      this._updateSuggestedTile();
+    }
+  },
+
+  /**
+   * Sets clicked flag for link url
+   * @param url String url of the suggested link
+   */
+  _setFrequencyCapClick: function DirectoryLinksProvider_reportFrequencyCapClick(url) {
+    let capObject = this._frequencyCaps[url];
+    // sanity check
+    if (!capObject) {
+      return;
+    }
+    capObject.clicked = true;
+    // and update suggested tiles, since current tile became invalid
+    this._updateSuggestedTile();
+  },
+
+  /**
+   * Tests frequency cap limits for link url
+   * @param url String url of the suggested link
+   * @return true if link is viewable, false otherwise
+   */
+  _testFrequencyCapLimits: function DirectoryLinksProvider_testFrequencyCapLimits(url) {
+    let capObject = this._frequencyCaps[url];
+    // sanity check: if url is missing - do not show this tile
+    if (!capObject) {
+      return false;
+    }
+
+    // check for clicked set or total views reached
+    if (capObject.clicked || capObject.totalViews >= capObject.totalCap) {
+      return false;
+    }
+
+    // otherwise check if link is over daily views limit
+    if (this._wasToday(capObject.lastShownDate) &&
+        capObject.dailyViews >= capObject.dailyCap) {
+      return false;
+    }
+
+    // we passed all cap tests: return true
+    return true;
+  },
+
+  /**
+   * Removes clicked flag from frequency cap entry for tile landing url
+   * @param url String url of the suggested link
+   * @return promise resolved upon disk write completion
+   */
+  _removeTileClick: function DirectoryLinksProvider_removeTileClick(url = "") {
+    // remove trailing slash, to accomodate Places sending site urls ending with '/'
+    let noTrailingSlashUrl = url.replace(/\/$/,"");
+    let capObject = this._frequencyCaps[url] || this._frequencyCaps[noTrailingSlashUrl];
+    // return resolved promise if capObject is not found
+    if (!capObject) {
+      return Promise.resolve();;
+    }
+    // otherwise remove clicked flag
+    delete capObject.clicked;
+    return this._writeFrequencyCapFile();
+  },
+
+  /**
+   * Removes all clicked flags from frequency cap object
+   * @return promise resolved upon disk write completion
+   */
+  _removeAllTileClicks: function DirectoryLinksProvider_removeAllTileClicks() {
+    Object.keys(this._frequencyCaps).forEach(url => {
+      delete this._frequencyCaps[url].clicked;
+    });
+    return this._writeFrequencyCapFile();
+  },
 
   /**
    * Return the object to its pre-init state

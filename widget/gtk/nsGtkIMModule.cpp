@@ -18,7 +18,6 @@
 using namespace mozilla;
 using namespace mozilla::widget;
 
-#ifdef PR_LOGGING
 PRLogModuleInfo* gGtkIMLog = nullptr;
 
 static const char*
@@ -75,7 +74,6 @@ GetEventType(GdkEventKey* aKeyEvent)
             return "Unknown";
     }
 }
-#endif
 
 const static bool kUseSimpleContextDefault = MOZ_WIDGET_GTK == 2;
 
@@ -96,11 +94,9 @@ nsGtkIMModule::nsGtkIMModule(nsWindow* aOwnerWindow)
     , mIsIMFocused(false)
     , mIsDeletingSurrounding(false)
 {
-#ifdef PR_LOGGING
     if (!gGtkIMLog) {
         gGtkIMLog = PR_NewLogModule("nsGtkIMModuleWidgets");
     }
-#endif
     static bool sFirstInstance = true;
     if (sFirstInstance) {
         sFirstInstance = false;
@@ -736,6 +732,57 @@ nsGtkIMModule::OnSelectionChange(nsWindow* aCaller)
              "mLastFocusedWindow=%p",
              mLastFocusedWindow));
         return;
+    }
+
+    // The focused editor might have placeholder text with normal text node.
+    // In such case, the text node must be removed from a compositionstart
+    // event handler.  So, we're dispatching NS_COMPOSITION_START,
+    // we should ignore selection change notification.
+    if (mCompositionState == eCompositionState_CompositionStartDispatched) {
+        nsCOMPtr<nsIWidget> focusedWindow(mLastFocusedWindow);
+        nsEventStatus status;
+        WidgetQueryContentEvent selection(true, NS_QUERY_SELECTED_TEXT,
+                                          focusedWindow);
+        InitEvent(selection);
+        mLastFocusedWindow->DispatchEvent(&selection, status);
+
+        bool cannotContinueComposition = false;
+        if (MOZ_UNLIKELY(IsDestroyed())) {
+            PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
+                ("    ERROR: nsGtkIMModule instance is destroyed during "
+                 "querying selection offset"));
+            return;
+        } else if (NS_WARN_IF(!selection.mSucceeded)) {
+            cannotContinueComposition = true;
+            PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
+                ("    ERROR: failed to retrieve new caret offset"));
+        } else if (selection.mReply.mOffset == UINT32_MAX) {
+            cannotContinueComposition = true;
+            PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
+                ("    ERROR: new offset is too large, cannot keep composing"));
+        } else if (!mLastFocusedWindow || focusedWindow != mLastFocusedWindow) {
+            cannotContinueComposition = true;
+            PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
+                ("    ERROR: focus is changed during querying selection "
+                 "offset"));
+        } else if (focusedWindow->Destroyed()) {
+            cannotContinueComposition = true;
+            PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
+                ("    ERROR: focused window started to be being destroyed "
+                 "during querying selection offset"));
+        }
+
+        if (!cannotContinueComposition) {
+            // Modify the selection start offset with new offset.
+            mCompositionStart = selection.mReply.mOffset;
+            PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
+                ("    NOTE: mCompositionStart is updated to %u, "
+                 "the selection change doesn't cause resetting IM context",
+                 mCompositionStart));
+            // And don't reset the IM context.
+            return;
+        }
+        // Otherwise, reset the IM context due to impossible to keep composing.
     }
 
     // If the selection change is caused by deleting surrounding text,

@@ -9,6 +9,7 @@ UNIFIED_SOURCES += [
     'TestAudioCompactor.cpp',
     'TestGMPCrossOrigin.cpp',
     'TestGMPRemoveAndDelete.cpp',
+    'TestIntervalSet.cpp',
     'TestMP4Demuxer.cpp',
     'TestMP4Reader.cpp',
     'TestTrackEncoder.cpp',
@@ -27,6 +28,11 @@ if CONFIG['MOZ_WEBM_ENCODER']:
         'TestVorbisTrackEncoder.cpp',
         'TestWebMWriter.cpp',
     ]
+
+if CONFIG['MOZ_RUST']:
+    SOURCES += ['hello.rs',]
+    UNIFIED_SOURCES += ['TestRust.cpp',]
+
 
 TEST_HARNESS_FILES.gtest += [
     '../test/gizmo-frag.mp4',

@@ -436,10 +436,32 @@ FinishAllOffThreadCompilations(JSCompartment* comp)
     }
 }
 
+class AutoLazyLinkExitFrame
+{
+    JitActivation* jitActivation_;
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+
+  public:
+    explicit AutoLazyLinkExitFrame(JitActivation* jitActivation
+                                   MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : jitActivation_(jitActivation)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_ASSERT(!jitActivation_->isLazyLinkExitFrame(),
+                   "Cannot stack multiple lazy-link frames.");
+        jitActivation_->setLazyLinkExitFrame(true);
+    }
+
+    ~AutoLazyLinkExitFrame() {
+        jitActivation_->setLazyLinkExitFrame(false);
+    }
+};
+
 uint8_t*
 jit::LazyLinkTopActivation(JSContext* cx)
 {
     JitActivationIterator iter(cx->runtime());
+    AutoLazyLinkExitFrame lazyLinkExitFrame(iter->asJit());
 
     // First frame should be an exit frame.
     JitFrameIterator it(iter);
@@ -1700,17 +1722,16 @@ MIRGenerator::traceNurseryObjects(JSTracer* trc)
 class MarkOffThreadNurseryObjects : public gc::BufferableRef
 {
   public:
-    void mark(JSTracer* trc);
+    void trace(JSTracer* trc) override;
 };
 
 void
-MarkOffThreadNurseryObjects::mark(JSTracer* trc)
+MarkOffThreadNurseryObjects::trace(JSTracer* trc)
 {
     JSRuntime* rt = trc->runtime();
 
     if (trc->runtime()->isHeapMinorCollecting()) {
-        // Only reset hasIonNurseryObjects if we're doing an actual minor GC,
-        // not if we're, for instance, verifying post barriers.
+        // Only reset hasIonNurseryObjects if we're doing an actual minor GC.
         MOZ_ASSERT(rt->jitRuntime()->hasIonNurseryObjects());
         rt->jitRuntime()->setHasIonNurseryObjects(false);
     }
@@ -2499,11 +2520,12 @@ InvalidateActivation(FreeOp* fop, const JitActivationIterator& activations, bool
     size_t frameno = 1;
 
     for (JitFrameIterator it(activations); !it.done(); ++it, ++frameno) {
-        MOZ_ASSERT_IF(frameno == 1, it.type() == JitFrame_Exit || it.type() == JitFrame_Bailout);
+        MOZ_ASSERT_IF(frameno == 1, it.isExitFrame() || it.type() == JitFrame_Bailout);
 
 #ifdef DEBUG
         switch (it.type()) {
           case JitFrame_Exit:
+          case JitFrame_LazyLink:
             JitSpew(JitSpew_IonInvalidate, "#%d exit frame @ %p", frameno, it.fp());
             break;
           case JitFrame_BaselineJS:

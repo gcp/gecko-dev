@@ -72,7 +72,6 @@ public:
 
   // For Media Resource Management
   virtual void SetIdle() override;
-  virtual bool IsWaitingMediaResources() override;
   virtual bool IsDormantNeeded() override;
   virtual void ReleaseMediaResources() override;
   virtual void SetSharedDecoderManager(SharedDecoderManager* aManager)
@@ -88,16 +87,12 @@ public:
 
   virtual void DisableHardwareAcceleration() override;
 
-  static bool IsVideoAccelerated(layers::LayersBackend aBackend);
-
 private:
 
   bool InitDemuxer();
   void ReturnOutput(MediaData* aData, TrackType aTrack);
 
   bool EnsureDecodersSetup();
-
-  bool CheckIfDecoderSetup();
 
   // Sends input to decoder for aTrack, and output to the state machine,
   // if necessary.
@@ -166,6 +161,9 @@ private:
     }
     virtual void ReleaseMediaResources() override {
       mReader->ReleaseMediaResources();
+    }
+    virtual bool OnReaderTaskQueue() override {
+      return mReader->OnTaskQueue();
     }
   private:
     MP4Reader* mReader;

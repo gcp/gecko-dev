@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 sw=2 sts=2 et tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -3370,10 +3370,10 @@ HTMLInputElement::NeedToInitializeEditorForEvent(
 
   switch (aVisitor.mEvent->message) {
   case NS_MOUSE_MOVE:
-  case NS_MOUSE_ENTER:
-  case NS_MOUSE_EXIT:
-  case NS_MOUSE_ENTER_SYNTH:
-  case NS_MOUSE_EXIT_SYNTH:
+  case NS_MOUSE_ENTER_WIDGET:
+  case NS_MOUSE_EXIT_WIDGET:
+  case NS_MOUSE_OVER:
+  case NS_MOUSE_OUT:
   case NS_SCROLLPORT_UNDERFLOW:
   case NS_SCROLLPORT_OVERFLOW:
     return false;

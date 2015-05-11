@@ -307,6 +307,7 @@ option {
   text-indent: 0;
   white-space: nowrap !important;
   word-wrap: normal !important;
+  text-align: match-parent;
 }
 
 select > option {
@@ -447,6 +448,7 @@ input[type="file"] {
 input[type="file"] > xul|label {
   min-inline-size: 12em;
   -moz-padding-start: 5px;
+  text-align: match-parent;
 
   color: inherit;
   font-size: inherit;
@@ -481,11 +483,11 @@ input[type="color"]:-moz-system-metric(color-picker-available)::-moz-color-swatc
 }
 
 /* Try to make RTL <input type='file'> look nicer. */
-/* TODO: use text-align: match-parent when bug 645642 is fixed. */
+/* TODO: find a better solution than forcing direction: ltr on all file
+   input labels and remove this override -- bug 1161482 */
 input[type="file"]:-moz-dir(rtl) > xul|label {
   -moz-padding-start: 0px;
   -moz-padding-end: 5px;
-  text-align: right;
 }
 
 /* radio buttons */
@@ -827,8 +829,8 @@ input[type=range] {
   display: inline-block;
   inline-size: 12em;
   block-size: 1.3em;
-  margin-inline-start: 0.7em;
-  margin-inline-end: 0.7em;
+  -moz-margin-start: 0.7em;
+  -moz-margin-end: 0.7em;
   margin-block-start: 0;
   margin-block-end: 0;
   /* Override some rules that apply on all input types: */
@@ -843,8 +845,8 @@ input[type=range] {
 input[type=range][orient=block] {
   inline-size: 1.3em;
   block-size: 12em;
-  margin-inline-start: 0;
-  margin-inline-end: 0;
+  -moz-margin-start: 0;
+  -moz-margin-end: 0;
   margin-block-start: 0.7em;
   margin-block-end: 0.7em;
 }

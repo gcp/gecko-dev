@@ -1,4 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -170,9 +171,6 @@ private:
 
   // Only used for top level workers.
   nsTArray<nsCOMPtr<nsIRunnable>> mQueuedRunnables;
-
-  // Only for ChromeWorkers without window and only touched on the main thread.
-  nsTArray<nsCString> mHostObjectURIs;
 
   // Protected by mMutex.
   JSSettings mJSSettings;
@@ -731,15 +729,6 @@ public:
 
   void
   CloseSharedWorkersForWindow(nsPIDOMWindow* aWindow);
-
-  void
-  RegisterHostObjectURI(const nsACString& aURI);
-
-  void
-  UnregisterHostObjectURI(const nsACString& aURI);
-
-  void
-  StealHostObjectURIs(nsTArray<nsCString>& aArray);
 
   void
   UpdateOverridenLoadGroup(nsILoadGroup* aBaseLoadGroup);

@@ -53,8 +53,7 @@ static bool test_pldhash_Init_capacity_ok()
 
 static bool test_pldhash_lazy_storage()
 {
-  PLDHashTable t;
-  PL_DHashTableInit(&t, PL_DHashGetStubOps(), sizeof(PLDHashEntryStub));
+  PLDHashTable t(PL_DHashGetStubOps(), sizeof(PLDHashEntryStub));
 
   // PLDHashTable allocates entry storage lazily. Check that all the non-add
   // operations work appropriately when the table is empty and the storage
@@ -107,26 +106,71 @@ static bool test_pldhash_lazy_storage()
     return false;   // size is non-zero?
   }
 
-  PL_DHashTableFinish(&t);
+  return true;
+}
+
+// We insert the integers 0.., so this hash function is (a) as simple as
+// possible, and (b) collision-free.  Both of which are good, because we want
+// this test to be as fast as possible.
+static PLDHashNumber
+trivial_hash(PLDHashTable *table, const void *key)
+{
+  return (PLDHashNumber)(size_t)key;
+}
+
+static bool test_pldhash_move_semantics()
+{
+  static const PLDHashTableOps ops = {
+    trivial_hash,
+    PL_DHashMatchEntryStub,
+    PL_DHashMoveEntryStub,
+    PL_DHashClearEntryStub,
+    nullptr
+  };
+
+  PLDHashTable t1(&ops, sizeof(PLDHashEntryStub));
+  PL_DHashTableAdd(&t1, (const void*)88);
+  PLDHashTable t2(&ops, sizeof(PLDHashEntryStub));
+  PL_DHashTableAdd(&t2, (const void*)99);
+
+  t1 = mozilla::Move(t1);   // self-move
+
+  t1 = mozilla::Move(t2);   // inited overwritten with inited
+
+  PLDHashTable t3, t4;
+  PL_DHashTableInit(&t3, &ops, sizeof(PLDHashEntryStub));
+  PL_DHashTableAdd(&t3, (const void*)88);
+
+  t3 = mozilla::Move(t4);   // inited overwritten with uninited
+
+  PL_DHashTableFinish(&t3);
+  PL_DHashTableFinish(&t4);
+
+  PLDHashTable t5, t6;
+  PL_DHashTableInit(&t6, &ops, sizeof(PLDHashEntryStub));
+  PL_DHashTableAdd(&t6, (const void*)88);
+
+  t5 = mozilla::Move(t6);   // uninited overwritten with inited
+
+  PL_DHashTableFinish(&t5);
+  PL_DHashTableFinish(&t6);
+
+  PLDHashTable t7;
+  PLDHashTable t8(mozilla::Move(t7));   // new table constructed with uninited
+
+  PLDHashTable t9(&ops, sizeof(PLDHashEntryStub));
+  PL_DHashTableAdd(&t9, (const void*)88);
+  PLDHashTable t10(mozilla::Move(t9));  // new table constructed with inited
 
   return true;
 }
 
 // See bug 931062, we skip this test on Android due to OOM.
 #ifndef MOZ_WIDGET_ANDROID
-// We insert the integers 0.., so this is has function is (a) as simple as
-// possible, and (b) collision-free.  Both of which are good, because we want
-// this test to be as fast as possible.
-static PLDHashNumber
-hash(PLDHashTable *table, const void *key)
-{
-  return (PLDHashNumber)(size_t)key;
-}
-
 static bool test_pldhash_grow_to_max_capacity()
 {
   static const PLDHashTableOps ops = {
-    hash,
+    trivial_hash,
     PL_DHashMatchEntryStub,
     PL_DHashMoveEntryStub,
     PL_DHashClearEntryStub,
@@ -134,11 +178,11 @@ static bool test_pldhash_grow_to_max_capacity()
   };
 
   // This is infallible.
-  PLDHashTable* t = PL_NewDHashTable(&ops, sizeof(PLDHashEntryStub), 128);
+  PLDHashTable* t = new PLDHashTable(&ops, sizeof(PLDHashEntryStub), 128);
 
   // Check that New() sets |t->ops|.
   if (!t->IsInitialized()) {
-    PL_DHashTableDestroy(t);
+    delete t;
     return false;
   }
 
@@ -157,7 +201,7 @@ static bool test_pldhash_grow_to_max_capacity()
     return false;
   }
 
-  PL_DHashTableDestroy(t);
+  delete t;
 
   return true;
 }
@@ -174,6 +218,7 @@ static const struct Test {
 } tests[] = {
   DECL_TEST(test_pldhash_Init_capacity_ok),
   DECL_TEST(test_pldhash_lazy_storage),
+  DECL_TEST(test_pldhash_move_semantics),
 // See bug 931062, we skip this test on Android due to OOM.
 #ifndef MOZ_WIDGET_ANDROID
   DECL_TEST(test_pldhash_grow_to_max_capacity),

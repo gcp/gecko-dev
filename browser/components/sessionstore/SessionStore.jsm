@@ -30,7 +30,6 @@ const OBSERVING = [
   "quit-application-requested", "browser-lastwindow-close-granted",
   "quit-application", "browser:purge-session-history",
   "browser:purge-domain-data",
-  "gather-telemetry",
   "idle-daily",
 ];
 
@@ -83,7 +82,20 @@ const NOTAB_MESSAGES = new Set([
   "SessionStore:setupSyncHandler",
 
   // For a description see above.
+  "SessionStore:crashedTabRevived",
+
+  // For a description see above.
   "SessionStore:update",
+]);
+
+// The list of messages we accept without an "epoch" parameter.
+// See getCurrentEpoch() and friends to find out what an "epoch" is.
+const NOEPOCH_MESSAGES = new Set([
+  // For a description see above.
+  "SessionStore:setupSyncHandler",
+
+  // For a description see above.
+  "SessionStore:crashedTabRevived",
 ]);
 
 // The list of messages we want to receive even during the short period after a
@@ -92,6 +104,9 @@ const NOTAB_MESSAGES = new Set([
 const CLOSED_MESSAGES = new Set([
   // For a description see above.
   "SessionStore:crashedTabRevived",
+
+  // For a description see above.
+  "SessionStore:update",
 ]);
 
 // These are tab events that we listen to.
@@ -99,9 +114,6 @@ const TAB_EVENTS = [
   "TabOpen", "TabClose", "TabSelect", "TabShow", "TabHide", "TabPinned",
   "TabUnpinned"
 ];
-
-// The number of milliseconds in a day
-const MS_PER_DAY = 1000.0 * 60.0 * 60.0 * 24.0;
 
 Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
@@ -111,6 +123,7 @@ Cu.import("resource://gre/modules/osfile.jsm", this);
 Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm", this);
 Cu.import("resource://gre/modules/Promise.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
+Cu.import("resource://gre/modules/debug.js", this);
 
 XPCOMUtils.defineLazyServiceGetter(this, "gSessionStartup",
   "@mozilla.org/browser/sessionstartup;1", "nsISessionStartup");
@@ -297,18 +310,7 @@ this.SessionStore = {
 
   reviveCrashedTab(aTab) {
     return SessionStoreInternal.reviveCrashedTab(aTab);
-  },
-
-  /**
-   * Backstage pass to implementation details, used for testing purpose.
-   * Controlled by preference "browser.sessionstore.testmode".
-   */
-  get _internal() {
-    if (Services.prefs.getBoolPref("browser.sessionstore.debug")) {
-      return SessionStoreInternal;
-    }
-    return undefined;
-  },
+  }
 };
 
 // Freeze the SessionStore object. We don't want anyone to modify it.
@@ -327,16 +329,22 @@ let SessionStoreInternal = {
   // windows yet to be restored
   _restoreCount: -1,
 
-  // This number gets incremented each time we start to restore a tab.
-  _nextRestoreEpoch: 1,
-
-  // For each <browser> element being restored, records the current epoch.
+  // For each <browser> element, records the current epoch.
   _browserEpochs: new WeakMap(),
 
   // Any browsers that fires the oop-browser-crashed event gets stored in
   // here - that way we know which browsers to ignore messages from (until
   // they get restored).
   _crashedBrowsers: new WeakSet(),
+
+  // A map (xul:browser -> nsIFrameLoader) that maps a browser to the last
+  // associated frameLoader we heard about.
+  _lastKnownFrameLoader: new WeakMap(),
+
+  // A map (xul:browser -> object) that maps a browser associated with a
+  // recently closed tab to all its necessary state information we need to
+  // properly handle final update message.
+  _closedTabs: new WeakMap(),
 
   // whether a setBrowserState call is in progress
   _browserSetState: false,
@@ -579,9 +587,6 @@ let SessionStoreInternal = {
       case "nsPref:changed": // catch pref changes
         this.onPrefChange(aData);
         break;
-      case "gather-telemetry":
-        this.onGatherTelemetry();
-        break;
       case "idle-daily":
         this.onIdleDaily();
         break;
@@ -607,92 +612,147 @@ let SessionStoreInternal = {
                       `from a browser that has no tab`);
     }
 
+    let data = aMessage.data || {};
+    let hasEpoch = data.hasOwnProperty("epoch");
+
+    // Most messages sent by frame scripts require to pass an epoch.
+    if (!hasEpoch && !NOEPOCH_MESSAGES.has(aMessage.name)) {
+      throw new Error(`received message '${aMessage.name}' without an epoch`);
+    }
+
+    // Ignore messages from previous epochs.
+    if (hasEpoch && !this.isCurrentEpoch(browser, data.epoch)) {
+      return;
+    }
+
     switch (aMessage.name) {
       case "SessionStore:setupSyncHandler":
         TabState.setSyncHandler(browser, aMessage.objects.handler);
         break;
       case "SessionStore:update":
+        // Ignore messages from <browser> elements that have crashed
+        // and not yet been revived.
         if (this._crashedBrowsers.has(browser.permanentKey)) {
-          // Ignore messages from <browser> elements that have crashed
-          // and not yet been revived.
           return;
         }
+
+        // |browser.frameLoader| might be empty if the browser was already
+        // destroyed and its tab removed. In that case we still have the last
+        // frameLoader we know about to compare.
+        let frameLoader = browser.frameLoader ||
+                          this._lastKnownFrameLoader.get(browser.permanentKey);
+
+        // If the message isn't targeting the latest frameLoader discard it.
+        if (frameLoader != aMessage.targetFrameLoader) {
+          return;
+        }
+
+        // Record telemetry measurements done in the child and update the tab's
+        // cached state. Mark the window as dirty and trigger a delayed write.
         this.recordTelemetry(aMessage.data.telemetry);
         TabState.update(browser, aMessage.data);
         this.saveStateDelayed(win);
-        break;
-      case "SessionStore:restoreHistoryComplete":
-        if (this.isCurrentEpoch(browser, aMessage.data.epoch)) {
-          // Notify the tabbrowser that the tab chrome has been restored.
-          let tabData = browser.__SS_data;
 
-          // wall-paper fix for bug 439675: make sure that the URL to be loaded
-          // is always visible in the address bar
-          let activePageData = tabData.entries[tabData.index - 1] || null;
-          let uri = activePageData ? activePageData.url || null : null;
-          browser.userTypedValue = uri;
+        // Handle any updates sent by the child after the tab was closed. This
+        // might be the final update as sent by the "unload" handler but also
+        // any async update message that was sent before the child unloaded.
+        if (this._closedTabs.has(browser.permanentKey)) {
+          let {closedTabs, tabData} = this._closedTabs.get(browser.permanentKey);
 
-          // If the page has a title, set it.
-          if (activePageData) {
-            if (activePageData.title) {
-              tab.label = activePageData.title;
-              tab.crop = "end";
-            } else if (activePageData.url != "about:blank") {
-              tab.label = activePageData.url;
-              tab.crop = "center";
+          // Update the closed tab's state. This will be reflected in its
+          // window's list of closed tabs as that refers to the same object.
+          TabState.copyFromCache({linkedBrowser: browser}, tabData.state);
+
+          // Is this the tab's final message?
+          if (aMessage.data.isFinal) {
+            // We expect no further updates.
+            this._closedTabs.delete(browser.permanentKey);
+            // The tab state no longer needs this reference.
+            delete tabData.permanentKey;
+
+            // Determine whether the tab state is worth saving.
+            let shouldSave = this._shouldSaveTabState(tabData.state);
+            let index = closedTabs.indexOf(tabData);
+
+            if (shouldSave && index == -1) {
+              // If the tab state is worth saving and we didn't push it onto
+              // the list of closed tabs when it was closed (because we deemed
+              // the state not worth saving) then add it to the window's list
+              // of closed tabs now.
+              this.saveClosedTabData(closedTabs, tabData);
+            } else if (!shouldSave && index > -1) {
+              // Remove from the list of closed tabs. The update messages sent
+              // after the tab was closed changed enough state so that we no
+              // longer consider its data interesting enough to keep around.
+              this.removeClosedTabData(closedTabs, index);
             }
           }
-
-          // Restore the tab icon.
-          if ("image" in tabData) {
-            win.gBrowser.setIcon(tab, tabData.image);
-          }
-
-          let event = win.document.createEvent("Events");
-          event.initEvent("SSTabRestoring", true, false);
-          tab.dispatchEvent(event);
         }
         break;
+      case "SessionStore:restoreHistoryComplete":
+        // Notify the tabbrowser that the tab chrome has been restored.
+        let tabData = browser.__SS_data;
+
+        // wall-paper fix for bug 439675: make sure that the URL to be loaded
+        // is always visible in the address bar
+        let activePageData = tabData.entries[tabData.index - 1] || null;
+        let uri = activePageData ? activePageData.url || null : null;
+        browser.userTypedValue = uri;
+
+        // If the page has a title, set it.
+        if (activePageData) {
+          if (activePageData.title) {
+            tab.label = activePageData.title;
+            tab.crop = "end";
+          } else if (activePageData.url != "about:blank") {
+            tab.label = activePageData.url;
+            tab.crop = "center";
+          }
+        }
+
+        // Restore the tab icon.
+        if ("image" in tabData) {
+          win.gBrowser.setIcon(tab, tabData.image);
+        }
+
+        let event = win.document.createEvent("Events");
+        event.initEvent("SSTabRestoring", true, false);
+        tab.dispatchEvent(event);
+        break;
       case "SessionStore:restoreTabContentStarted":
-        if (this.isCurrentEpoch(browser, aMessage.data.epoch)) {
-          if (browser.__SS_restoreState == TAB_STATE_NEEDS_RESTORE) {
-            // If a load not initiated by sessionstore was started in a
-            // previously pending tab. Mark the tab as no longer pending.
-            this.markTabAsRestoring(tab);
-          } else {
-            // If the user was typing into the URL bar when we crashed, but hadn't hit
-            // enter yet, then we just need to write that value to the URL bar without
-            // loading anything. This must happen after the load, since it will clear
-            // userTypedValue.
-            let tabData = browser.__SS_data;
-            if (tabData.userTypedValue && !tabData.userTypedClear) {
-              browser.userTypedValue = tabData.userTypedValue;
-              win.URLBarSetURI();
-            }
+        if (browser.__SS_restoreState == TAB_STATE_NEEDS_RESTORE) {
+          // If a load not initiated by sessionstore was started in a
+          // previously pending tab. Mark the tab as no longer pending.
+          this.markTabAsRestoring(tab);
+        } else {
+          // If the user was typing into the URL bar when we crashed, but hadn't hit
+          // enter yet, then we just need to write that value to the URL bar without
+          // loading anything. This must happen after the load, since it will clear
+          // userTypedValue.
+          let tabData = browser.__SS_data;
+          if (tabData.userTypedValue && !tabData.userTypedClear) {
+            browser.userTypedValue = tabData.userTypedValue;
+            win.URLBarSetURI();
           }
         }
         break;
       case "SessionStore:restoreTabContentComplete":
-        if (this.isCurrentEpoch(browser, aMessage.data.epoch)) {
-          // This callback is used exclusively by tests that want to
-          // monitor the progress of network loads.
-          if (gDebuggingEnabled) {
-            Services.obs.notifyObservers(browser, NOTIFY_TAB_RESTORED, null);
-          }
-
-          delete browser.__SS_data;
-
-          SessionStoreInternal._resetLocalTabRestoringState(tab);
-          SessionStoreInternal.restoreNextTab();
-
-          this._sendTabRestoredNotification(tab);
+        // This callback is used exclusively by tests that want to
+        // monitor the progress of network loads.
+        if (gDebuggingEnabled) {
+          Services.obs.notifyObservers(browser, NOTIFY_TAB_RESTORED, null);
         }
+
+        delete browser.__SS_data;
+
+        SessionStoreInternal._resetLocalTabRestoringState(tab);
+        SessionStoreInternal.restoreNextTab();
+
+        this._sendTabRestoredNotification(tab);
         break;
       case "SessionStore:reloadPendingTab":
-        if (this.isCurrentEpoch(browser, aMessage.data.epoch)) {
-          if (browser.__SS_restoreState == TAB_STATE_NEEDS_RESTORE) {
-            this.restoreTabContent(tab);
-          }
+        if (browser.__SS_restoreState == TAB_STATE_NEEDS_RESTORE) {
+          this.restoreTabContent(tab);
         }
         break;
       case "SessionStore:crashedTabRevived":
@@ -722,25 +782,26 @@ let SessionStoreInternal = {
    * Implement nsIDOMEventListener for handling various window and tab events
    */
   handleEvent: function ssi_handleEvent(aEvent) {
-    var win = aEvent.currentTarget.ownerDocument.defaultView;
+    let win = aEvent.currentTarget.ownerDocument.defaultView;
+    let target = aEvent.originalTarget;
     switch (aEvent.type) {
       case "TabOpen":
-        this.onTabAdd(win, aEvent.originalTarget);
+        this.onTabAdd(win, target);
         break;
       case "TabClose":
         // aEvent.detail determines if the tab was closed by moving to a different window
         if (!aEvent.detail)
-          this.onTabClose(win, aEvent.originalTarget);
-        this.onTabRemove(win, aEvent.originalTarget);
+          this.onTabClose(win, target);
+        this.onTabRemove(win, target);
         break;
       case "TabSelect":
         this.onTabSelect(win);
         break;
       case "TabShow":
-        this.onTabShow(win, aEvent.originalTarget);
+        this.onTabShow(win, target);
         break;
       case "TabHide":
-        this.onTabHide(win, aEvent.originalTarget);
+        this.onTabHide(win, target);
         break;
       case "TabPinned":
       case "TabUnpinned":
@@ -748,8 +809,15 @@ let SessionStoreInternal = {
         this.saveStateDelayed(win);
         break;
       case "oop-browser-crashed":
-        this.onBrowserCrashed(win, aEvent.originalTarget);
+        this.onBrowserCrashed(win, target);
         break;
+      case "XULFrameLoaderCreated":
+        if (target.tagName == "browser" && target.frameLoader) {
+          this._lastKnownFrameLoader.set(target.permanentKey, target.frameLoader);
+        }
+        break;
+      default:
+        throw new Error(`unhandled event ${aEvent.type}?`);
     }
     this._clearRestoringWindows();
   },
@@ -943,6 +1011,9 @@ let SessionStoreInternal = {
     TAB_EVENTS.forEach(function(aEvent) {
       tabbrowser.tabContainer.addEventListener(aEvent, this, true);
     }, this);
+
+    // Keep track of a browser's latest frameLoader.
+    aWindow.gBrowser.addEventListener("XULFrameLoaderCreated", this);
   },
 
   /**
@@ -1045,6 +1116,8 @@ let SessionStoreInternal = {
     TAB_EVENTS.forEach(function(aEvent) {
       tabbrowser.tabContainer.removeEventListener(aEvent, this, true);
     }, this);
+
+    aWindow.gBrowser.removeEventListener("XULFrameLoaderCreated", this);
 
     let winData = this._windows[aWindow.__SSi];
 
@@ -1190,11 +1263,13 @@ let SessionStoreInternal = {
     LastSession.clear();
     let openWindows = {};
     this._forEachBrowserWindow(function(aWindow) {
-      Array.forEach(aWindow.gBrowser.tabs, function(aTab) {
-        delete aTab.linkedBrowser.__SS_data;
-        if (aTab.linkedBrowser.__SS_restoreState)
-          this._resetTabRestoringState(aTab);
-      }, this);
+      let tabs = aWindow.gBrowser.tabs;
+      // Remove pending or restoring tabs instead of just emptying them.
+      for (let i = tabs.length - 1; i >= 0 && tabs.length > 1; i--) {
+        if (tabs[i].linkedBrowser.__SS_restoreState) {
+          aWindow.gBrowser.removeTab(tabs[i], {animate: false});
+        }
+      }
       openWindows[aWindow.__SSi] = true;
     });
     // also clear all data about closed tabs and windows
@@ -1205,6 +1280,9 @@ let SessionStoreInternal = {
         delete this._windows[ix];
       }
     }
+    // Remove all pointers so that pending/restoring tabs that were closed
+    // above do not end up in _closedTabs[] again.
+    this._closedTabs.clear();
     // also clear all data about closed windows
     this._closedWindows = [];
     // give the tabbrowsers a chance to clear their histories first
@@ -1311,6 +1389,11 @@ let SessionStoreInternal = {
     let browser = aTab.linkedBrowser;
     browser.addEventListener("SwapDocShells", this);
     browser.addEventListener("oop-browser-crashed", this);
+
+    if (browser.frameLoader) {
+      this._lastKnownFrameLoader.set(browser.permanentKey, browser.frameLoader);
+    }
+
     if (!aNoNotification) {
       this.saveStateDelayed(aWindow);
     }
@@ -1365,9 +1448,6 @@ let SessionStoreInternal = {
       return;
     }
 
-    // Flush all data queued in the content script before the tab is gone.
-    TabState.flush(aTab.linkedBrowser);
-
     // Get the latest data for this tab (generally, from the cache)
     let tabState = TabState.collect(aTab);
 
@@ -1377,23 +1457,96 @@ let SessionStoreInternal = {
       return;
     }
 
-    // store closed-tab data for undo
-    if (this._shouldSaveTabState(tabState)) {
-      let tabTitle = aTab.label;
-      let tabbrowser = aWindow.gBrowser;
-      tabTitle = this._replaceLoadingTitle(tabTitle, tabbrowser, aTab);
+    // Store closed-tab data for undo.
+    let tabbrowser = aWindow.gBrowser;
+    let tabTitle = this._replaceLoadingTitle(aTab.label, tabbrowser, aTab);
+    let {permanentKey} = aTab.linkedBrowser;
 
-      this._windows[aWindow.__SSi]._closedTabs.unshift({
-        state: tabState,
-        title: tabTitle,
-        image: tabbrowser.getIcon(aTab),
-        pos: aTab._tPos,
-        closedAt: Date.now()
-      });
-      var length = this._windows[aWindow.__SSi]._closedTabs.length;
-      if (length > this._max_tabs_undo)
-        this._windows[aWindow.__SSi]._closedTabs.splice(this._max_tabs_undo, length - this._max_tabs_undo);
+    let tabData = {
+      permanentKey,
+      state: tabState,
+      title: tabTitle,
+      image: tabbrowser.getIcon(aTab),
+      pos: aTab._tPos,
+      closedAt: Date.now()
+    };
+
+    let closedTabs = this._windows[aWindow.__SSi]._closedTabs;
+
+    // Determine whether the tab contains any information worth saving. Note
+    // that there might be pending state changes queued in the child that
+    // didn't reach the parent yet. If a tab is emptied before closing then we
+    // might still remove it from the list of closed tabs later.
+    if (this._shouldSaveTabState(tabState)) {
+      // Save the tab state, for now. We might push a valid tab out
+      // of the list but those cases should be extremely rare and
+      // do probably never occur when using the browser normally.
+      // (Tests or add-ons might do weird things though.)
+      this.saveClosedTabData(closedTabs, tabData);
     }
+
+    // Remember the closed tab to properly handle any last updates included in
+    // the final "update" message sent by the frame script's unload handler.
+    this._closedTabs.set(permanentKey, {closedTabs, tabData});
+  },
+
+  /**
+   * Insert a given |tabData| object into the list of |closedTabs|. We will
+   * determine the right insertion point based on the .closedAt properties of
+   * all tabs already in the list. The list will be truncated to contain a
+   * maximum of |this._max_tabs_undo| entries.
+   *
+   * @param closedTabs (array)
+   *        The list of closed tabs for a window.
+   * @param tabData (object)
+   *        The tabData to be inserted.
+   */
+  saveClosedTabData(closedTabs, tabData) {
+    // Find the index of the first tab in the list
+    // of closed tabs that was closed before our tab.
+    let index = closedTabs.findIndex(tab => {
+      return tab.closedAt < tabData.closedAt;
+    });
+
+    // If we found no tab closed before our
+    // tab then just append it to the list.
+    if (index == -1) {
+      index = closedTabs.length;
+    }
+
+    // Insert tabData at the right position.
+    closedTabs.splice(index, 0, tabData);
+
+    // Truncate the list of closed tabs, if needed.
+    if (closedTabs.length > this._max_tabs_undo) {
+      closedTabs.splice(this._max_tabs_undo, closedTabs.length);
+    }
+  },
+
+  /**
+   * Remove the closed tab data at |index| from the list of |closedTabs|. If
+   * the tab's final message is still pending we will simply discard it when
+   * it arrives so that the tab doesn't reappear in the list.
+   *
+   * @param closedTabs (array)
+   *        The list of closed tabs for a window.
+   * @param index (uint)
+   *        The index of the tab to remove.
+   */
+  removeClosedTabData(closedTabs, index) {
+    // Remove the given index from the list.
+    let [closedTab] = closedTabs.splice(index, 1);
+
+    // If the closed tab's state still has a .permanentKey property then we
+    // haven't seen its final update message yet. Remove it from the map of
+    // closed tabs so that we will simply discard its last messages and will
+    // not add it back to the list of closed tabs again.
+    if (closedTab.permanentKey) {
+      this._closedTabs.delete(closedTab.permanentKey);
+      delete closedTab.permanentKey;
+    }
+
+    return closedTab;
   },
 
   /**
@@ -1462,16 +1615,10 @@ let SessionStoreInternal = {
     // restore the selected tab and lazily restore the rest. We'll make no
     // efforts at this time to be smart and restore all of the tabs that had
     // been in a restored state at the time of the crash.
-    let tab = aWindow.gBrowser.getTabForBrowser(aBrowser);
-    this._resetLocalTabRestoringState(tab);
-  },
-
-  onGatherTelemetry: function() {
-    // On the first gather-telemetry notification of the session,
-    // gather telemetry data.
-    Services.obs.removeObserver(this, "gather-telemetry");
-    let stateString = SessionStore.getBrowserState();
-    return SessionFile.gatherTelemetry(stateString);
+    if (aBrowser.__SS_restoreState) {
+      let tab = aWindow.gBrowser.getTabForBrowser(aBrowser);
+      this._resetLocalTabRestoringState(tab);
+    }
   },
 
   // Clean up data that has been closed a long time ago.
@@ -1696,18 +1843,17 @@ let SessionStoreInternal = {
     }
 
     // fetch the data of closed tab, while removing it from the array
-    let [closedTab] = closedTabs.splice(aIndex, 1);
-    let closedTabState = closedTab.state;
+    let {state, pos} = this.removeClosedTabData(closedTabs, aIndex);
 
     // create a new tab
     let tabbrowser = aWindow.gBrowser;
     let tab = tabbrowser.selectedTab = tabbrowser.addTab();
 
     // restore tab content
-    this.restoreTab(tab, closedTabState);
+    this.restoreTab(tab, state);
 
     // restore the tab's position
-    tabbrowser.moveTabTo(tab, closedTab.pos);
+    tabbrowser.moveTabTo(tab, pos);
 
     // focus the tab's content area (bug 342432)
     tab.linkedBrowser.focus();
@@ -1729,7 +1875,7 @@ let SessionStoreInternal = {
     }
 
     // remove closed tab from the array
-    closedTabs.splice(aIndex, 1);
+    this.removeClosedTabData(closedTabs, aIndex);
   },
 
   getClosedWindowCount: function ssi_getClosedWindowCount() {
@@ -2256,7 +2402,6 @@ let SessionStoreInternal = {
   _collectWindowData: function ssi_collectWindowData(aWindow) {
     if (!this._isWindowLoaded(aWindow))
       return;
-    TelemetryStopwatch.start("FX_SESSION_RESTORE_COLLECT_SINGLE_WINDOW_DATA_MS");
 
     let tabbrowser = aWindow.gBrowser;
     let tabs = tabbrowser.tabs;
@@ -2278,7 +2423,6 @@ let SessionStoreInternal = {
         aWindow.__SS_lastSessionWindowID;
 
     DirtyWindows.remove(aWindow);
-    TelemetryStopwatch.finish("FX_SESSION_RESTORE_COLLECT_SINGLE_WINDOW_DATA_MS");
   },
 
   /* ........ Restoring Functionality .............. */
@@ -2588,6 +2732,9 @@ let SessionStoreInternal = {
 
   // Restores the given tab state for a given tab.
   restoreTab(tab, tabData, options = {}) {
+    NS_ASSERT(!tab.linkedBrowser.__SS_restoreState,
+              "must reset tab before calling restoreTab()");
+
     let restoreImmediately = options.restoreImmediately;
     let loadArguments = options.loadArguments;
     let browser = tab.linkedBrowser;
@@ -2605,7 +2752,8 @@ let SessionStoreInternal = {
     // fill the array with at least empty tabData objects until |_tPos| or
     // we'll end up with |null| entries.
     for (let tab of Array.slice(tabbrowser.tabs, 0, tab._tPos)) {
-      this._windows[window.__SSi].tabs.push(TabState.collect(tab));
+      let emptyState = {entries: [], lastAccessed: tab.lastAccessed};
+      this._windows[window.__SSi].tabs.push(emptyState);
     }
 
     // Update the tab state in case we shut down without being notified.
@@ -2647,11 +2795,6 @@ let SessionStoreInternal = {
     // Tab is now open.
     delete tabData.closedAt;
 
-    // Flush all data from the content script synchronously. This is done so
-    // that all async messages that are still on their way to chrome will
-    // be ignored and don't override any tab data set when restoring.
-    TabState.flush(browser);
-
     // Ensure the index is in bounds.
     let activeIndex = (tabData.index || tabData.entries.length) - 1;
     activeIndex = Math.min(activeIndex, tabData.entries.length - 1);
@@ -2669,11 +2812,10 @@ let SessionStoreInternal = {
     }
     tabbrowser.updateBrowserRemotenessByURL(browser, uri);
 
-    // Start a new epoch and include the epoch in the restoreHistory
-    // message. If a message is received that relates to a previous epoch, we
-    // discard it.
-    let epoch = this._nextRestoreEpoch++;
-    this._browserEpochs.set(browser.permanentKey, epoch);
+    // Start a new epoch to discard all frame script messages relating to a
+    // previous epoch. All async messages that are still on their way to chrome
+    // will be ignored and don't override any tab data set when restoring.
+    let epoch = this.startNextEpoch(browser);
 
     // keep the data around to prevent dataloss in case
     // a tab gets closed before it's been properly restored
@@ -2927,14 +3069,6 @@ let SessionStoreInternal = {
     // Attempt to load the session start time from the session state
     if (state.session && state.session.startTime) {
       this._sessionStartTime = state.session.startTime;
-
-      // ms to days
-      let sessionLength = (Date.now() - this._sessionStartTime) / MS_PER_DAY;
-
-      if (sessionLength > 0) {
-        // Submit the session length telemetry measurement
-        Services.telemetry.getHistogramById("FX_SESSION_RESTORE_SESSION_LENGTH").add(sessionLength);
-      }
     }
   },
 
@@ -3457,6 +3591,9 @@ let SessionStoreInternal = {
    *        The tab that will be "reset"
    */
   _resetLocalTabRestoringState: function (aTab) {
+    NS_ASSERT(aTab.linkedBrowser.__SS_restoreState,
+              "given tab is not restoring");
+
     let window = aTab.ownerDocument.defaultView;
     let browser = aTab.linkedBrowser;
 
@@ -3465,7 +3602,6 @@ let SessionStoreInternal = {
 
     // The browser is no longer in any sort of restoring state.
     delete browser.__SS_restoreState;
-    this._browserEpochs.delete(browser.permanentKey);
 
     aTab.removeAttribute("pending");
     browser.removeAttribute("pending");
@@ -3482,11 +3618,32 @@ let SessionStoreInternal = {
   },
 
   _resetTabRestoringState: function (tab) {
+    NS_ASSERT(tab.linkedBrowser.__SS_restoreState,
+              "given tab is not restoring");
+
     let browser = tab.linkedBrowser;
-    if (browser.__SS_restoreState) {
-      browser.messageManager.sendAsyncMessage("SessionStore:resetRestore", {});
-    }
+    browser.messageManager.sendAsyncMessage("SessionStore:resetRestore", {});
     this._resetLocalTabRestoringState(tab);
+  },
+
+  /**
+   * Each fresh tab starts out with epoch=0. This function can be used to
+   * start a next epoch by incrementing the current value. It will enables us
+   * to ignore stale messages sent from previous epochs. The function returns
+   * the new epoch ID for the given |browser|.
+   */
+  startNextEpoch(browser) {
+    let next = this.getCurrentEpoch(browser) + 1;
+    this._browserEpochs.set(browser.permanentKey, next);
+    return next;
+  },
+
+  /**
+   * Returns the current epoch for the given <browser>. If we haven't assigned
+   * a new epoch this will default to zero for new tabs.
+   */
+  getCurrentEpoch(browser) {
+    return this._browserEpochs.get(browser.permanentKey) || 0;
   },
 
   /**
@@ -3497,7 +3654,7 @@ let SessionStoreInternal = {
    * with respect to |browser|.
    */
   isCurrentEpoch: function (browser, epoch) {
-    return (this._browserEpochs.get(browser.permanentKey) || 0) == epoch;
+    return this.getCurrentEpoch(browser) == epoch;
   },
 
 };

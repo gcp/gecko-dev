@@ -149,10 +149,10 @@ class GCMarker : public JSTracer
     template <typename T> void traverse(T thing);
 
     // Calls traverse on target after making additional assertions.
-    template <typename S, typename T> void traverse(S source, T target);
-
+    template <typename S, typename T> void traverseEdge(S source, T target);
     // C++ requires explicit declarations of partial template instantiations.
-    template <typename S> void traverse(S source, jsid target);
+    template <typename S> void traverseEdge(S source, jsid target);
+    template <typename S> void traverseEdge(S source, Value target);
 
     /*
      * Care must be taken changing the mark color from gray to black. The cycle
@@ -277,7 +277,7 @@ class GCMarker : public JSTracer
         return stack.isEmpty();
     }
 
-    bool restoreValueArray(NativeObject* obj, void** vpp, void** endp);
+    bool restoreValueArray(JSObject* obj, void** vpp, void** endp);
     void saveValueRanges();
     inline void processMarkStackTop(SliceBudget& budget);
 
@@ -300,14 +300,9 @@ class GCMarker : public JSTracer
     mozilla::DebugOnly<bool> strictCompartmentChecking;
 };
 
-void
-SetMarkStackLimit(JSRuntime* rt, size_t limit);
-
 bool
 IsBufferingGrayRoots(JSTracer* trc);
 
-} /* namespace js */
-namespace js {
 namespace gc {
 
 /*** Special Cases ***/
@@ -383,12 +378,11 @@ class HashKeyRef : public BufferableRef
   public:
     HashKeyRef(Map* m, const Key& k) : map(m), key(k) {}
 
-    void mark(JSTracer* trc) {
+    void trace(JSTracer* trc) override {
         Key prior = key;
         typename Map::Ptr p = map->lookup(key);
         if (!p)
             return;
-        JS::AutoOriginalTraceLocation reloc(trc, (void**)&*p);
         TraceManuallyBarrieredEdge(trc, &key, "HashKeyRef");
         map->rekeyIfMoved(prior, key);
     }

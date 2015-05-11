@@ -568,12 +568,12 @@
   -moz-border-start: solid 4px #ff9500;
 }
 
-.addon[active="false"] {
-  opacity: 0.5;
+.addon[active="false"] > .content-container > .content-inner-container {
+  color: #999;
 }
 
-.addon[active="false"][selected] {
-  opacity: 0.7;
+.addon[active="false"][selected] > .content-container > .content-inner-container {
+  color: #777;
 }
 
 
@@ -965,7 +965,6 @@ button.button-link {
   background: transparent;
   border: none;
   box-shadow: none;
-  text-decoration: underline;
   color: #0095dd;
   cursor: pointer;
   min-width: 0;
@@ -978,20 +977,17 @@ button.button-link:not(:-moz-focusring) > .button-box {
   margin: 1px;
 }
 
-.text-link {
-  color: #0095dd;
-  font-size: inherit;
-}
-
-button.button-link:hover,
-.text-link:hover {
-  color: #4cb1ff;
+button.button-link:hover {
   background-color: transparent;
+  color: #178ce5;
+  text-decoration: underline;
 }
 
 /* Needed to override normal button style from inContent.css */
 button.button-link:not([disabled="true"]):active:hover {
   background-color: transparent;
+  color: #ff9500;
+  text-decoration: none;
 }
 
 
@@ -1020,4 +1016,24 @@ button.button-link:not([disabled="true"]):active:hover {
 .addon[active="true"] .experiment-bullet,
 #detail-view[active="true"] #detail-experiment-bullet {
   fill: rgb(106, 201, 20);
+}
+
+/*** info UI for add-ons that have been disabled for being unsigned ***/
+
+#show-disabled-unsigned-extensions:not(:hover) {
+  background-color: #fcf8ed;
+}
+
+#disabled-unsigned-addons-info {
+  margin-bottom: 2em;
+}
+
+#disabled-unsigned-addons-heading {
+  font-size: 1.4em;
+  font-weight: bold;
+  margin-bottom: .5em;
+}
+
+#signing-dev-info {
+  font-style: italic;
 }

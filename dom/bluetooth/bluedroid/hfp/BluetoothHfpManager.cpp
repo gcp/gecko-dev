@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -208,27 +208,6 @@ BluetoothHfpManager::ResetCallArray()
   }
 }
 
-#ifdef MOZ_B2G_BT_API_V2
-void
-BluetoothHfpManager::Reset()
-{
-  mReceiveVgsFlag = false;
-  mDialingRequestProcessed = true;
-
-  mConnectionState = HFP_CONNECTION_STATE_DISCONNECTED;
-  mPrevConnectionState = HFP_CONNECTION_STATE_DISCONNECTED;
-  mAudioState = HFP_AUDIO_STATE_DISCONNECTED;
-
-  // Phone & Device CIND
-  ResetCallArray();
-  mBattChg = 5;
-  mService = HFP_NETWORK_STATE_NOT_AVAILABLE;
-  mRoam = HFP_SERVICE_TYPE_HOME;
-  mSignal = 0;
-
-  mController = nullptr;
-}
-#else
 void
 BluetoothHfpManager::Cleanup()
 {
@@ -255,17 +234,12 @@ BluetoothHfpManager::Reset()
   mAudioState = HFP_AUDIO_STATE_DISCONNECTED;
   Cleanup();
 }
-#endif
 
 bool
 BluetoothHfpManager::Init()
 {
-#ifdef MOZ_B2G_BT_API_V2
   // The function must run at b2g process since it would access SettingsService.
   MOZ_ASSERT(IsMainProcess());
-#else
-  // Missing on bluetooth1
-#endif
 
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -624,11 +598,7 @@ BluetoothHfpManager::NotifyConnectionStateChanged(const nsAString& aType)
       } else {
         OnDisconnect(EmptyString());
       }
-#ifdef MOZ_B2G_BT_API_V2
-      Reset();
-#else
       Cleanup();
-#endif
     }
   }
 }
@@ -719,7 +689,6 @@ BluetoothHfpManager::HandleVoiceConnectionChanged(uint32_t aClientId)
   nsString regState;
   voiceInfo->GetState(regState);
 
-#ifdef MOZ_B2G_BT_API_V2
   BluetoothHandsfreeNetworkState service =
     (regState.EqualsLiteral("registered")) ? HFP_NETWORK_STATE_AVAILABLE :
                                              HFP_NETWORK_STATE_NOT_AVAILABLE;
@@ -728,15 +697,6 @@ BluetoothHfpManager::HandleVoiceConnectionChanged(uint32_t aClientId)
     mListener->ServiceChanged(aClientId, service);
   }
   mService = service;
-#else
-  int service = (regState.EqualsLiteral("registered")) ? 1 : 0;
-  if (service != mService) {
-    // Notify BluetoothRilListener of service change
-    mListener->ServiceChanged(aClientId, service);
-  }
-  mService = service ? HFP_NETWORK_STATE_AVAILABLE :
-                       HFP_NETWORK_STATE_NOT_AVAILABLE;
-#endif
 
   // Signal
   JS::Rooted<JS::Value> value(nsContentUtils::RootingCxForThread());

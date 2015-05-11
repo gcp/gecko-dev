@@ -91,6 +91,7 @@
 #include "InputData.h"
 #include "VibrancyManager.h"
 #include "nsNativeThemeCocoa.h"
+#include "nsIDOMWindowUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::layers;
@@ -106,9 +107,7 @@ using mozilla::gfx::Matrix4x4;
 // out to the bounding-box if there are more
 #define MAX_RECTS_IN_REGION 100
 
-#ifdef PR_LOGGING
 PRLogModuleInfo* sCocoaLog = nullptr;
-#endif
 
 extern "C" {
   CG_EXTERN void CGContextResetCTM(CGContextRef);
@@ -274,11 +273,9 @@ FlipCocoaScreenCoordinate(NSPoint &inPoint)
 
 void EnsureLogInitialized()
 {
-#ifdef PR_LOGGING
   if (!sCocoaLog) {
     sCocoaLog = PR_NewLogModule("nsCocoaWidgets");
   }
-#endif // PR_LOGGING
 }
 
 namespace {
@@ -1180,6 +1177,42 @@ nsresult nsChildView::SynthesizeNativeMouseEvent(LayoutDeviceIntPoint aPoint,
   }
 
   [NSApp sendEvent:event];
+  return NS_OK;
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+}
+
+nsresult nsChildView::SynthesizeNativeMouseScrollEvent(mozilla::LayoutDeviceIntPoint aPoint,
+                                                       uint32_t aNativeMessage,
+                                                       double aDeltaX,
+                                                       double aDeltaY,
+                                                       double aDeltaZ,
+                                                       uint32_t aModifierFlags,
+                                                       uint32_t aAdditionalFlags,
+                                                       nsIObserver* aObserver)
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+
+  AutoObserverNotifier notifier(aObserver, "mousescrollevent");
+
+  NSPoint pt =
+    nsCocoaUtils::DevPixelsToCocoaPoints(aPoint, BackingScaleFactor());
+
+  // Move the mouse cursor to the requested position and reconnect it to the mouse.
+  CGWarpMouseCursorPosition(NSPointToCGPoint(pt));
+  CGAssociateMouseAndMouseCursorPosition(true);
+
+  // Mostly copied from http://stackoverflow.com/a/6130349
+  CGScrollEventUnit units =
+    (aAdditionalFlags & nsIDOMWindowUtils::MOUSESCROLL_SCROLL_LINES)
+    ? kCGScrollEventUnitLine : kCGScrollEventUnitPixel;
+  CGEventRef cgEvent = CGEventCreateScrollWheelEvent(NULL, units, 3, aDeltaY, aDeltaX, aDeltaZ);
+  if (!cgEvent) {
+    return NS_ERROR_FAILURE;
+  }
+
+  CGEventPost(kCGHIDEventTap, cgEvent);
+  CFRelease(cgEvent);
   return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
@@ -4549,7 +4582,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
   NSPoint windowEventLocation = nsCocoaUtils::EventLocationForWindow(aEvent, [self window]);
   NSPoint localEventLocation = [self convertPoint:windowEventLocation fromView:nil];
 
-  uint32_t msg = aEnter ? NS_MOUSE_ENTER : NS_MOUSE_EXIT;
+  uint32_t msg = aEnter ? NS_MOUSE_ENTER_WIDGET : NS_MOUSE_EXIT_WIDGET;
   WidgetMouseEvent event(true, msg, mGeckoChild, WidgetMouseEvent::eReal);
   event.refPoint = LayoutDeviceIntPoint::FromUntyped(
     mGeckoChild->CocoaPointsToDevPixels(localEventLocation));

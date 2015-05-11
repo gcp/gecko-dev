@@ -2885,19 +2885,13 @@ var WalkerActor = protocol.ActorClass({
   }),
 
   /**
-   * Given an StyleSheetActor (identified by its ID), commonly used in the
+   * Given a StyleSheetActor (identified by its ID), commonly used in the
    * style-editor, get its ownerNode and return the corresponding walker's
-   * NodeActor
+   * NodeActor.
+   * Note that getNodeFromActor was added later and can now be used instead.
    */
   getStyleSheetOwnerNode: method(function(styleSheetActorID) {
-    let styleSheetActor = this.conn.getActor(styleSheetActorID);
-    let ownerNode = styleSheetActor.ownerNode;
-
-    if (!styleSheetActor || !ownerNode) {
-      return null;
-    }
-
-    return this.attachElement(ownerNode);
+    return this.getNodeFromActor(styleSheetActorID, ["ownerNode"]);
   }, {
     request: {
       styleSheetActorID: Arg(0, "string")
@@ -2906,6 +2900,60 @@ var WalkerActor = protocol.ActorClass({
       ownerNode: RetVal("nullable:disconnectedNode")
     }
   }),
+
+  /**
+   * This method can be used to retrieve NodeActor for DOM nodes from other
+   * actors in a way that they can later be highlighted in the page, or
+   * selected in the inspector.
+   * If an actor has a reference to a DOM node, and the UI needs to know about
+   * this DOM node (and possibly select it in the inspector), the UI should
+   * first retrieve a reference to the walkerFront:
+   *
+   * // Make sure the inspector/walker have been initialized first.
+   * toolbox.initInspector().then(() => {
+   *  // Retrieve the walker.
+   *  let walker = toolbox.walker;
+   * });
+   *
+   * And then call this method:
+   *
+   * // Get the nodeFront from my actor, passing the ID and properties path.
+   * walker.getNodeFromActor(myActorID, ["element"]).then(nodeFront => {
+   *   // Use the nodeFront, e.g. select the node in the inspector.
+   *   toolbox.getPanel("inspector").selection.setNodeFront(nodeFront);
+   * });
+   *
+   * @param {String} actorID The ID for the actor that has a reference to the
+   * DOM node.
+   * @param {Array} path Where, on the actor, is the DOM node stored. If in the
+   * scope of the actor, the node is available as `this.data.node`, then this
+   * should be ["data", "node"].
+   * @return {NodeActor} The attached NodeActor, or null if it couldn't be found.
+   */
+  getNodeFromActor: method(function(actorID, path) {
+    let actor = this.conn.getActor(actorID);
+    if (!actor) {
+      return null;
+    }
+
+    let obj = actor;
+    for (let name of path) {
+      if (!(name in obj)) {
+        return null;
+      }
+      obj = obj[name];
+    }
+
+    return this.attachElement(obj);
+  }, {
+    request: {
+      actorID: Arg(0, "string"),
+      path: Arg(1, "array:string")
+    },
+    response: {
+      node: RetVal("nullable:disconnectedNode")
+    }
+  })
 });
 
 /**
@@ -3061,6 +3109,14 @@ var WalkerFront = exports.WalkerFront = protocol.FrontClass(WalkerActor, {
     });
   }, {
     impl: "_getStyleSheetOwnerNode"
+  }),
+
+  getNodeFromActor: protocol.custom(function(actorID, path) {
+    return this._getNodeFromActor(actorID, path).then(response => {
+      return response ? response.node : null;
+    });
+  }, {
+    impl: "_getNodeFromActor"
   }),
 
   _releaseFront: function(node, force) {
@@ -3471,6 +3527,30 @@ var InspectorActor = exports.InspectorActor = protocol.ActorClass({
   }, {
     request: {url: Arg(0), maxDim: Arg(1, "nullable:number")},
     response: RetVal("imageData")
+  }),
+
+  /**
+   * Resolve a URL to its absolute form, in the scope of a given content window.
+   * @param {String} url.
+   * @param {NodeActor} node If provided, the owner window of this node will be
+   * used to resolve the URL. Otherwise, the top-level content window will be
+   * used instead.
+   * @return {String} url.
+   */
+  resolveRelativeURL: method(function(url, node) {
+    let document = isNodeDead(node)
+                   ? this.window.document
+                   : nodeDocument(node.rawNode);
+
+    if (!document) {
+      return url;
+    } else {
+      let baseURI = Services.io.newURI(document.location.href, null, null);
+      return Services.io.newURI(url, null, baseURI).spec;
+    }
+  }, {
+    request: {url: Arg(0, "string"), node: Arg(1, "nullable:domnode")},
+    response: {value: RetVal("string")}
   })
 });
 

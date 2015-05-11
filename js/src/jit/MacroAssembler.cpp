@@ -1016,6 +1016,31 @@ template void
 MacroAssembler::storeUnboxedProperty(BaseIndex address, JSValueType type,
                                      ConstantOrRegister value, Label* failure);
 
+void
+MacroAssembler::checkUnboxedArrayCapacity(Register obj, const Int32Key& index, Register temp,
+                                          Label* failure)
+{
+    Address initLengthAddr(obj, UnboxedArrayObject::offsetOfCapacityIndexAndInitializedLength());
+    Address lengthAddr(obj, UnboxedArrayObject::offsetOfLength());
+
+    Label capacityIsIndex, done;
+    load32(initLengthAddr, temp);
+    branchTest32(Assembler::NonZero, temp, Imm32(UnboxedArrayObject::CapacityMask), &capacityIsIndex);
+    branchKey(Assembler::BelowOrEqual, lengthAddr, index, failure);
+    jump(&done);
+    bind(&capacityIsIndex);
+
+    // Do a partial shift so that we can get an absolute offset from the base
+    // of CapacityArray to use.
+    JS_STATIC_ASSERT(sizeof(UnboxedArrayObject::CapacityArray[0]) == 4);
+    rshiftPtr(Imm32(UnboxedArrayObject::CapacityShift - 2), temp);
+    and32(Imm32(~0x3), temp);
+
+    addPtr(ImmPtr(&UnboxedArrayObject::CapacityArray), temp);
+    branchKey(Assembler::BelowOrEqual, Address(temp, 0), index, failure);
+    bind(&done);
+}
+
 // Inlined version of gc::CheckAllocatorState that checks the bare essentials
 // and bails for anything that cannot be handled with our jit allocators.
 void
@@ -1060,9 +1085,10 @@ MacroAssembler::nurseryAllocate(Register result, Register temp, gc::AllocKind al
     MOZ_ASSERT(initialHeap != gc::TenuredHeap);
 
     // We still need to allocate in the nursery, per the comment in
-    // shouldNurseryAllocate; however, we need to insert into hugeSlots, so
-    // bail to do the nursery allocation in the interpreter.
-    if (nDynamicSlots >= Nursery::MaxNurserySlots) {
+    // shouldNurseryAllocate; however, we need to insert into the
+    // mallocedBuffers set, so bail to do the nursery allocation in the
+    // interpreter.
+    if (nDynamicSlots >= Nursery::MaxNurseryBufferSize / sizeof(Value)) {
         jump(fail);
         return;
     }
@@ -1433,6 +1459,16 @@ MacroAssembler::initGCThing(Register obj, Register temp, JSObject* templateObj,
         storePtr(ImmWord(0), Address(obj, UnboxedPlainObject::offsetOfExpando()));
         if (initContents)
             initUnboxedObjectContents(obj, &templateObj->as<UnboxedPlainObject>());
+    } else if (templateObj->is<UnboxedArrayObject>()) {
+        MOZ_ASSERT(templateObj->as<UnboxedArrayObject>().hasInlineElements());
+        int elementsOffset = UnboxedArrayObject::offsetOfInlineElements();
+        computeEffectiveAddress(Address(obj, elementsOffset), temp);
+        storePtr(temp, Address(obj, UnboxedArrayObject::offsetOfElements()));
+        store32(Imm32(templateObj->as<UnboxedArrayObject>().length()),
+                Address(obj, UnboxedArrayObject::offsetOfLength()));
+        uint32_t capacityIndex = templateObj->as<UnboxedArrayObject>().capacityIndex();
+        store32(Imm32(capacityIndex << UnboxedArrayObject::CapacityShift),
+                Address(obj, UnboxedArrayObject::offsetOfCapacityIndexAndInitializedLength()));
     } else {
         MOZ_CRASH("Unknown object");
     }

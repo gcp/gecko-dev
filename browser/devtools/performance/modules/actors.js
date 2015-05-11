@@ -19,14 +19,17 @@ loader.lazyRequireGetter(this, "TimelineFront",
   "devtools/server/actors/timeline", true);
 loader.lazyRequireGetter(this, "MemoryFront",
   "devtools/server/actors/memory", true);
-loader.lazyRequireGetter(this, "timers",
-  "resource://gre/modules/Timer.jsm");
+loader.lazyRequireGetter(this, "Poller",
+  "devtools/shared/poller", true);
 
 // how often do we pull allocation sites from the memory actor
 const ALLOCATION_SITE_POLL_TIMER = 200; // ms
 
+// how often do we check the status of the profiler's circular buffer
+const PROFILER_CHECK_TIMER = 5000; // ms
+
 const MEMORY_ACTOR_METHODS = [
-  "destroy", "attach", "detach", "getState", "getAllocationsSettings",
+  "attach", "detach", "getState", "getAllocationsSettings",
   "getAllocations", "startRecordingAllocations", "stopRecordingAllocations"
 ];
 
@@ -35,7 +38,7 @@ const TIMELINE_ACTOR_METHODS = [
 ];
 
 const PROFILER_ACTOR_METHODS = [
-  "isActive", "startProfiler", "getStartOptions", "stopProfiler",
+  "startProfiler", "getStartOptions", "stopProfiler",
   "registerEventNotifications", "unregisterEventNotifications"
 ];
 
@@ -45,6 +48,9 @@ const PROFILER_ACTOR_METHODS = [
 function ProfilerFrontFacade (target) {
   this._target = target;
   this._onProfilerEvent = this._onProfilerEvent.bind(this);
+  this._checkProfilerStatus = this._checkProfilerStatus.bind(this);
+  this._PROFILER_CHECK_TIMER = this._target.TEST_MOCK_PROFILER_CHECK_TIMER || PROFILER_CHECK_TIMER;
+
   EventEmitter.decorate(this);
 }
 
@@ -72,6 +78,9 @@ ProfilerFrontFacade.prototype = {
    * Unregisters events for the underlying profiler actor.
    */
   destroy: Task.async(function *() {
+    if (this._poller) {
+      yield this._poller.destroy();
+    }
     yield this.unregisterEventNotifications({ events: this.EVENTS });
     // TODO bug 1159389, listen directly to actor if supporting new front
     this._target.client.removeListener("eventNotification", this._onProfilerEvent);
@@ -79,16 +88,30 @@ ProfilerFrontFacade.prototype = {
 
   /**
    * Starts the profiler actor, if necessary.
+   *
+   * @option {number?} bufferSize
+   * @option {number?} sampleFrequency
    */
   start: Task.async(function *(options={}) {
+    // Check for poller status even if the profiler is already active --
+    // profiler can be activated via `console.profile` or another source, like
+    // the Gecko Profiler.
+    if (!this._poller) {
+      this._poller = new Poller(this._checkProfilerStatus, this._PROFILER_CHECK_TIMER, false);
+    }
+    if (!this._poller.isPolling()) {
+      this._poller.on();
+    }
+
     // Start the profiler only if it wasn't already active. The built-in
     // nsIPerformance module will be kept recording, because it's the same instance
     // for all targets and interacts with the whole platform, so we don't want
     // to affect other clients by stopping (or restarting) it.
-    let profilerStatus = yield this.isActive();
-    if (profilerStatus.isActive) {
+    let { isActive, currentTime, position, generation, totalSize } = yield this.getStatus();
+
+    if (isActive) {
       this.emit("profiler-already-active");
-      return profilerStatus.currentTime;
+      return { startTime: currentTime, position, generation, totalSize };
     }
 
     // Translate options from the recording model into profiler-specific
@@ -101,7 +124,43 @@ ProfilerFrontFacade.prototype = {
     yield this.startProfiler(profilerOptions);
 
     this.emit("profiler-activated");
-    return 0;
+    return { startTime: 0, position, generation, totalSize };
+  }),
+
+  /**
+   * Indicates the end of a recording -- does not actually stop the profiler
+   * (stopProfiler does that), but notes that we no longer need to poll
+   * for buffer status.
+   */
+  stop: Task.async(function *() {
+    yield this._poller.off();
+  }),
+
+  /**
+   * Wrapper around `profiler.isActive()` to take profiler status data and emit.
+   */
+  getStatus: Task.async(function *() {
+    let data = yield (actorCompatibilityBridge("isActive").call(this));
+    // If no data, the last poll for `isActive()` was wrapping up, and the target.client
+    // is now null, so we no longer have data, so just abort here.
+    if (!data) {
+      return;
+    }
+
+    // If TEST_PROFILER_FILTER_STATUS defined (via array of fields), filter
+    // out any field from isActive, used only in tests. Used to filter out
+    // buffer status fields to simulate older geckos.
+    if (this._target.TEST_PROFILER_FILTER_STATUS) {
+      data = Object.keys(data).reduce((acc, prop) => {
+        if (this._target.TEST_PROFILER_FILTER_STATUS.indexOf(prop) === -1) {
+          acc[prop] = data[prop];
+        }
+        return acc;
+      }, {});
+    }
+
+    this.emit("profiler-status", data);
+    return data;
   }),
 
   /**
@@ -135,6 +194,11 @@ ProfilerFrontFacade.prototype = {
       this.emit("profiler-stopped");
     }
   },
+
+  _checkProfilerStatus: Task.async(function *() {
+    // Calling `getStatus()` will emit the "profiler-status" on its own
+    yield this.getStatus();
+  }),
 
   toString: () => "[object ProfilerFrontFacade]"
 };
@@ -200,6 +264,7 @@ exports.TimelineFront = TimelineFrontFacade;
 function MemoryFrontFacade (target) {
   this._target = target;
   this._pullAllocationSites = this._pullAllocationSites.bind(this);
+
   EventEmitter.decorate(this);
 }
 
@@ -214,6 +279,16 @@ MemoryFrontFacade.prototype = {
   }),
 
   /**
+   * Disables polling and destroys actor.
+   */
+  destroy: Task.async(function *() {
+    if (this._poller) {
+      yield this._poller.destroy();
+    }
+    yield this._actor.destroy();
+  }),
+
+  /**
    * Starts polling for allocation information.
    */
   start: Task.async(function *(options) {
@@ -223,12 +298,24 @@ MemoryFrontFacade.prototype = {
 
     yield this.attach();
 
-    let startTime = yield this.startRecordingAllocations({
-      probability: options.allocationsSampleProbability,
-      maxLogLength: options.allocationsMaxLogLength
-    });
+    // Reconstruct our options because the server actor fails when being passed
+    // undefined values in objects.
+    let allocationOptions = {};
+    if (options.allocationsSampleProbability !== void 0) {
+      allocationOptions.probability = options.allocationsSampleProbability;
+    }
+    if (options.allocationsMaxLogLength !== void 0) {
+      allocationOptions.maxLogLength = options.allocationsMaxLogLength;
+    }
 
-    yield this._pullAllocationSites();
+    let startTime = yield this.startRecordingAllocations(allocationOptions);
+
+    if (!this._poller) {
+      this._poller = new Poller(this._pullAllocationSites, ALLOCATION_SITE_POLL_TIMER, false);
+    }
+    if (!this._poller.isPolling()) {
+      this._poller.on();
+    }
 
     return startTime;
   }),
@@ -246,8 +333,8 @@ MemoryFrontFacade.prototype = {
     // be stopped before that method finishes executing. Therefore, we need to
     // wait for the last request to `getAllocations` to finish before actually
     // stopping recording allocations.
+    yield this._poller.off();
     yield this._lastPullAllocationSitesFinished;
-    timers.clearTimeout(this._sitesPullTimeout);
 
     let endTime = yield this.stopRecordingAllocations();
     yield this.detach();
@@ -279,8 +366,6 @@ MemoryFrontFacade.prototype = {
       frames: memoryData.frames,
       counts: memoryData.counts
     });
-
-    this._sitesPullTimeout = timers.setTimeout(this._pullAllocationSites, ALLOCATION_SITE_POLL_TIMER);
 
     resolve();
   }),

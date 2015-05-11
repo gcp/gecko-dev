@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,10 +16,7 @@
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 
-#include "nsIAppsService.h"
 #include "nsIDocument.h"
-#include "nsIScriptSecurityManager.h"
-#include "nsServiceManagerUtils.h"
 #include "nsISupportsPrimitives.h"
 
 #ifdef XP_WIN
@@ -55,36 +53,6 @@ void
 GetOrigin(nsIPrincipal* aPrincipal, nsAString& aOrigin, ErrorResult& aRv)
 {
   MOZ_ASSERT(aPrincipal);
-
-  bool unknownAppId;
-  aRv = aPrincipal->GetUnknownAppId(&unknownAppId);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return;
-  }
-
-  if (!unknownAppId) {
-    uint32_t appId;
-    aRv = aPrincipal->GetAppId(&appId);
-    if (NS_WARN_IF(aRv.Failed())) {
-      return;
-    }
-
-    if (appId != nsIScriptSecurityManager::NO_APP_ID) {
-      // If we are in "app code", use manifest URL as unique origin since
-      // multiple apps can share the same origin but not same broadcast
-      // messages.
-      nsresult rv;
-      nsCOMPtr<nsIAppsService> appsService =
-        do_GetService("@mozilla.org/AppsService;1", &rv);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        aRv.Throw(rv);
-        return;
-      }
-
-      appsService->GetManifestURLByLocalId(appId, aOrigin);
-      return;
-    }
-  }
 
   nsAutoString tmp;
   aRv = nsContentUtils::GetUTFOrigin(aPrincipal, tmp);

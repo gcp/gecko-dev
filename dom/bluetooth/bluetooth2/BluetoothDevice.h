@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -143,6 +143,16 @@ private:
    */
   bool IsDeviceAttributeChanged(BluetoothDeviceAttribute aType,
                                 const BluetoothValue& aValue);
+
+  /**
+   * Parse advertising data to update device properties.
+   *
+   * Parse 'Advertising Data Type' from an inquiry response and set name, UUIDs
+   * and COD if they exist in ADV data.
+   *
+   * @param aAdvData [in] advertising data which provided by the LeScan result.
+   */
+   void UpdatePropertiesFromAdvData(const nsTArray<uint8_t>& aAdvData);
 
   /****************************************************************************
    * Variables

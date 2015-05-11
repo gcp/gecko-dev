@@ -139,7 +139,7 @@ loop.conversation = (function(mozL10n) {
     loop.store.StoreMixin.register({
       conversationAppStore: conversationAppStore,
       conversationStore: conversationStore,
-      feedbackStore: feedbackStore,
+      feedbackStore: feedbackStore
     });
 
     // Obtain the windowId and pass it through
@@ -160,6 +160,9 @@ loop.conversation = (function(mozL10n) {
       dispatcher={dispatcher}
       mozLoop={navigator.mozLoop}
     />, document.querySelector('#main'));
+
+    document.body.setAttribute("dir", mozL10n.getDirection());
+    document.body.setAttribute("platform", loop.shared.utils.getPlatform());
 
     dispatcher.dispatch(new sharedActions.GetWindowData({
       windowId: windowId

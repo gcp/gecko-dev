@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,6 +12,7 @@
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 #include "nsContentUtils.h"
 #include "nsISystemMessagesInternal.h"
+#include "nsIUUIDGenerator.h"
 #include "nsServiceManagerUtils.h"
 #include "nsXULAppAPI.h"
 
@@ -74,6 +75,27 @@ StringToUuid(const char* aString, BluetoothUuid& aUuid)
   memcpy(&aUuid.mUuid[8], &uuid3, sizeof(uint16_t));
   memcpy(&aUuid.mUuid[10], &uuid4, sizeof(uint32_t));
   memcpy(&aUuid.mUuid[14], &uuid5, sizeof(uint16_t));
+}
+
+void
+GenerateUuid(nsAString &aUuidString)
+{
+  nsresult rv;
+  nsCOMPtr<nsIUUIDGenerator> uuidGenerator =
+    do_GetService("@mozilla.org/uuid-generator;1", &rv);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  nsID uuid;
+  rv = uuidGenerator->GenerateUUIDInPlace(&uuid);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  // Build a string in {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx} format
+  char uuidBuffer[NSID_LENGTH];
+  uuid.ToProvidedString(uuidBuffer);
+  NS_ConvertASCIItoUTF16 uuidString(uuidBuffer);
+
+  // Remove {} and the null terminator
+  aUuidString.Assign(Substring(uuidString, 1, NSID_LENGTH - 3));
 }
 
 void

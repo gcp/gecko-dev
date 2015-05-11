@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=2 et lcs=trail\:.,tab\:>~ :
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -54,8 +54,13 @@ ServiceWorkerPeriodicUpdater::Observe(nsISupports* aSubject,
                                       const char* aTopic,
                                       const char16_t* aData)
 {
+  // In tests, the pref is set to false so that the idle-daily service does not
+  // trigger updates leading to intermittent failures.
+  // We're called from SpecialPowers inside tests, in which case we need to
+  // update during the test run, for which we use a non-empty aData.
+  NS_NAMED_LITERAL_STRING(CallerSpecialPowers, "Caller:SpecialPowers");
   if (strcmp(aTopic, OBSERVER_TOPIC_IDLE_DAILY) == 0 &&
-      sPeriodicUpdatesEnabled) {
+      (sPeriodicUpdatesEnabled || (aData && CallerSpecialPowers.Equals(aData)))) {
     // First, update all registrations in the parent process.
     nsCOMPtr<nsIServiceWorkerManager> swm =
       mozilla::services::GetServiceWorkerManager();

@@ -481,18 +481,16 @@ GetScaleForValue(const StyleAnimationValue& aValue, nsIFrame* aFrame)
 }
 
 static float
-GetSuitableScale(float aMaxScale, float aMinScale)
+GetSuitableScale(float aMaxScale, float aMinScale,
+                 nscoord aVisibleDimension, nscoord aDisplayDimension)
 {
-  // If the minimum scale >= 1.0f, use it; if the maximum <= 1.0f, use it;
-  // otherwise use 1.0f.
-  if (aMinScale >= 1.0f) {
-    return aMinScale;
-  }
-  else if (aMaxScale <= 1.0f) {
-    return aMaxScale;
-  }
-
-  return 1.0f;
+  float displayVisibleRatio = float(aDisplayDimension) /
+                              float(aVisibleDimension);
+  // We want to rasterize based on the largest scale used during the
+  // transform animation, unless that would make us rasterize something
+  // larger than the screen.  But we never want to go smaller than the
+  // minimum scale over the animation.
+  return std::max(std::min(aMaxScale, displayVisibleRatio), aMinScale);
 }
 
 static void
@@ -531,7 +529,9 @@ GetMinAndMaxScaleForAnimationProperty(nsIContent* aContent,
 }
 
 gfxSize
-nsLayoutUtils::ComputeSuitableScaleForAnimation(nsIContent* aContent)
+nsLayoutUtils::ComputeSuitableScaleForAnimation(nsIContent* aContent,
+                                                const nsSize& aVisibleSize,
+                                                const nsSize& aDisplaySize)
 {
   gfxSize maxScale(std::numeric_limits<gfxFloat>::min(),
                    std::numeric_limits<gfxFloat>::min());
@@ -556,11 +556,13 @@ nsLayoutUtils::ComputeSuitableScaleForAnimation(nsIContent* aContent)
 
   if (maxScale.width == std::numeric_limits<gfxFloat>::min()) {
     // We didn't encounter a transform
-    maxScale = minScale = gfxSize(1.0, 1.0);
+    return gfxSize(1.0, 1.0);
   }
 
-  return gfxSize(GetSuitableScale(maxScale.width, minScale.width),
-                 GetSuitableScale(maxScale.height, minScale.height));
+  return gfxSize(GetSuitableScale(maxScale.width, minScale.width,
+                                  aVisibleSize.width, aDisplaySize.width),
+                 GetSuitableScale(maxScale.height, minScale.height,
+                                  aVisibleSize.height, aDisplaySize.height));
 }
 
 bool
@@ -2907,10 +2909,10 @@ CalculateFrameMetricsForDisplayPort(nsIScrollableFrame* aScrollFrame) {
   } else {
     compBoundsScale = cumulativeResolution * layerToParentLayerScale;
   }
-  metrics.mCompositionBounds
-      = LayoutDeviceRect::FromAppUnits(nsRect(nsPoint(0, 0), compositionSize),
+  metrics.SetCompositionBounds(
+      LayoutDeviceRect::FromAppUnits(nsRect(nsPoint(0, 0), compositionSize),
                                        presContext->AppUnitsPerDevPixel())
-      * compBoundsScale;
+      * compBoundsScale);
 
   metrics.SetRootCompositionSize(
       nsLayoutUtils::CalculateRootCompositionSize(frame, false, metrics));
@@ -3116,10 +3118,12 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       }
     }
 #if !defined(MOZ_WIDGET_ANDROID) || defined(MOZ_ANDROID_APZ)
-    else if (presShell->GetDocument() && presShell->GetDocument()->IsRootDisplayDocument()) {
+    else if (presShell->GetDocument() && presShell->GetDocument()->IsRootDisplayDocument()
+        && !presShell->GetRootScrollFrame()) {
       // In cases where the root document is a XUL document, we want to take
       // the ViewID from the root element, as that will be the ViewID of the
-      // root APZC in the tree.
+      // root APZC in the tree. Skip doing this in cases where we know
+      // nsGfxScrollFrame::BuilDisplayList will do it instead.
       if (dom::Element* element = presShell->GetDocument()->GetDocumentElement()) {
         id = nsLayoutUtils::FindOrCreateIDFor(element);
       }
@@ -6607,6 +6611,7 @@ nsLayoutUtils::SurfaceFromElement(nsIImageLoadingContent* aElement,
 
   uint32_t status;
   imgRequest->GetImageStatus(&status);
+  result.mHasSize = status & imgIRequest::STATUS_SIZE_AVAILABLE;
   if ((status & imgIRequest::STATUS_LOAD_COMPLETE) == 0) {
     // Spec says to use GetComplete, but that only works on
     // nsIDOMHTMLImageElement, and we support all sorts of other stuff
@@ -6727,6 +6732,7 @@ nsLayoutUtils::SurfaceFromElement(HTMLCanvasElement* aElement,
   // in case this is being used by -moz-element()
   aElement->MarkContextClean();
 
+  result.mHasSize = true;
   result.mSize = size;
   result.mPrincipal = aElement->NodePrincipal();
   result.mIsWriteOnly = aElement->IsWriteOnly();
@@ -6779,6 +6785,7 @@ nsLayoutUtils::SurfaceFromElement(HTMLVideoElement* aElement,
   }
 
   result.mCORSUsed = aElement->GetCORSMode() != CORS_NONE;
+  result.mHasSize = true;
   result.mSize = size;
   result.mPrincipal = principal.forget();
   result.mIsWriteOnly = false;
@@ -7589,69 +7596,118 @@ nsLayoutUtils::GetContentViewerSize(nsPresContext* aPresContext,
   return true;
 }
 
+static bool
+UpdateCompositionBoundsForRCDRSF(ParentLayerRect& aCompBounds,
+                                 nsPresContext* aPresContext,
+                                 const nsRect& aFrameBounds,
+                                 bool aScaleContentViewerSize,
+                                 const LayoutDeviceToLayerScale2D& aCumulativeResolution)
+{
+  nsIFrame* rootFrame = aPresContext->PresShell()->GetRootFrame();
+  if (!rootFrame) {
+    return false;
+  }
+
+  // On Android, we need to do things a bit differently to get things
+  // right (see bug 983208, bug 988882). We use the bounds of the nearest
+  // widget, but clamp the height to the frame bounds height. This clamping
+  // is done to get correct results for a page where the page is sized to
+  // the screen and thus the dynamic toolbar never disappears. In such a
+  // case, we want the composition bounds to exclude the toolbar height,
+  // but the widget bounds includes it. We don't currently have a good way
+  // of knowing about the toolbar height, but clamping to the frame bounds
+  // height gives the correct answer in the cases we care about.
+#ifdef MOZ_WIDGET_ANDROID
+  nsIWidget* widget = rootFrame->GetNearestWidget();
+#else
+  nsView* view = rootFrame->GetView();
+  nsIWidget* widget = view ? view->GetWidget() : nullptr;
+#endif
+
+  if (widget) {
+    nsIntRect widgetBounds;
+    widget->GetBounds(widgetBounds);
+    widgetBounds.MoveTo(0, 0);
+    aCompBounds = ParentLayerRect(ViewAs<ParentLayerPixel>(widgetBounds));
+#ifdef MOZ_WIDGET_ANDROID
+    ParentLayerRect frameBounds =
+          LayoutDeviceRect::FromAppUnits(aFrameBounds, aPresContext->AppUnitsPerDevPixel())
+        * aCumulativeResolution
+        * LayerToParentLayerScale(1.0);
+    if (frameBounds.height < aCompBounds.height) {
+      aCompBounds.height = frameBounds.height;
+    }
+#endif
+    return true;
+  }
+
+  LayoutDeviceIntSize contentSize;
+  if (nsLayoutUtils::GetContentViewerSize(aPresContext, contentSize)) {
+    LayoutDeviceToParentLayerScale scale;
+    if (aScaleContentViewerSize && aPresContext->GetParentPresContext()) {
+      scale = LayoutDeviceToParentLayerScale(
+        aPresContext->GetParentPresContext()->PresShell()->GetCumulativeResolution());
+    }
+    aCompBounds.SizeTo(contentSize * scale);
+    return true;
+  }
+
+  return false;
+}
+
+static bool
+DeflateScrollbarAreaFromCompositionBoundsFor(nsIFrame* aScrollFrame)
+{
+  if (!aScrollFrame || !aScrollFrame->GetScrollTargetFrame()) {
+    return false;
+  }
+  nsPresContext* presContext = aScrollFrame->PresContext();
+  nsIPresShell* presShell = presContext->GetPresShell();
+  if (!presShell) {
+    return false;
+  }
+  bool isRootScrollFrame = aScrollFrame == presShell->GetRootScrollFrame();
+  bool isRootContentDocRootScrollFrame = isRootScrollFrame
+                                      && presContext->IsRootContentDocument();
+  // Exclude any non-overlay scroll bars from the composition bounds.
+  // This is only done for the RCD-RSF case, because otherwise the scroll
+  // port size is used and that already excludes the scroll bars.
+  return isRootContentDocRootScrollFrame &&
+         !LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars);
+}
+
 /* static */ nsSize
-nsLayoutUtils::CalculateCompositionSizeForFrame(nsIFrame* aFrame)
+nsLayoutUtils::CalculateCompositionSizeForFrame(nsIFrame* aFrame, bool aSubtractScrollbars)
 {
   // If we have a scrollable frame, restrict the composition bounds to its
   // scroll port. The scroll port excludes the frame borders and the scroll
   // bars, which we don't want to be part of the composition bounds.
   nsIScrollableFrame* scrollableFrame = aFrame->GetScrollTargetFrame();
-  nsSize size = scrollableFrame ? scrollableFrame->GetScrollPortRect().Size() : aFrame->GetSize();
+  nsRect rect = scrollableFrame ? scrollableFrame->GetScrollPortRect() : aFrame->GetRect();
+  nsSize size = rect.Size();
 
   nsPresContext* presContext = aFrame->PresContext();
   nsIPresShell* presShell = presContext->PresShell();
 
-  // See the comments in the code that calculates the root
-  // composition bounds in ComputeFrameMetrics.
-  // TODO: Reuse that code here.
   bool isRootContentDocRootScrollFrame = presContext->IsRootContentDocument()
                                       && aFrame == presShell->GetRootScrollFrame();
   if (isRootContentDocRootScrollFrame) {
-    if (nsIFrame* rootFrame = presShell->GetRootFrame()) {
-#ifdef MOZ_WIDGET_ANDROID
-      nsIWidget* widget = rootFrame->GetNearestWidget();
-#else
-      nsView* view = rootFrame->GetView();
-      nsIWidget* widget = view ? view->GetWidget() : nullptr;
-#endif
+    ParentLayerRect compBounds;
+    LayoutDeviceToLayerScale2D cumulativeResolution(
+        presShell->GetCumulativeResolution()
+      * nsLayoutUtils::GetTransformToAncestorScale(aFrame));
+    if (UpdateCompositionBoundsForRCDRSF(compBounds, presContext, rect,
+        false, cumulativeResolution)) {
       int32_t auPerDevPixel = presContext->AppUnitsPerDevPixel();
-      if (widget) {
-        nsIntRect widgetBounds;
-        widget->GetBounds(widgetBounds);
-        size = nsSize(widgetBounds.width * auPerDevPixel,
-                      widgetBounds.height * auPerDevPixel);
-#ifdef MOZ_WIDGET_ANDROID
-        nsRect frameRect = aFrame->GetRect();
-        float cumulativeResolution = presShell->GetCumulativeResolution();
-        LayoutDeviceToParentLayerScale layoutToParentLayerScale =
-          // The ScreenToParentLayerScale should be mTransformScale which is
-          // not calculated yet, but we don't yet handle CSS transforms, so we
-          // assume it's 1 here.
-          LayoutDeviceToLayerScale(cumulativeResolution) *
-          LayerToScreenScale(1.0) * ScreenToParentLayerScale(1.0);
-        ParentLayerRect frameRectPixels =
-          LayoutDeviceRect::FromAppUnits(frameRect, auPerDevPixel)
-          * layoutToParentLayerScale;
-        if (frameRectPixels.height < ParentLayerRect(ViewAs<ParentLayerPixel>(widgetBounds)).height) {
-          // Our return value is in appunits of the parent, so we need to
-          // include the resolution.
-          size.height =
-            NSToCoordRound(frameRect.height * cumulativeResolution);
-        }
-#endif
-      } else {
-        LayoutDeviceIntSize contentSize;
-        if (nsLayoutUtils::GetContentViewerSize(presContext, contentSize)) {
-          size = LayoutDevicePixel::ToAppUnits(contentSize, auPerDevPixel);
-        }
-      }
-
-      if (scrollableFrame && !LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars)) {
-        nsMargin margins = scrollableFrame->GetActualScrollbarSizes();
-        size.width -= margins.LeftRight();
-        size.height -= margins.TopBottom();
-      }
+      size = nsSize(compBounds.width * auPerDevPixel, compBounds.height * auPerDevPixel);
     }
+  }
+
+  if (aSubtractScrollbars && DeflateScrollbarAreaFromCompositionBoundsFor(aFrame)) {
+    MOZ_ASSERT(scrollableFrame);
+    nsMargin margins = scrollableFrame->GetActualScrollbarSizes();
+    size.width -= margins.LeftRight();
+    size.height -= margins.TopBottom();
   }
 
   return size;
@@ -7664,7 +7720,7 @@ nsLayoutUtils::CalculateRootCompositionSize(nsIFrame* aFrame,
 {
 
   if (aIsRootContentDocRootScrollFrame) {
-    return ViewAs<LayerPixel>(aMetrics.mCompositionBounds.Size(),
+    return ViewAs<LayerPixel>(aMetrics.GetCompositionBounds().Size(),
                               PixelCastJustification::ParentLayerToLayerForRootComposition)
            * LayerToScreenScale(1.0f)
            / aMetrics.DisplayportPixelsPerCSSPixel();
@@ -7678,44 +7734,22 @@ nsLayoutUtils::CalculateRootCompositionSize(nsIFrame* aFrame,
   }
   nsIPresShell* rootPresShell = nullptr;
   if (rootPresContext) {
-    // See the comments in the code that calculates the root
-    // composition bounds in RecordFrameMetrics.
-    // TODO: Reuse that code here.
-    nsIPresShell* rootPresShell = rootPresContext->PresShell();
+    rootPresShell = rootPresContext->PresShell();
     if (nsIFrame* rootFrame = rootPresShell->GetRootFrame()) {
       LayoutDeviceToLayerScale2D cumulativeResolution(
         rootPresShell->GetCumulativeResolution()
       * nsLayoutUtils::GetTransformToAncestorScale(rootFrame));
-      int32_t rootAUPerDevPixel = rootPresContext->AppUnitsPerDevPixel();
-      LayerSize frameSize =
-        (LayoutDeviceRect::FromAppUnits(rootFrame->GetRect(), rootAUPerDevPixel)
-         * cumulativeResolution).Size();
-      rootCompositionSize = frameSize * LayerToScreenScale(1.0f);
-#ifdef MOZ_WIDGET_ANDROID
-      nsIWidget* widget = rootFrame->GetNearestWidget();
-#else
-      nsView* view = rootFrame->GetView();
-      nsIWidget* widget = view ? view->GetWidget() : nullptr;
-#endif
-      if (widget) {
-        nsIntRect widgetBounds;
-        widget->GetBounds(widgetBounds);
-        rootCompositionSize = ScreenSize(ViewAs<ScreenPixel>(widgetBounds.Size()));
-#ifdef MOZ_WIDGET_ANDROID
-        if (frameSize.height < rootCompositionSize.height) {
-          rootCompositionSize.height = frameSize.height;
-        }
-#endif
+      ParentLayerRect compBounds;
+      if (UpdateCompositionBoundsForRCDRSF(compBounds, rootPresContext,
+          rootFrame->GetRect(), true, cumulativeResolution)) {
+        rootCompositionSize = ViewAs<ScreenPixel>(compBounds.Size(),
+            PixelCastJustification::ScreenIsParentLayerForRoot);
       } else {
-        LayoutDeviceIntSize contentSize;
-        if (nsLayoutUtils::GetContentViewerSize(rootPresContext, contentSize)) {
-          LayoutDeviceToLayerScale scale;
-          if (rootPresContext->GetParentPresContext()) {
-            float res = rootPresContext->GetParentPresContext()->PresShell()->GetCumulativeResolution();
-            scale = LayoutDeviceToLayerScale(res);
-          }
-          rootCompositionSize = contentSize * scale * LayerToScreenScale(1.0f);
-        }
+        int32_t rootAUPerDevPixel = rootPresContext->AppUnitsPerDevPixel();
+        LayerSize frameSize =
+          (LayoutDeviceRect::FromAppUnits(rootFrame->GetRect(), rootAUPerDevPixel)
+           * cumulativeResolution).Size();
+        rootCompositionSize = frameSize * LayerToScreenScale(1.0f);
       }
     }
   } else {
@@ -7727,11 +7761,9 @@ nsLayoutUtils::CalculateRootCompositionSize(nsIFrame* aFrame,
 
   // Adjust composition size for the size of scroll bars.
   nsIFrame* rootRootScrollFrame = rootPresShell ? rootPresShell->GetRootScrollFrame() : nullptr;
-  nsIScrollableFrame* rootScrollableFrame = nullptr;
-  if (rootRootScrollFrame) {
-    rootScrollableFrame = rootRootScrollFrame->GetScrollTargetFrame();
-  }
-  if (rootScrollableFrame && !LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars)) {
+  if (DeflateScrollbarAreaFromCompositionBoundsFor(rootRootScrollFrame)) {
+    nsIScrollableFrame* rootScrollableFrame = rootRootScrollFrame->GetScrollTargetFrame();
+    MOZ_ASSERT(rootScrollableFrame);
     CSSMargin margins = CSSMargin::FromAppUnits(rootScrollableFrame->GetActualScrollbarSizes());
     // Scrollbars are not subject to scaling, so CSS pixels = layer pixels for them.
     rootCompositionSize.width -= margins.LeftRight();
@@ -7835,6 +7867,7 @@ nsLayoutUtils::SurfaceFromElementResult::SurfaceFromElementResult()
   // Use safe default values here
   : mIsWriteOnly(true)
   , mIsStillLoading(false)
+  , mHasSize(false)
   , mCORSUsed(false)
   , mIsPremultiplied(true)
 {
@@ -8184,6 +8217,10 @@ nsLayoutUtils::ComputeFrameMetrics(nsIFrame* aForFrame,
     }
   }
 
+  // If we have the scrollparent being the same as the scroll id, the
+  // compositor-side code could get into an infinite loop while building the
+  // overscroll handoff chain.
+  MOZ_ASSERT(aScrollParentId == FrameMetrics::NULL_SCROLL_ID || scrollId != aScrollParentId);
   metrics.SetScrollId(scrollId);
   metrics.SetIsRoot(aIsRoot);
   metrics.SetScrollParentId(aScrollParentId);
@@ -8234,7 +8271,6 @@ nsLayoutUtils::ComputeFrameMetrics(nsIFrame* aForFrame,
   ParentLayerRect frameBounds = LayoutDeviceRect::FromAppUnits(compositionBounds, auPerDevPixel)
                               * metrics.GetCumulativeResolution()
                               * layerToParentLayerScale;
-  metrics.mCompositionBounds = frameBounds;
 
   // For the root scroll frame of the root content document (RCD-RSF), the above calculation
   // will yield the size of the viewport frame as the composition bounds, which
@@ -8248,55 +8284,19 @@ nsLayoutUtils::ComputeFrameMetrics(nsIFrame* aForFrame,
   bool isRootContentDocRootScrollFrame = isRootScrollFrame
                                       && presContext->IsRootContentDocument();
   if (isRootContentDocRootScrollFrame) {
-    if (nsIFrame* rootFrame = presShell->GetRootFrame()) {
-      // On Android, we need to do things a bit differently to get things
-      // right (see bug 983208, bug 988882). We use the bounds of the nearest
-      // widget, but clamp the height to the frame bounds height. This clamping
-      // is done to get correct results for a page where the page is sized to
-      // the screen and thus the dynamic toolbar never disappears. In such a
-      // case, we want the composition bounds to exclude the toolbar height,
-      // but the widget bounds includes it. We don't currently have a good way
-      // of knowing about the toolbar height, but clamping to the frame bounds
-      // height gives the correct answer in the cases we care about.
-#ifdef MOZ_WIDGET_ANDROID
-      nsIWidget* widget = rootFrame->GetNearestWidget();
-#else
-      nsView* view = rootFrame->GetView();
-      nsIWidget* widget = view ? view->GetWidget() : nullptr;
-#endif
-      if (widget) {
-        nsIntRect widgetBounds;
-        widget->GetBounds(widgetBounds);
-        widgetBounds.MoveTo(0,0);
-        metrics.mCompositionBounds = ParentLayerRect(ViewAs<ParentLayerPixel>(widgetBounds));
-#ifdef MOZ_WIDGET_ANDROID
-        if (frameBounds.height < metrics.mCompositionBounds.height) {
-          metrics.mCompositionBounds.height = frameBounds.height;
-        }
-#endif
-      } else {
-        LayoutDeviceIntSize contentSize;
-        if (nsLayoutUtils::GetContentViewerSize(presContext, contentSize)) {
-          LayoutDeviceToParentLayerScale scale;
-          if (presContext->GetParentPresContext()) {
-            float res = presContext->GetParentPresContext()->PresShell()->GetCumulativeResolution();
-            scale = LayoutDeviceToParentLayerScale(res);
-          }
-          metrics.mCompositionBounds.SizeTo(contentSize * scale);
-        }
-      }
-
-      // Exclude any non-overlay scroll bars from the composition bounds.
-      // This is only done for the RCD-RSF case, because otherwise the scroll
-      // port size is used and that already excludes the scroll bars.
-      if (scrollableFrame && !LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars)) {
-        nsMargin sizes = scrollableFrame->GetActualScrollbarSizes();
-        // Scrollbars are not subject to scaling, so CSS pixels = layer pixels for them.
-        ParentLayerMargin boundMargins = CSSMargin::FromAppUnits(sizes) * CSSToParentLayerScale(1.0f);
-        metrics.mCompositionBounds.Deflate(boundMargins);
-      }
-    }
+    UpdateCompositionBoundsForRCDRSF(frameBounds, presContext,
+      compositionBounds, true, metrics.GetCumulativeResolution());
   }
+
+  if (DeflateScrollbarAreaFromCompositionBoundsFor(aScrollFrame)) {
+    MOZ_ASSERT(scrollableFrame);
+    nsMargin sizes = scrollableFrame->GetActualScrollbarSizes();
+    // Scrollbars are not subject to scaling, so CSS pixels = layer pixels for them.
+    ParentLayerMargin boundMargins = CSSMargin::FromAppUnits(sizes) * CSSToParentLayerScale(1.0f);
+    frameBounds.Deflate(boundMargins);
+  }
+
+  metrics.SetCompositionBounds(frameBounds);
 
   metrics.SetRootCompositionSize(
     nsLayoutUtils::CalculateRootCompositionSize(aScrollFrame ? aScrollFrame : aForFrame,

@@ -70,7 +70,7 @@ XPCOMUtils.defineLazyGetter(this, "is64Bit", () => {
 // White-list buttons that can be toggled to prevent adding prefs for
 // addons that have manually inserted toolbarbuttons into DOM.
 // (By default, supported target is only local tab)
-const ToolboxButtons = [
+const ToolboxButtons = exports.ToolboxButtons = [
   { id: "command-button-pick",
     isTargetSupported: target =>
       target.getTrait("highlightable")
@@ -83,7 +83,8 @@ const ToolboxButtons = [
     isTargetSupported: target => !target.isAddon },
   { id: "command-button-responsive" },
   { id: "command-button-paintflashing" },
-  { id: "command-button-tilt" },
+  { id: "command-button-tilt",
+    commands: "devtools/tilt/tilt-commands" },
   { id: "command-button-scratchpad" },
   { id: "command-button-eyedropper" },
   { id: "command-button-screenshot" },
@@ -108,6 +109,9 @@ function Toolbox(target, selectedTool, hostType, hostOptions) {
   this._target = target;
   this._toolPanels = new Map();
   this._telemetry = new Telemetry();
+
+  this._initInspector = null;
+  this._inspector = null;
 
   this._toolRegistered = this._toolRegistered.bind(this);
   this._toolUnregistered = this._toolUnregistered.bind(this);
@@ -366,7 +370,7 @@ Toolbox.prototype = {
 
       this._pingTelemetry();
 
-      let panel = yield this.selectTool(this._defaultToolId);
+      yield this.selectTool(this._defaultToolId);
 
       // Wait until the original tool is selected so that the split
       // console input will receive focus.
@@ -717,9 +721,12 @@ Toolbox.prototype = {
       this._buildPickerButton();
     }
 
-    // Set the visibility of the built in buttons before adding more buttons
-    // so they are shown before calling into the GCLI actor.
     this.setToolboxButtonsVisibility();
+
+    // Old servers don't have a GCLI Actor, so just return
+    if (!this.target.hasActor("gcli")) {
+      return promise.resolve();
+    }
 
     const options = {
       environment: CommandUtils.createEnvironment(this, '_target')

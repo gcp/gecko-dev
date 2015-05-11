@@ -8,6 +8,7 @@ let {console} = Cu.import("resource://gre/modules/devtools/Console.jsm", {});
 let {gDevTools} = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
 const {DOMHelpers} = Cu.import("resource:///modules/devtools/DOMHelpers.jsm", {});
 const {Hosts} = require("devtools/framework/toolbox-hosts");
+const {defer} = require("sdk/core/promise");
 
 gDevTools.testing = true;
 SimpleTest.registerCleanupFunction(() => {
@@ -241,4 +242,23 @@ function* openAndCloseToolbox(nbOfTimes, usageTime, toolId) {
     info("Closing toolbox " + (i + 1));
     yield gDevTools.closeToolbox(target);
   }
+}
+
+/**
+ * Waits until a predicate returns true.
+ *
+ * @param function predicate
+ *        Invoked once in a while until it returns true.
+ * @param number interval [optional]
+ *        How often the predicate is invoked, in milliseconds.
+ */
+function waitUntil(predicate, interval = 10) {
+  if (predicate()) {
+    return Promise.resolve(true);
+  }
+  return new Promise(resolve => {
+    setTimeout(function() {
+      waitUntil(predicate).then(() => resolve(true));
+    }, interval);
+  });
 }

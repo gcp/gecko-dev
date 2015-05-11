@@ -3020,19 +3020,24 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
 
   } else {
     EventRegions regions;
-    regions.mHitRegion = ScaleRegionToOutsidePixels(data->mHitRegion);
-    regions.mNoActionRegion = ScaleRegionToOutsidePixels(data->mNoActionRegion);
-    regions.mHorizontalPanRegion = ScaleRegionToOutsidePixels(data->mHorizontalPanRegion);
-    regions.mVerticalPanRegion = ScaleRegionToOutsidePixels(data->mVerticalPanRegion);
+    regions.mHitRegion =
+      data->mHitRegion.ToOutsidePixels(mAppUnitsPerDevPixel);
+    regions.mNoActionRegion =
+      data->mNoActionRegion.ToOutsidePixels(mAppUnitsPerDevPixel);
+    regions.mHorizontalPanRegion =
+      data->mHorizontalPanRegion.ToOutsidePixels(mAppUnitsPerDevPixel);
+    regions.mVerticalPanRegion =
+      data->mVerticalPanRegion.ToOutsidePixels(mAppUnitsPerDevPixel);
 
     // Points whose hit-region status we're not sure about need to be dispatched
     // to the content thread. If a point is in both maybeHitRegion and hitRegion
     // then it's not a "maybe" any more, and doesn't go into the dispatch-to-
     // content region.
-    nsIntRegion maybeHitRegion = ScaleRegionToOutsidePixels(data->mMaybeHitRegion);
+    nsIntRegion maybeHitRegion =
+      data->mMaybeHitRegion.ToOutsidePixels(mAppUnitsPerDevPixel);
     regions.mDispatchToContentHitRegion.Sub(maybeHitRegion, regions.mHitRegion);
     regions.mDispatchToContentHitRegion.OrWith(
-        ScaleRegionToOutsidePixels(data->mDispatchToContentHitRegion));
+        data->mDispatchToContentHitRegion.ToOutsidePixels(mAppUnitsPerDevPixel));
     regions.mHitRegion.OrWith(maybeHitRegion);
 
     Matrix mat = layer->GetBaseTransform().As2D();
@@ -4480,7 +4485,9 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
     if (aContainerFrame->GetContent() &&
         nsLayoutUtils::HasAnimationsForCompositor(
           aContainerFrame->GetContent(), eCSSProperty_transform)) {
-      scale = nsLayoutUtils::ComputeSuitableScaleForAnimation(aContainerFrame->GetContent());
+      scale = nsLayoutUtils::ComputeSuitableScaleForAnimation(
+                aContainerFrame->GetContent(), aVisibleRect.Size(),
+                aContainerFrame->PresContext()->GetVisibleArea().Size());
     } else {
       // Scale factors are normalized to a power of 2 to reduce the number of resolution changes
       scale = RoundToFloatPrecision(ThebesMatrix(transform2d).ScaleFactors(true));

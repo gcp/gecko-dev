@@ -52,13 +52,17 @@ EXTRA_JS_MODULES.devtools.shared += [
     'frame-script-utils.js',
     'getjson.js',
     'inplace-editor.js',
+    'node-attribute-parser.js',
     'observable-object.js',
     'options-view.js',
+    'poller.js',
     'source-utils.js',
     'telemetry.js',
     'theme-switching.js',
     'theme.js',
     'undo.js',
+    'worker-helper.js',
+    'worker.js',
 ]
 
 EXTRA_JS_MODULES.devtools.shared.widgets += [

@@ -254,14 +254,14 @@ CompositorScheduler::ResumeComposition()
 }
 
 void
-CompositorScheduler::ForceComposeToTarget(gfx::DrawTarget* aTarget, const nsIntRect* aRect)
+CompositorScheduler::ForceComposeToTarget(gfx::DrawTarget* aTarget, const IntRect* aRect)
 {
   mLastCompose = TimeStamp::Now();
   ComposeToTarget(aTarget, aRect);
 }
 
 void
-CompositorScheduler::ComposeToTarget(gfx::DrawTarget* aTarget, const nsIntRect* aRect)
+CompositorScheduler::ComposeToTarget(gfx::DrawTarget* aTarget, const IntRect* aRect)
 {
   MOZ_ASSERT(CompositorParent::IsInCompositorThread());
   MOZ_ASSERT(mCompositorParent);
@@ -540,7 +540,7 @@ CompositorVsyncScheduler::OnForceComposeToTarget()
 }
 
 void
-CompositorVsyncScheduler::ForceComposeToTarget(gfx::DrawTarget* aTarget, const nsIntRect* aRect)
+CompositorVsyncScheduler::ForceComposeToTarget(gfx::DrawTarget* aTarget, const IntRect* aRect)
 {
   OnForceComposeToTarget();
   CompositorScheduler::ForceComposeToTarget(aTarget, aRect);
@@ -661,12 +661,19 @@ CompositorParent::CompositorParent(nsIWidget* aWidget,
     sIndirectLayerTrees[mRootLayerTreeID].mParent = this;
   }
 
-  if (gfxPrefs::AsyncPanZoomEnabled()) {
+  if (gfxPrefs::AsyncPanZoomEnabled() &&
+#if defined(XP_WIN) || defined(MOZ_WIDGET_COCOA) || defined(MOZ_WIDGET_GTK)
+      // For desktop platforms we only want to use APZ in e10s-enabled windows.
+      // If we ever get input events off the main thread we can consider
+      // relaxing this requirement.
+      aWidget->IsMultiProcessWindow() &&
+#endif
+      (aWidget->WindowType() == eWindowType_toplevel || aWidget->WindowType() == eWindowType_child)) {
     mApzcTreeManager = new APZCTreeManager();
   }
 
   if (UseVsyncComposition()) {
-    NS_WARNING("Enabling vsync compositor\n");
+    NS_WARNING("Enabling vsync compositor");
     mCompositorScheduler = new CompositorVsyncScheduler(this, aWidget);
   } else {
     mCompositorScheduler = new CompositorSoftwareTimerScheduler(this);

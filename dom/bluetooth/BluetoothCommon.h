@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -749,6 +749,22 @@ struct BluetoothGattNotifyParam {
   BluetoothGattId mCharId;
   uint16_t mLength;
   bool mIsNotify;
+};
+
+/**
+ * EIR Data Type, Advertising Data Type (AD Type) and OOB Data Type Definitions
+ * Please refer to https://www.bluetooth.org/en-us/specification/\
+ * assigned-numbers/generic-access-profile
+ */
+enum BluetoothGapDataType {
+  GAP_INCOMPLETE_UUID16  = 0X02, // Incomplete List of 16-bit Service Class UUIDs
+  GAP_COMPLETE_UUID16    = 0X03, // Complete List of 16-bit Service Class UUIDs
+  GAP_INCOMPLETE_UUID32  = 0X04, // Incomplete List of 32-bit Service Class UUIDs
+  GAP_COMPLETE_UUID32    = 0X05, // Complete List of 32-bit Service Class UUIDs»
+  GAP_INCOMPLETE_UUID128 = 0X06, // Incomplete List of 128-bit Service Class UUIDs
+  GAP_COMPLETE_UUID128   = 0X07, // Complete List of 128-bit Service Class UUIDs
+  GAP_SHORTENED_NAME     = 0X08, // Shortened Local Name
+  GAP_COMPLETE_NAME      = 0X09, // Complete Local Name
 };
 
 END_BLUETOOTH_NAMESPACE

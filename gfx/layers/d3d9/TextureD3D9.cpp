@@ -551,7 +551,7 @@ DataTextureSourceD3D9::GetTileRect(uint32_t aTileIndex) const
                  verticalTile < (verticalTiles - 1) ? maxSize : mSize.height % maxSize);
 }
 
-nsIntRect
+IntRect
 DataTextureSourceD3D9::GetTileRect()
 {
   return GetTileRect(mCurrentTile);
@@ -762,6 +762,29 @@ SharedTextureClientD3D9::~SharedTextureClientD3D9()
   MOZ_COUNT_DTOR(SharedTextureClientD3D9);
 }
 
+// static
+TemporaryRef<SharedTextureClientD3D9>
+SharedTextureClientD3D9::Create(ISurfaceAllocator* aAllocator,
+                                gfx::SurfaceFormat aFormat,
+                                TextureFlags aFlags,
+                                IDirect3DTexture9* aTexture,
+                                HANDLE aSharedHandle,
+                                D3DSURFACE_DESC aDesc)
+{
+  RefPtr<SharedTextureClientD3D9> texture =
+    new SharedTextureClientD3D9(aAllocator,
+                                aFormat,
+                                aFlags);
+  MOZ_ASSERT(!texture->mTexture);
+  texture->mTexture = aTexture;
+  texture->mHandle = aSharedHandle;
+  texture->mDesc = aDesc;
+  if (texture->mTexture) {
+    gfxWindowsPlatform::sD3D9SharedTextureUsed += texture->mDesc.Width * texture->mDesc.Height * 4;
+  }
+  return texture;
+}
+
 bool
 SharedTextureClientD3D9::Lock(OpenMode)
 {
@@ -857,7 +880,7 @@ DataTextureSourceD3D9::UpdateFromTexture(IDirect3DTexture9* aTexture,
 
   if (aRegion) {
     nsIntRegionRectIterator iter(*aRegion);
-    const nsIntRect *iterRect;
+    const IntRect *iterRect;
     while ((iterRect = iter.Next())) {
       RECT rect;
       rect.left = iterRect->x;

@@ -1869,7 +1869,7 @@ public class BrowserApp extends GeckoApp
             } else if (event.equals("Prompt:ShowTop")) {
                 // Bring this activity to front so the prompt is visible..
                 Intent bringToFrontIntent = new Intent();
-                bringToFrontIntent.setClassName(AppConstants.ANDROID_PACKAGE_NAME, AppConstants.BROWSER_INTENT_CLASS_NAME);
+                bringToFrontIntent.setClassName(AppConstants.ANDROID_PACKAGE_NAME, AppConstants.MOZ_ANDROID_BROWSER_INTENT_CLASS);
                 bringToFrontIntent.setFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
                 startActivity(bringToFrontIntent);
             } else if (event.equals("Accounts:Exist")) {
@@ -1953,6 +1953,9 @@ public class BrowserApp extends GeckoApp
                 });
             }
         } else {
+            if (mDoorHangerPopup != null) {
+                mDoorHangerPopup.disable();
+            }
             mTabsPanel.show(panel);
         }
     }
@@ -1960,6 +1963,9 @@ public class BrowserApp extends GeckoApp
     @Override
     public void hideTabs() {
         mTabsPanel.hide();
+        if (mDoorHangerPopup != null) {
+            mDoorHangerPopup.enable();
+        }
     }
 
     @Override
@@ -2234,6 +2240,14 @@ public class BrowserApp extends GeckoApp
         // Expected to be fixed by bug 915825.
         hideHomePager(url);
         loadUrlOrKeywordSearch(url);
+        clearSelectedTabApplicationId();
+    }
+
+    private void clearSelectedTabApplicationId() {
+        final Tab selected = Tabs.getInstance().getSelectedTab();
+        if (selected != null) {
+            selected.setApplicationId(null);
+        }
     }
 
     private void loadUrlOrKeywordSearch(final String url) {
@@ -3572,6 +3586,7 @@ public class BrowserApp extends GeckoApp
             startActivity(intent);
         } else if (!maybeSwitchToTab(url, flags)) {
             openUrlAndStopEditing(url);
+            clearSelectedTabApplicationId();
         }
     }
 

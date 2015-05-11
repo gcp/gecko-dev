@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 sw=2 et tw=78: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -503,59 +503,6 @@ nsFrameLoader::GetDocShell(nsIDocShell **aDocShell)
 }
 
 static void
-FirePageHideEvent(nsIDocShellTreeItem* aItem,
-                  EventTarget* aChromeEventHandler)
-{
-  nsCOMPtr<nsIDocument> doc = aItem->GetDocument();
-  NS_ASSERTION(doc, "What happened here?");
-  doc->OnPageHide(true, aChromeEventHandler);
-
-  int32_t childCount = 0;
-  aItem->GetChildCount(&childCount);
-  nsAutoTArray<nsCOMPtr<nsIDocShellTreeItem>, 8> kids;
-  kids.AppendElements(childCount);
-  for (int32_t i = 0; i < childCount; ++i) {
-    aItem->GetChildAt(i, getter_AddRefs(kids[i]));
-  }
-
-  for (uint32_t i = 0; i < kids.Length(); ++i) {
-    if (kids[i]) {
-      FirePageHideEvent(kids[i], aChromeEventHandler);
-    }
-  }
-}
-
-// The pageshow event is fired for a given document only if IsShowing() returns
-// the same thing as aFireIfShowing.  This gives us a way to fire pageshow only
-// on documents that are still loading or only on documents that are already
-// loaded.
-static void
-FirePageShowEvent(nsIDocShellTreeItem* aItem,
-                  EventTarget* aChromeEventHandler,
-                  bool aFireIfShowing)
-{
-  int32_t childCount = 0;
-  aItem->GetChildCount(&childCount);
-  nsAutoTArray<nsCOMPtr<nsIDocShellTreeItem>, 8> kids;
-  kids.AppendElements(childCount);
-  for (int32_t i = 0; i < childCount; ++i) {
-    aItem->GetChildAt(i, getter_AddRefs(kids[i]));
-  }
-
-  for (uint32_t i = 0; i < kids.Length(); ++i) {
-    if (kids[i]) {
-      FirePageShowEvent(kids[i], aChromeEventHandler, aFireIfShowing);
-    }
-  }
-
-  nsCOMPtr<nsIDocument> doc = aItem->GetDocument();
-  NS_ASSERTION(doc, "What happened here?");
-  if (doc->IsShowing() == aFireIfShowing) {
-    doc->OnPageShow(true, aChromeEventHandler);
-  }
-}
-
-static void
 SetTreeOwnerAndChromeEventHandlerOnDocshellTree(nsIDocShellTreeItem* aItem,
                                                 nsIDocShellTreeOwner* aOwner,
                                                 EventTarget* aHandler)
@@ -1023,6 +970,9 @@ nsFrameLoader::SwapWithOtherRemoteLoader(nsFrameLoader* aOther,
   otherDoc->FlushPendingNotifications(Flush_Layout);
 
   mInSwap = aOther->mInSwap = false;
+
+  unused << mRemoteBrowser->SendSwappedWithOtherRemoteLoader();
+  unused << aOther->mRemoteBrowser->SendSwappedWithOtherRemoteLoader();
   return NS_OK;
 }
 
@@ -1199,25 +1149,25 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
   // Fire pageshow events on still-loading pages, and then fire pagehide
   // events.  Note that we do NOT fire these in the normal way, but just fire
   // them on the chrome event handlers.
-  FirePageShowEvent(ourDocshell, ourEventTarget, false);
-  FirePageShowEvent(otherDocshell, otherEventTarget, false);
-  FirePageHideEvent(ourDocshell, ourEventTarget);
-  FirePageHideEvent(otherDocshell, otherEventTarget);
+  nsContentUtils::FirePageShowEvent(ourDocshell, ourEventTarget, false);
+  nsContentUtils::FirePageShowEvent(otherDocshell, otherEventTarget, false);
+  nsContentUtils::FirePageHideEvent(ourDocshell, ourEventTarget);
+  nsContentUtils::FirePageHideEvent(otherDocshell, otherEventTarget);
   
   nsIFrame* ourFrame = ourContent->GetPrimaryFrame();
   nsIFrame* otherFrame = otherContent->GetPrimaryFrame();
   if (!ourFrame || !otherFrame) {
     mInSwap = aOther->mInSwap = false;
-    FirePageShowEvent(ourDocshell, ourEventTarget, true);
-    FirePageShowEvent(otherDocshell, otherEventTarget, true);
+    nsContentUtils::FirePageShowEvent(ourDocshell, ourEventTarget, true);
+    nsContentUtils::FirePageShowEvent(otherDocshell, otherEventTarget, true);
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
   nsSubDocumentFrame* ourFrameFrame = do_QueryFrame(ourFrame);
   if (!ourFrameFrame) {
     mInSwap = aOther->mInSwap = false;
-    FirePageShowEvent(ourDocshell, ourEventTarget, true);
-    FirePageShowEvent(otherDocshell, otherEventTarget, true);
+    nsContentUtils::FirePageShowEvent(ourDocshell, ourEventTarget, true);
+    nsContentUtils::FirePageShowEvent(otherDocshell, otherEventTarget, true);
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
@@ -1225,8 +1175,8 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
   rv = ourFrameFrame->BeginSwapDocShells(otherFrame);
   if (NS_FAILED(rv)) {
     mInSwap = aOther->mInSwap = false;
-    FirePageShowEvent(ourDocshell, ourEventTarget, true);
-    FirePageShowEvent(otherDocshell, otherEventTarget, true);
+    nsContentUtils::FirePageShowEvent(ourDocshell, ourEventTarget, true);
+    nsContentUtils::FirePageShowEvent(otherDocshell, otherEventTarget, true);
     return rv;
   }
 
@@ -1329,8 +1279,8 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
   ourParentDocument->FlushPendingNotifications(Flush_Layout);
   otherParentDocument->FlushPendingNotifications(Flush_Layout);
 
-  FirePageShowEvent(ourDocshell, ourEventTarget, true);
-  FirePageShowEvent(otherDocshell, otherEventTarget, true);
+  nsContentUtils::FirePageShowEvent(ourDocshell, ourEventTarget, true);
+  nsContentUtils::FirePageShowEvent(otherDocshell, otherEventTarget, true);
 
   mInSwap = aOther->mInSwap = false;
   return NS_OK;

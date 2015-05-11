@@ -1085,7 +1085,7 @@ NewObject(ExclusiveContext* cx, HandleObjectGroup group, gc::AllocKind kind,
 
     MOZ_ASSERT(clasp != &ArrayObject::class_);
     MOZ_ASSERT_IF(clasp == &JSFunction::class_,
-                  kind == JSFunction::FinalizeKind || kind == JSFunction::ExtendedFinalizeKind);
+                  kind == AllocKind::FUNCTION || kind == AllocKind::FUNCTION_EXTENDED);
 
     // For objects which can have fixed data following the object, only use
     // enough fixed slots to cover the number of reserved slots in the object,
@@ -3963,6 +3963,16 @@ JSObject::allocKindForTenure(const js::Nursery& nursery) const
     if (is<UnboxedPlainObject>()) {
         size_t nbytes = as<UnboxedPlainObject>().layoutDontCheckGeneration().size();
         return GetGCObjectKindForBytes(UnboxedPlainObject::offsetOfData() + nbytes);
+    }
+
+    // Unboxed arrays use inline data if their size is small enough.
+    if (is<UnboxedArrayObject>()) {
+        const UnboxedArrayObject* nobj = &as<UnboxedArrayObject>();
+        size_t nbytes = UnboxedArrayObject::offsetOfInlineElements() +
+                        nobj->capacity() * nobj->elementSize();
+        if (nbytes <= JSObject::MAX_BYTE_SIZE)
+            return GetGCObjectKindForBytes(nbytes);
+        return AllocKind::OBJECT0;
     }
 
     // Inlined typed objects are followed by their data, so make sure we copy

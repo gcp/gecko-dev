@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -50,6 +50,14 @@ ReversedUuidToString(const BluetoothUuid& aUuid, nsAString& aString);
  */
 void
 StringToUuid(const char* aString, BluetoothUuid& aUuid);
+
+/**
+ * Generate a random uuid.
+ *
+ * @param aUuidString [out] String to store the generated uuid.
+ */
+void
+GenerateUuid(nsAString &aUuidString);
 
 //
 // Generate bluetooth signal path from GattId

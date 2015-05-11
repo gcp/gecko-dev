@@ -2287,8 +2287,13 @@ TryReuseArrayGroup(JSObject* obj, ArrayObject* narr)
      */
     MOZ_ASSERT(ObjectGroup::hasDefaultNewGroup(narr->getProto(), &ArrayObject::class_, narr->group()));
 
-    if (obj->is<ArrayObject>() && !obj->isSingleton() && obj->getProto() == narr->getProto())
+    if (obj->is<ArrayObject>() &&
+        !obj->isSingleton() &&
+        !obj->group()->hasUnanalyzedPreliminaryObjects() &&
+        obj->getProto() == narr->getProto())
+    {
         narr->setGroup(obj->group());
+    }
 }
 
 /*
@@ -3257,7 +3262,7 @@ const Class ArrayObject::class_ = {
     nullptr, /* construct */
     nullptr, /* trace */
     {
-        GenericCreateConstructor<ArrayConstructor, 1, JSFunction::FinalizeKind>,
+        GenericCreateConstructor<ArrayConstructor, 1, gc::AllocKind::FUNCTION>,
         CreateArrayPrototype,
         array_static_methods,
         nullptr,

@@ -302,6 +302,10 @@ public:
 
     virtual bool RecvUpdateServiceWorkerRegistrations() override;
 
+    virtual bool RecvRemoveServiceWorkerRegistrationsForDomain(const nsString& aDomain) override;
+
+    virtual bool RecvRemoveServiceWorkerRegistrations() override;
+
     virtual bool RecvNotifyVisited(const URIParams& aURI) override;
     // auto remove when alertfinished is received.
     nsresult AddRemoteAlertObserver(const nsString& aData, nsIObserver* aObserver);
@@ -360,6 +364,7 @@ public:
                                       const bool& aIsUnmounting,
                                       const bool& aIsRemovable,
                                       const bool& aIsHotSwappable) override;
+    virtual bool RecvVolumeRemoved(const nsString& aFsName) override;
 
     virtual bool RecvNuwaFork() override;
 

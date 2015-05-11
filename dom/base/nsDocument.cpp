@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 sw=2 et tw=78: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -270,14 +270,14 @@ nsIdentifierMapEntry::Traverse(nsCycleCollectionTraversalCallback* aCallback)
 bool
 nsIdentifierMapEntry::IsEmpty()
 {
-  return mIdContentList.Count() == 0 && !mNameContentList &&
+  return mIdContentList.IsEmpty() && !mNameContentList &&
          !mChangeCallbacks && !mImageElement;
 }
 
 Element*
 nsIdentifierMapEntry::GetIdElement()
 {
-  return static_cast<Element*>(mIdContentList.SafeElementAt(0));
+  return mIdContentList.SafeElementAt(0);
 }
 
 Element*
@@ -289,8 +289,8 @@ nsIdentifierMapEntry::GetImageIdElement()
 void
 nsIdentifierMapEntry::AppendAllIdContent(nsCOMArray<nsIContent>* aElements)
 {
-  for (int32_t i = 0; i < mIdContentList.Count(); ++i) {
-    aElements->AppendObject(static_cast<Element*>(mIdContentList[i]));
+  for (size_t i = 0; i < mIdContentList.Length(); ++i) {
+    aElements->AppendObject(mIdContentList[i]);
   }
 }
 
@@ -592,16 +592,15 @@ bool
 nsIdentifierMapEntry::AddIdElement(Element* aElement)
 {
   NS_PRECONDITION(aElement, "Must have element");
-  NS_PRECONDITION(mIdContentList.IndexOf(nullptr) < 0,
+  NS_PRECONDITION(!mIdContentList.Contains(nullptr),
                   "Why is null in our list?");
 
 #ifdef DEBUG
-  Element* currentElement =
-    static_cast<Element*>(mIdContentList.SafeElementAt(0));
+  Element* currentElement = mIdContentList.SafeElementAt(0);
 #endif
 
   // Common case
-  if (mIdContentList.Count() == 0) {
+  if (mIdContentList.IsEmpty()) {
     if (!mIdContentList.AppendElement(aElement))
       return false;
     NS_ASSERTION(currentElement == nullptr, "How did that happen?");
@@ -613,7 +612,7 @@ nsIdentifierMapEntry::AddIdElement(Element* aElement)
   // with us.  Search for the right place to insert the content.
 
   size_t idx;
-  if (BinarySearchIf(mIdContentList, 0, mIdContentList.Count(),
+  if (BinarySearchIf(mIdContentList, 0, mIdContentList.Length(),
                      PositionComparator(aElement), &idx)) {
     // Already in the list, so already in the right spot.  Get out of here.
     // XXXbz this only happens because XUL does all sorts of random
@@ -621,12 +620,12 @@ nsIdentifierMapEntry::AddIdElement(Element* aElement)
     return true;
   }
 
-  if (!mIdContentList.InsertElementAt(aElement, idx))
+  if (!mIdContentList.InsertElementAt(idx, aElement)) {
     return false;
+  }
 
   if (idx == 0) {
-    Element* oldElement =
-      static_cast<Element*>(mIdContentList.SafeElementAt(1));
+    Element* oldElement = mIdContentList.SafeElementAt(1);
     NS_ASSERTION(currentElement == oldElement, "How did that happen?");
     FireChangeCallbacks(oldElement, aElement);
   }
@@ -645,17 +644,15 @@ nsIdentifierMapEntry::RemoveIdElement(Element* aElement)
   // Only assert this in HTML documents for now as XUL does all sorts of weird
   // crap.
   NS_ASSERTION(!aElement->OwnerDoc()->IsHTMLDocument() ||
-               mIdContentList.IndexOf(aElement) >= 0,
+               mIdContentList.Contains(aElement),
                "Removing id entry that doesn't exist");
 
   // XXXbz should this ever Compact() I guess when all the content is gone
   // we'll just get cleaned up in the natural order of things...
-  Element* currentElement =
-    static_cast<Element*>(mIdContentList.SafeElementAt(0));
+  Element* currentElement = mIdContentList.SafeElementAt(0);
   mIdContentList.RemoveElement(aElement);
   if (currentElement == aElement) {
-    FireChangeCallbacks(currentElement,
-                        static_cast<Element*>(mIdContentList.SafeElementAt(0)));
+    FireChangeCallbacks(currentElement, mIdContentList.SafeElementAt(0));
   }
 }
 
@@ -1722,11 +1719,8 @@ nsDocument::~nsDocument()
 
   // Kill the subdocument map, doing this will release its strong
   // references, if any.
-  if (mSubDocuments) {
-    PL_DHashTableDestroy(mSubDocuments);
-
-    mSubDocuments = nullptr;
-  }
+  delete mSubDocuments;
+  mSubDocuments = nullptr;
 
   // Destroy link map now so we don't waste time removing
   // links one by one
@@ -1779,10 +1773,6 @@ nsDocument::~nsDocument()
   }
 
   mPendingTitleChangeEvent.Revoke();
-
-  for (uint32_t i = 0; i < mHostObjectURIs.Length(); ++i) {
-    nsHostObjectProtocolHandler::RemoveDataEntry(mHostObjectURIs[i]);
-  }
 
   // We don't want to leave residual locks on images. Make sure we're in an
   // unlocked state, and then clear the table.
@@ -2050,10 +2040,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsDocument)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCSSLoader)
 
-  for (uint32_t i = 0; i < tmp->mHostObjectURIs.Length(); ++i) {
-    nsHostObjectProtocolHandler::Traverse(tmp->mHostObjectURIs[i], cb);
-  }
-
   // We own only the items in mDOMMediaQueryLists that have listeners;
   // this reference is managed by their AddListener and RemoveListener
   // methods.
@@ -2138,10 +2124,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
     tmp->mStyleSheetSetList = nullptr;
   }
 
-  if (tmp->mSubDocuments) {
-    PL_DHashTableDestroy(tmp->mSubDocuments);
-    tmp->mSubDocuments = nullptr;
-  }
+  delete tmp->mSubDocuments;
+  tmp->mSubDocuments = nullptr;
 
   tmp->mFrameRequestCallbacks.Clear();
 
@@ -2163,10 +2147,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
   if (tmp->mCSSLoader) {
     tmp->mCSSLoader->DropDocumentReference();
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mCSSLoader)
-  }
-
-  for (uint32_t i = 0; i < tmp->mHostObjectURIs.Length(); ++i) {
-    nsHostObjectProtocolHandler::RemoveDataEntry(tmp->mHostObjectURIs[i]);
   }
 
   // We own only the items in mDOMMediaQueryLists that have listeners;
@@ -2343,11 +2323,8 @@ nsDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
 
   // Delete references to sub-documents and kill the subdocument map,
   // if any. It holds strong references
-  if (mSubDocuments) {
-    PL_DHashTableDestroy(mSubDocuments);
-
-    mSubDocuments = nullptr;
-  }
+  delete mSubDocuments;
+  mSubDocuments = nullptr;
 
   // Destroy link map now so we don't waste time removing
   // links one by one
@@ -4054,7 +4031,7 @@ nsDocument::SetSubDocumentFor(Element* aElement, nsIDocument* aSubDoc)
         SubDocInitEntry
       };
 
-      mSubDocuments = PL_NewDHashTable(&hash_table_ops, sizeof(SubDocMapEntry));
+      mSubDocuments = new PLDHashTable(&hash_table_ops, sizeof(SubDocMapEntry));
     }
 
     // Add a mapping to the hash table
@@ -5048,7 +5025,7 @@ nsDocument::GetElementById(const nsAString& aElementId)
   return entry ? entry->GetIdElement() : nullptr;
 }
 
-const nsSmallVoidArray*
+const nsTArray<Element*>*
 nsDocument::GetAllElementsForId(const nsAString& aElementId) const
 {
   if (aElementId.IsEmpty()) {
@@ -5056,7 +5033,7 @@ nsDocument::GetAllElementsForId(const nsAString& aElementId) const
   }
 
   nsIdentifierMapEntry *entry = mIdentifierMap.GetEntry(aElementId);
-  return entry ? entry->GetIdElements() : nullptr;
+  return entry ? &entry->GetIdElements() : nullptr;
 }
 
 NS_IMETHODIMP
@@ -10068,18 +10045,6 @@ nsDocument::GetTemplateContentsOwner()
 }
 
 void
-nsDocument::RegisterHostObjectUri(const nsACString& aUri)
-{
-  mHostObjectURIs.AppendElement(aUri);
-}
-
-void
-nsDocument::UnregisterHostObjectUri(const nsACString& aUri)
-{
-  mHostObjectURIs.RemoveElement(aUri);
-}
-
-void
 nsDocument::SetScrollToRef(nsIURI *aDocumentURI)
 {
   if (!aDocumentURI) {
@@ -11266,6 +11231,12 @@ ExitFullscreenInDocTree(nsIDocument* aMaybeNotARootDoc)
   NS_ASSERTION(!root->IsFullScreenDoc(),
     "Fullscreen root should no longer be a fullscreen doc...");
 
+  // Dispatch MozExitedDomFullscreen to the last document in
+  // the list since we want this event to follow the same path
+  // MozEnteredDomFullscreen dispatched.
+  nsRefPtr<AsyncEventDispatcher> asyncDispatcher = new AsyncEventDispatcher(
+    changed.LastElement(), NS_LITERAL_STRING("MozExitedDomFullscreen"), true, true);
+  asyncDispatcher->PostDOMEvent();
   // Move the top-level window out of fullscreen mode.
   SetWindowFullScreen(root, false);
 }
@@ -11422,6 +11393,9 @@ nsDocument::RestorePreviousFullScreenState()
     // move the top-level window out of fullscreen mode.
     NS_ASSERTION(!GetFullscreenRootDocument(this)->IsFullScreenDoc(),
       "Should have cleared all docs' stacks");
+    nsRefPtr<AsyncEventDispatcher> asyncDispatcher = new AsyncEventDispatcher(
+      this, NS_LITERAL_STRING("MozExitedDomFullscreen"), true, true);
+    asyncDispatcher->PostDOMEvent();
     SetWindowFullScreen(this, false);
   }
 }

@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -442,12 +442,8 @@ BluetoothHfpManager::Reset()
 bool
 BluetoothHfpManager::Init()
 {
-#ifdef MOZ_B2G_BT_API_V2
   // The function must run at b2g process since it would access SettingsService.
   MOZ_ASSERT(IsMainProcess());
-#else
-// Missing in bluetooth1
-#endif
   MOZ_ASSERT(NS_IsMainThread());
 
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
@@ -597,11 +593,8 @@ BluetoothHfpManager::HandleVolumeChanged(nsISupports* aSubject)
   //  {"key":"volumeup", "value":10}
   //  {"key":"volumedown", "value":2}
 
-#ifdef MOZ_B2G_BT_API_V2
   RootedDictionary<dom::SettingChangeNotification> setting(nsContentUtils::RootingCx());
-#else
-  RootedDictionary<SettingChangeNotification> setting(nsContentUtils::RootingCx());
-#endif
+
   if (!WrappedJSToDictionary(aSubject, setting)) {
     return;
   }
@@ -1115,20 +1108,7 @@ BluetoothHfpManager::ReceiveSocketData(BluetoothSocket* aSocket,
     }
 #endif // MOZ_B2G_RIL
   } else {
-#ifdef MOZ_B2G_BT_API_V2
-    nsCString warningMsg;
-    warningMsg.Append(NS_LITERAL_CSTRING("Unsupported AT command: "));
-    warningMsg.Append(msg);
-    warningMsg.Append(NS_LITERAL_CSTRING(", reply with ERROR"));
-    BT_WARNING(warningMsg.get());
-#else
-    nsCString warningMsg;
-    warningMsg.AppendLiteral("Unsupported AT command: ");
-    warningMsg.Append(msg);
-    warningMsg.AppendLiteral(", reply with ERROR");
-    BT_WARNING(warningMsg.get());
-#endif
-
+    BT_WARNING("Unsupported AT command: %s, reply with ERROR", msg.get());
     SendLine("ERROR");
     return;
   }
@@ -1700,11 +1680,7 @@ BluetoothHfpManager::HandleCallStateChanged(uint32_t aCallIndex,
           GetNumberOfCalls(nsITelephonyService::CALL_STATE_DISCONNECTED)) {
         // In order to let user hear busy tone via connected Bluetooth headset,
         // we postpone the timing of dropping SCO.
-#ifdef MOZ_B2G_BT_API_V2
         if (!(aError.Equals(NS_LITERAL_STRING("BusyError")))) {
-#else
-        if (!(aError.EqualsLiteral("BusyError"))) {
-#endif
           DisconnectSco();
         } else {
           // Close Sco later since Dialer is still playing busy tone via HF.

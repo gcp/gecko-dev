@@ -127,14 +127,13 @@
  * There are also special classes HeapValue and HeapId, which barrier js::Value
  * and jsid, respectively.
  *
- * One additional note: not all object writes need to be barriered. Writes to
- * newly allocated objects do not need a pre-barrier.  In these cases, we use
+ * One additional note: not all object writes need to be pre-barriered. Writes
+ * to newly allocated objects do not need a pre-barrier. In these cases, we use
  * the "obj->field.init(value)" method instead of "obj->field = value". We use
  * the init naming idiom in many places to signify that a field is being
  * assigned for the first time.
  *
- * For each of pointers, Values and jsids this file implements four classes,
- * illustrated here for the pointer (Ptr) classes:
+ * This file implements four classes, illustrated here:
  *
  * BarrieredBase          abstract base class which provides common operations
  *  |  |  |
@@ -144,9 +143,27 @@
  *  |
  * RelocatablePtr         provides pre- and post-barriers and is relocatable
  *
+ * The implementation of the barrier logic is implemented on T::writeBarrier.*,
+ * via:
+ *
+ * BarrieredBase<T>::pre
+ *  -> InternalGCMethods<T*>::preBarrier
+ *      -> T::writeBarrierPre
+ *  -> InternalGCMethods<Value>::preBarrier
+ *  -> InternalGCMethods<jsid>::preBarrier
+ *      -> InternalGCMethods<T*>::preBarrier
+ *          -> T::writeBarrierPre
+ *
+ * HeapPtr<T>::post and RelocatablePtr<T>::post
+ *  -> InternalGCMethods<T*>::postBarrier
+ *      -> T::writeBarrierPost
+ *  -> InternalGCMethods<Value>::postBarrier
+ *      -> StoreBuffer::put
+ *
  * These classes are designed to be used by the internals of the JS engine.
- * Barriers designed to be used externally are provided in
- * js/public/RootingAPI.h.
+ * Barriers designed to be used externally are provided in js/RootingAPI.h.
+ * These external barriers call into the same post-barrier implementations at
+ * InternalGCMethods<T>::post via an indirect call to Heap(.+)Barrier.
  */
 
 class JSAtom;
@@ -732,6 +749,7 @@ typedef ReadBarriered<DebugScopeObject*> ReadBarrieredDebugScopeObject;
 typedef ReadBarriered<GlobalObject*> ReadBarrieredGlobalObject;
 typedef ReadBarriered<JSFunction*> ReadBarrieredFunction;
 typedef ReadBarriered<JSObject*> ReadBarrieredObject;
+typedef ReadBarriered<JSScript*> ReadBarrieredScript;
 typedef ReadBarriered<ScriptSourceObject*> ReadBarrieredScriptSourceObject;
 typedef ReadBarriered<Shape*> ReadBarrieredShape;
 typedef ReadBarriered<UnownedBaseShape*> ReadBarrieredUnownedBaseShape;
@@ -793,6 +811,8 @@ class HeapSlot : public BarrieredBase<Value>
         reinterpret_cast<HeapSlot*>(const_cast<Value*>(&target))->post(owner, kind, slot, target);
     }
 
+    Value* unsafeGet() { return &value; }
+
   private:
     void post(NativeObject* owner, Kind kind, uint32_t slot, const Value& target) {
         MOZ_ASSERT(preconditionForWriteBarrierPost(owner, kind, slot, target));
@@ -803,22 +823,6 @@ class HeapSlot : public BarrieredBase<Value>
         }
     }
 };
-
-static inline const Value*
-Valueify(const BarrieredBase<Value>* array)
-{
-    JS_STATIC_ASSERT(sizeof(HeapValue) == sizeof(Value));
-    JS_STATIC_ASSERT(sizeof(HeapSlot) == sizeof(Value));
-    return (const Value*)array;
-}
-
-static inline HeapValue*
-HeapValueify(Value* v)
-{
-    JS_STATIC_ASSERT(sizeof(HeapValue) == sizeof(Value));
-    JS_STATIC_ASSERT(sizeof(HeapSlot) == sizeof(Value));
-    return (HeapValue*)v;
-}
 
 class HeapSlotArray
 {
@@ -838,7 +842,11 @@ class HeapSlotArray
 #endif
     {}
 
-    operator const Value*() const { return Valueify(array); }
+    operator const Value*() const {
+        JS_STATIC_ASSERT(sizeof(HeapValue) == sizeof(Value));
+        JS_STATIC_ASSERT(sizeof(HeapSlot) == sizeof(Value));
+        return reinterpret_cast<const Value*>(array);
+    }
     operator HeapSlot*() const { MOZ_ASSERT(allowWrite()); return array; }
 
     HeapSlotArray operator +(int offset) const { return HeapSlotArray(array + offset, allowWrite()); }

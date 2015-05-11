@@ -37,6 +37,7 @@
 #include "nsPerformance.h"
 #include "nsINetworkInterceptController.h"
 #include "mozIThirdPartyUtil.h"
+#include "nsStreamUtils.h"
 
 #include <algorithm>
 
@@ -563,6 +564,51 @@ HttpBaseChannel::SetUploadStream(nsIInputStream *stream,
   mUploadStream = stream;
   return NS_OK;
 }
+
+static void
+EnsureStreamBuffered(nsCOMPtr<nsIInputStream>& aStream)
+{
+  if (!NS_InputStreamIsBuffered(aStream)) {
+    nsCOMPtr<nsIInputStream> bufferedStream;
+    nsresult rv = NS_NewBufferedInputStream(getter_AddRefs(bufferedStream),
+                                            aStream,
+                                            4096);
+    NS_ENSURE_SUCCESS_VOID(rv);
+    aStream.swap(bufferedStream);
+  }
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::CloneUploadStream(nsIInputStream** aClonedStream)
+{
+  NS_ENSURE_ARG_POINTER(aClonedStream);
+  *aClonedStream = nullptr;
+
+  if (!mUploadStream) {
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIInputStream> clonedStream;
+  nsCOMPtr<nsIInputStream> replacementStream;
+  nsresult rv = NS_CloneInputStream(mUploadStream, getter_AddRefs(clonedStream),
+                                    getter_AddRefs(replacementStream));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (replacementStream) {
+    mUploadStream.swap(replacementStream);
+
+    // Ensure that the replacement stream is buffered.
+    EnsureStreamBuffered(mUploadStream);
+  }
+
+  // Ensure that the cloned stream is buffered.
+  EnsureStreamBuffered(clonedStream);
+
+  clonedStream.forget(aClonedStream);
+
+  return NS_OK;
+}
+
 
 //-----------------------------------------------------------------------------
 // HttpBaseChannel::nsIUploadChannel2
@@ -2310,16 +2356,17 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
     // Transfer existing redirect information. Add all of our existing
     // redirects to the new channel.
     for (int32_t i = 0; i < mRedirects.Count(); ++i) {
-#ifdef PR_LOGGING
-      nsCOMPtr<nsIURI> uri;
-      mRedirects[i]->GetURI(getter_AddRefs(uri));
-      nsCString spec;
-      if (uri) {
-        uri->GetSpec(spec);
+      if (LOG_ENABLED()) {
+        nsCOMPtr<nsIURI> uri;
+        mRedirects[i]->GetURI(getter_AddRefs(uri));
+        nsCString spec;
+        if (uri) {
+          uri->GetSpec(spec);
+        }
+        LOG(("HttpBaseChannel::SetupReplacementChannel adding redirect \'%s\' "
+             "[this=%p]", spec.get(), this));
       }
-      LOG(("HttpBaseChannel::SetupReplacementChannel adding redirect \'%s\' "
-           "[this=%p]", spec.get(), this));
-#endif
+
       httpInternal->AddRedirect(mRedirects[i]);
     }
 

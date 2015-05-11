@@ -154,9 +154,6 @@ user_pref("layout.css.object-fit-and-position.enabled", true);
 // Enable CSS Ruby for testing
 user_pref("layout.css.ruby.enabled", true);
 
-// Enable CSS Font Loading API for testing
-user_pref("layout.css.font-loading-api.enabled", true);
-
 // Enable unicode-range for testing
 user_pref("layout.css.unicode-range.enabled", true);
 
@@ -246,6 +243,7 @@ user_pref("identity.fxaccounts.remote.signup.uri", "https://%(server)s/fxa-signu
 user_pref("identity.fxaccounts.remote.force_auth.uri", "https://%(server)s/fxa-force-auth");
 user_pref("identity.fxaccounts.remote.signin.uri", "https://%(server)s/fxa-signin");
 user_pref("identity.fxaccounts.settings.uri", "https://%(server)s/fxa-settings");
+user_pref('identity.fxaccounts.remote.webchannel.uri', 'https://%(server)s/');
 
 // Enable logging of APZ test data (see bug 961289).
 user_pref('apz.test.logging_enabled', true);

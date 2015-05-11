@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -813,6 +814,7 @@ Console::Trace(JSContext* aCx)
 
 // Displays an interactive listing of all the properties of an object.
 METHOD(Dir, "dir");
+METHOD(Dirxml, "dirxml");
 
 METHOD(Group, "group")
 METHOD(GroupCollapsed, "groupCollapsed")
@@ -842,6 +844,19 @@ Console::TimeEnd(JSContext* aCx, const JS::Handle<JS::Value> aTime)
   }
 
   Method(aCx, MethodTimeEnd, NS_LITERAL_STRING("timeEnd"), data);
+}
+
+void
+Console::TimeStamp(JSContext* aCx, const JS::Handle<JS::Value> aData)
+{
+  Sequence<JS::Value> data;
+  SequenceRooter<JS::Value> rooter(aCx, &data);
+
+  if (aData.isString()) {
+    data.AppendElement(aData);
+  }
+
+  Method(aCx, MethodTimeStamp, NS_LITERAL_STRING("timeStamp"), data);
 }
 
 void
@@ -1014,6 +1029,27 @@ public:
   }
 };
 
+class TimestampTimelineMarker : public TimelineMarker
+{
+public:
+  TimestampTimelineMarker(nsDocShell* aDocShell,
+                          TracingMetadata aMetaData,
+                          const nsAString& aCause)
+    : TimelineMarker(aDocShell, "TimeStamp", aMetaData, aCause)
+  {
+    CaptureStack();
+    MOZ_ASSERT(aMetaData == TRACING_TIMESTAMP);
+  }
+
+  virtual void AddDetails(mozilla::dom::ProfileTimelineMarker& aMarker) override
+  {
+    if (!GetCause().IsEmpty()) {
+      aMarker.mCauseName.Construct(GetCause());
+    }
+    aMarker.mEndStack = GetStack();
+  }
+};
+
 // Queue a call to a console method. See the CALL_DELAY constant.
 void
 Console::Method(JSContext* aCx, MethodName aMethodName,
@@ -1088,7 +1124,9 @@ Console::Method(JSContext* aCx, MethodName aMethodName,
   }
 
   // Monotonic timer for 'time' and 'timeEnd'
-  if ((aMethodName == MethodTime || aMethodName == MethodTimeEnd)) {
+  if (aMethodName == MethodTime ||
+      aMethodName == MethodTimeEnd ||
+      aMethodName == MethodTimeStamp) {
     if (mWindow) {
       nsGlobalWindow *win = static_cast<nsGlobalWindow*>(mWindow.get());
       MOZ_ASSERT(win);
@@ -1107,7 +1145,23 @@ Console::Method(JSContext* aCx, MethodName aMethodName,
         docShell->GetRecordProfileTimelineMarkers(&isTimelineRecording);
       }
 
-      if (isTimelineRecording && aData.Length() == 1) {
+      // 'timeStamp' recordings do not need an argument; use empty string
+      // if no arguments passed in
+      if (isTimelineRecording && aMethodName == MethodTimeStamp) {
+        JS::Rooted<JS::Value> value(aCx, aData.Length() == 0 ?
+                                    JS_GetEmptyStringValue(aCx) : aData[0]);
+        JS::Rooted<JSString*> jsString(aCx, JS::ToString(aCx, value));
+        nsAutoJSString key;
+        if (jsString) {
+          key.init(aCx, jsString);
+        }
+
+        mozilla::UniquePtr<TimelineMarker> marker =
+          MakeUnique<TimestampTimelineMarker>(docShell, TRACING_TIMESTAMP, key);
+        docShell->AddProfileTimelineMarker(Move(marker));
+      }
+      // For `console.time(foo)` and `console.timeEnd(foo)`
+      else if (isTimelineRecording && aData.Length() == 1) {
         JS::Rooted<JS::Value> value(aCx, aData[0]);
         JS::Rooted<JSString*> jsString(aCx, JS::ToString(aCx, value));
         if (jsString) {
@@ -1359,6 +1413,27 @@ Console::ProcessCallData(ConsoleCallData* aData)
   }
 }
 
+namespace {
+
+// Helper method for ProcessArguments. Flushes output, if non-empty, to aSequence.
+void
+FlushOutput(JSContext* aCx, Sequence<JS::Value>& aSequence, nsString &output)
+{
+  if (!output.IsEmpty()) {
+    JS::Rooted<JSString*> str(aCx, JS_NewUCStringCopyN(aCx,
+                                                       output.get(),
+                                                       output.Length()));
+    if (!str) {
+      return;
+    }
+
+    aSequence.AppendElement(JS::StringValue(str));
+    output.Truncate();
+  }
+}
+
+} // anonymous namespace
+
 void
 Console::ProcessArguments(JSContext* aCx,
                           const nsTArray<JS::Heap<JS::Value>>& aData,
@@ -1470,17 +1545,7 @@ Console::ProcessArguments(JSContext* aCx,
       case 'o':
       case 'O':
       {
-        if (!output.IsEmpty()) {
-          JS::Rooted<JSString*> str(aCx, JS_NewUCStringCopyN(aCx,
-                                                             output.get(),
-                                                             output.Length()));
-          if (!str) {
-            return;
-          }
-
-          aSequence.AppendElement(JS::StringValue(str));
-          output.Truncate();
-        }
+        FlushOutput(aCx, aSequence, output);
 
         JS::Rooted<JS::Value> v(aCx);
         if (index < aData.Length()) {
@@ -1493,17 +1558,7 @@ Console::ProcessArguments(JSContext* aCx,
 
       case 'c':
       {
-        if (!output.IsEmpty()) {
-          JS::Rooted<JSString*> str(aCx, JS_NewUCStringCopyN(aCx,
-                                                             output.get(),
-                                                             output.Length()));
-          if (!str) {
-            return;
-          }
-
-          aSequence.AppendElement(JS::StringValue(str));
-          output.Truncate();
-        }
+        FlushOutput(aCx, aSequence, output);
 
         if (index < aData.Length()) {
           JS::Rooted<JS::Value> v(aCx, aData[index++]);
@@ -1577,14 +1632,11 @@ Console::ProcessArguments(JSContext* aCx,
     }
   }
 
-  if (!output.IsEmpty()) {
-    JS::Rooted<JSString*> str(aCx, JS_NewUCStringCopyN(aCx, output.get(),
-                                                       output.Length()));
-    if (!str) {
-      return;
-    }
+  FlushOutput(aCx, aSequence, output);
 
-    aSequence.AppendElement(JS::StringValue(str));
+  // Discard trailing style element if there is no output to apply it to.
+  if (aStyles.Length() > aSequence.Length()) {
+    aStyles.TruncateLength(aSequence.Length());
   }
 
   // The rest of the array, if unused by the format string.

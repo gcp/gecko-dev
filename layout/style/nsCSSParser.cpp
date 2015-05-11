@@ -736,6 +736,11 @@ protected:
                                            bool aMustCallValueAppended,
                                            bool* aChanged,
                                            nsCSSContextType aContext);
+  // When we detect a webkit-prefixed gradient expression, this function can
+  // be used to parse its body into outparam |aValue|. Only call if
+  // ShouldUseUnprefixingService() returns true.
+  bool ParseWebkitPrefixedGradient(nsAString& aPrefixedFuncName,
+                                   nsCSSValue& aValue);
 
   bool ParseProperty(nsCSSProperty aPropID);
   bool ParsePropertyByFunction(nsCSSProperty aPropID);
@@ -1212,7 +1217,6 @@ protected:
   // sites.
   bool mDidUnprefixWebkitBoxInEarlierDecl; // not :1 so we can use AutoRestore
 
-#ifdef DEBUG
   // True if any parsing of URL values requires a sheet principal to have
   // been passed in the nsCSSScanner constructor.  This is usually the case.
   // It can be set to false, for example, when we create an nsCSSParser solely
@@ -1221,7 +1225,6 @@ protected:
   // not be set to false if any nsCSSValues created during parsing can escape
   // out of the parser.
   bool mSheetPrincipalRequired;
-#endif
 
   // Stack of rule groups; used for @media and such.
   InfallibleTArray<nsRefPtr<css::GroupRule> > mGroupStack;
@@ -1300,9 +1303,7 @@ CSSParserImpl::CSSParserImpl()
     mInFailingSupportsRule(false),
     mSuppressErrors(false),
     mDidUnprefixWebkitBoxInEarlierDecl(false),
-#ifdef DEBUG
     mSheetPrincipalRequired(true),
-#endif
     mNextFree(nullptr)
 {
 }
@@ -2738,7 +2739,9 @@ CSSParserImpl::GetToken(bool aSkipWS)
       return true;
     }
   }
-  return mScanner->Next(mToken, aSkipWS);
+  return mScanner->Next(mToken, aSkipWS ?
+                        eCSSScannerExclude_WhitespaceAndComments :
+                        eCSSScannerExclude_Comments);
 }
 
 void
@@ -6687,6 +6690,72 @@ CSSParserImpl::ParsePropertyWithUnprefixingService(
   return success;
 }
 
+bool
+CSSParserImpl::ParseWebkitPrefixedGradient(nsAString& aPrefixedFuncName,
+                                           nsCSSValue& aValue)
+{
+  MOZ_ASSERT(ShouldUseUnprefixingService(),
+             "Should only call if we're allowed to use unprefixing service");
+
+  // Record the body of the "-webkit-*gradient" function into a string.
+  // Note: we're already just after the opening "(".
+  nsAutoString prefixedFuncBody;
+  mScanner->StartRecording();
+  bool gotCloseParen = SkipUntil(')');
+  mScanner->StopRecording(prefixedFuncBody);
+  if (gotCloseParen) {
+    // Strip off trailing close-paren, so that the value we pass to the
+    // unprefixing service is *just* the function-body (no parens).
+    prefixedFuncBody.Truncate(prefixedFuncBody.Length() - 1);
+  }
+
+  // NOTE: Even if we fail, we'll be leaving the parser's cursor just after
+  // the close of the "-webkit-*gradient(...)" expression. This is the same
+  // behavior that the other Parse*Gradient functions have in their failure
+  // cases -- they call "SkipUntil(')') before returning false. So this is
+  // probably what we want.
+  nsCOMPtr<nsICSSUnprefixingService> unprefixingSvc =
+    do_GetService(NS_CSSUNPREFIXINGSERVICE_CONTRACTID);
+  NS_ENSURE_TRUE(unprefixingSvc, false);
+
+  bool success;
+  nsAutoString unprefixedFuncName;
+  nsAutoString unprefixedFuncBody;
+  nsresult rv =
+    unprefixingSvc->GenerateUnprefixedGradientValue(aPrefixedFuncName,
+                                                    prefixedFuncBody,
+                                                    unprefixedFuncName,
+                                                    unprefixedFuncBody,
+                                                    &success);
+
+  if (NS_FAILED(rv) || !success) {
+    return false;
+  }
+
+  // JS service thinks it successfully converted the gradient! Now let's try
+  // to parse the resulting string.
+
+  // First, add a close-paren if we originally recorded one (so that what we're
+  // about to put into the CSS parser is a faithful representation of what it
+  // would've seen if it were just parsing the original input stream):
+  if (gotCloseParen) {
+    unprefixedFuncBody.Append(char16_t(')'));
+  }
+
+  nsAutoScannerChanger scannerChanger(this, unprefixedFuncBody);
+  if (unprefixedFuncName.EqualsLiteral("linear-gradient")) {
+    return ParseLinearGradient(aValue, false, false);
+  }
+  if (unprefixedFuncName.EqualsLiteral("radial-gradient")) {
+    return ParseRadialGradient(aValue, false, false);
+  }
+
+  NS_ERROR("CSSUnprefixingService returned an unrecognized type of "
+           "gradient function");
+
+  return false;
+}
+
 //----------------------------------------------------------------------
 
 bool
@@ -7310,6 +7379,14 @@ CSSParserImpl::ParseVariant(nsCSSValue& aValue,
     if (tmp.LowerCaseEqualsLiteral("radial-gradient")) {
       return ParseRadialGradient(aValue, isRepeating, isLegacy);
     }
+    if (ShouldUseUnprefixingService() &&
+        !isRepeating && !isLegacy &&
+        StringBeginsWith(tmp, NS_LITERAL_STRING("-webkit-"))) {
+      // Copy 'tmp' into a string on the stack, since as soon as we
+      // start parsing, its backing store (in "tk") will be overwritten
+      nsAutoString prefixedFuncName(tmp);
+      return ParseWebkitPrefixedGradient(prefixedFuncName, aValue);
+    }
   }
   if ((aVariantMask & VARIANT_IMAGE_RECT) != 0 &&
       eCSSToken_Function == tk->mType &&
@@ -7611,9 +7688,13 @@ bool
 CSSParserImpl::SetValueToURL(nsCSSValue& aValue, const nsString& aURL)
 {
   if (!mSheetPrincipal) {
-    NS_ASSERTION(!mSheetPrincipalRequired,
-                 "Codepaths that expect to parse URLs MUST pass in an "
-                 "origin principal");
+    if (!mSheetPrincipalRequired) {
+      /* Pretend to succeed.  */
+      return true;
+    }
+
+    NS_NOTREACHED("Codepaths that expect to parse URLs MUST pass in an "
+                  "origin principal");
     return false;
   }
 
@@ -10549,7 +10630,11 @@ CSSParserImpl::ParseBackgroundItem(CSSParserImpl::BackgroundParseState& aState)
                  mToken.mIdent.LowerCaseEqualsLiteral("-moz-repeating-linear-gradient") ||
                  mToken.mIdent.LowerCaseEqualsLiteral("-moz-repeating-radial-gradient") ||
                  mToken.mIdent.LowerCaseEqualsLiteral("-moz-image-rect") ||
-                 mToken.mIdent.LowerCaseEqualsLiteral("-moz-element")))) {
+                 mToken.mIdent.LowerCaseEqualsLiteral("-moz-element") ||
+                 (ShouldUseUnprefixingService() &&
+                  (mToken.mIdent.LowerCaseEqualsLiteral("-webkit-gradient") ||
+                   mToken.mIdent.LowerCaseEqualsLiteral("-webkit-linear-gradient") ||
+                   mToken.mIdent.LowerCaseEqualsLiteral("-webkit-radial-gradient")))))) {
       if (haveImage)
         return false;
       haveImage = true;
@@ -15379,7 +15464,6 @@ CSSParserImpl::IsValueValidForProperty(const nsCSSProperty aPropID,
   css::ErrorReporter reporter(scanner, mSheet, mChildLoader, nullptr);
   InitScanner(scanner, reporter, nullptr, nullptr, nullptr);
 
-#ifdef DEBUG
   // We normally would need to pass in a sheet principal to InitScanner,
   // because we might parse a URL value.  However, we will never use the
   // parsed nsCSSValue (and so whether we have a sheet principal or not
@@ -15388,7 +15472,6 @@ CSSParserImpl::IsValueValidForProperty(const nsCSSProperty aPropID,
   // that it's safe to skip the assertion.
   AutoRestore<bool> autoRestore(mSheetPrincipalRequired);
   mSheetPrincipalRequired = false;
-#endif
 
   nsAutoSuppressErrors suppressErrors(this);
 

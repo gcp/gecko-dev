@@ -960,8 +960,6 @@ bool nsBaseWidget::IsMultiProcessWindow()
 
 void nsBaseWidget::ConfigureAPZCTreeManager()
 {
-  uint64_t rootLayerTreeId = mCompositorParent->RootLayerTreeId();
-  mAPZC = CompositorParent::GetAPZCTreeManager(rootLayerTreeId);
   MOZ_ASSERT(mAPZC);
 
   ConfigureAPZControllerThread();
@@ -973,6 +971,7 @@ void nsBaseWidget::ConfigureAPZCTreeManager()
 
   nsRefPtr<GeckoContentController> controller = CreateRootContentController();
   if (controller) {
+    uint64_t rootLayerTreeId = mCompositorParent->RootLayerTreeId();
     CompositorParent::SetControllerForLayerTree(rootLayerTreeId, controller);
   }
 }
@@ -1148,14 +1147,9 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
   // Make sure the parent knows it is same process.
   mCompositorParent->SetOtherProcessId(base::GetCurrentProcId());
 
-  if (gfxPrefs::AsyncPanZoomEnabled() &&
-#if defined(XP_WIN) || defined(MOZ_WIDGET_COCOA) || defined(MOZ_WIDGET_GTK)
-      // For desktop platforms we only want to use APZ in e10s-enabled windows.
-      // If we ever get input events off the main thread we can consider
-      // relaxing this requirement.
-      IsMultiProcessWindow() &&
-#endif
-      (WindowType() == eWindowType_toplevel || WindowType() == eWindowType_child)) {
+  uint64_t rootLayerTreeId = mCompositorParent->RootLayerTreeId();
+  mAPZC = CompositorParent::GetAPZCTreeManager(rootLayerTreeId);
+  if (mAPZC) {
     ConfigureAPZCTreeManager();
   }
 
@@ -1938,8 +1932,8 @@ case _value: eventName.AssignLiteral(_name) ; break
     _ASSIGN_eventName(NS_KEY_DOWN,"NS_KEY_DOWN");
     _ASSIGN_eventName(NS_KEY_PRESS,"NS_KEY_PRESS");
     _ASSIGN_eventName(NS_KEY_UP,"NS_KEY_UP");
-    _ASSIGN_eventName(NS_MOUSE_ENTER,"NS_MOUSE_ENTER");
-    _ASSIGN_eventName(NS_MOUSE_EXIT,"NS_MOUSE_EXIT");
+    _ASSIGN_eventName(NS_MOUSE_ENTER_WIDGET,"NS_MOUSE_ENTER_WIDGET");
+    _ASSIGN_eventName(NS_MOUSE_EXIT_WIDGET,"NS_MOUSE_EXIT_WIDGET");
     _ASSIGN_eventName(NS_MOUSE_BUTTON_DOWN,"NS_MOUSE_BUTTON_DOWN");
     _ASSIGN_eventName(NS_MOUSE_BUTTON_UP,"NS_MOUSE_BUTTON_UP");
     _ASSIGN_eventName(NS_MOUSE_CLICK,"NS_MOUSE_CLICK");
@@ -2099,8 +2093,8 @@ nsBaseWidget::debug_DumpEvent(FILE *                aFileOut,
       return;
   }
 
-  if (aGuiEvent->message == NS_MOUSE_ENTER ||
-      aGuiEvent->message == NS_MOUSE_EXIT)
+  if (aGuiEvent->message == NS_MOUSE_ENTER_WIDGET ||
+      aGuiEvent->message == NS_MOUSE_EXIT_WIDGET)
   {
     if (!debug_GetCachedBoolPref("nglayout.debug.crossing_event_dumping"))
       return;

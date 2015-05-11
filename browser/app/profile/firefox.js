@@ -48,6 +48,7 @@ pref("extensions.getAddons.search.browseURL", "https://addons.mozilla.org/%LOCAL
 pref("extensions.getAddons.search.url", "https://services.addons.mozilla.org/%LOCALE%/firefox/api/%API_VERSION%/search/%TERMS%/all/%MAX_RESULTS%/%OS%/%VERSION%/%COMPATIBILITY_MODE%?src=firefox");
 pref("extensions.webservice.discoverURL", "https://services.addons.mozilla.org/%LOCALE%/firefox/discovery/pane/%VERSION%/%OS%/%COMPATIBILITY_MODE%");
 pref("extensions.getAddons.recommended.url", "https://services.addons.mozilla.org/%LOCALE%/%APP%/api/%API_VERSION%/list/recommended/all/%MAX_RESULTS%/%OS%/%VERSION%?src=firefox");
+pref("extensions.getAddons.link.url", "https://addons.mozilla.org/%LOCALE%/firefox/");
 
 // Blocklist preferences
 pref("extensions.blocklist.enabled", true);
@@ -64,6 +65,7 @@ pref("extensions.update.autoUpdateDefault", true);
 pref("extensions.hotfix.id", "firefox-hotfix@mozilla.org");
 pref("extensions.hotfix.cert.checkAttributes", true);
 pref("extensions.hotfix.certs.1.sha1Fingerprint", "91:53:98:0C:C1:86:DF:47:8F:35:22:9E:11:C9:A7:31:04:49:A1:AA");
+pref("extensions.hotfix.certs.2.sha1Fingerprint", "39:E7:2B:7A:5B:CF:37:78:F9:5D:4A:E0:53:2D:2F:3D:68:53:C5:60");
 
 // Disable add-ons that are not installed by the user in all scopes by default.
 // See the SCOPE constants in AddonManager.jsm for values to use here.
@@ -71,6 +73,7 @@ pref("extensions.autoDisableScopes", 15);
 
 // Don't require signed add-ons by default
 pref("xpinstall.signatures.required", false);
+pref("xpinstall.signatures.devInfoURL", "https://wiki.mozilla.org/Addons/Extension_Signing");
 
 // Dictionary download preference
 pref("browser.dictionaries.download.url", "https://addons.mozilla.org/%LOCALE%/firefox/dictionaries/");
@@ -1345,10 +1348,9 @@ pref("devtools.devedition.promo.url", "https://www.mozilla.org/firefox/developer
 // Disable the error console
 pref("devtools.errorconsole.enabled", false);
 
-// Developer toolbar and GCLI preferences
+// Developer toolbar preferences
 pref("devtools.toolbar.enabled", true);
 pref("devtools.toolbar.visible", false);
-pref("devtools.commands.dir", "");
 
 // Enable the app manager
 pref("devtools.appmanager.enabled", true);
@@ -1397,6 +1399,8 @@ pref("devtools.inspector.imagePreviewTooltipSize", 300);
 pref("devtools.inspector.showUserAgentStyles", false);
 // Show all native anonymous content (like controls in <video> tags)
 pref("devtools.inspector.showAllAnonymousContent", false);
+// Enable the MDN docs tooltip
+pref("devtools.inspector.mdnDocsTooltip.enabled", true);
 
 // DevTools default color unit
 pref("devtools.defaultColorUnit", "hex");
@@ -1443,15 +1447,14 @@ pref("devtools.performance.ui.show-idle-blocks", true);
 pref("devtools.performance.ui.enable-memory", false);
 pref("devtools.performance.ui.enable-framerate", true);
 pref("devtools.performance.ui.show-jit-optimizations", false);
-// If in aurora (40.0, will revert for 40.1), set default
+// If in aurora/dev edition (40.0, will revert for 40.1), set default
 // to retro mode.
 // TODO bug 1160313
-#if MOZ_UPDATE_CHANNEL == aurora
+#ifdef MOZ_DEV_EDITION
   pref("devtools.performance.ui.retro-mode", true);
 #else
   pref("devtools.performance.ui.retro-mode", false);
 #endif
-
 
 // The default cache UI setting
 pref("devtools.cache.disabled", false);
@@ -1520,17 +1523,6 @@ sticky_pref("devtools.theme", "dark");
 #else
 sticky_pref("devtools.theme", "light");
 #endif
-
-// Display the introductory text
-pref("devtools.gcli.hideIntro", false);
-
-// How eager are we to show help: never=1, sometimes=2, always=3
-pref("devtools.gcli.eagerHelper", 2);
-
-// Alias to the script URLs for inject command.
-pref("devtools.gcli.jquerySrc", "https://ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js");
-pref("devtools.gcli.lodashSrc", "https://cdnjs.cloudflare.com/ajax/libs/lodash.js/2.4.1/lodash.min.js");
-pref("devtools.gcli.underscoreSrc", "https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.7.0/underscore-min.js");
 
 // Remember the Web Console filters
 pref("devtools.webconsole.filter.network", true);
@@ -1622,11 +1614,6 @@ pref("devtools.fontinspector.enabled", true);
 // opened developer tool. This allows us to ping telemetry just once per browser
 // version for each user.
 pref("devtools.telemetry.tools.opened.version", "{}");
-
-// Set imgur upload client ID
-pref("devtools.gcli.imgurClientID", '0df414e888d7240');
-// Imgur's upload URL
-pref("devtools.gcli.imgurUploadURL", "https://api.imgur.com/3/image");
 
 // Whether the character encoding menu is under the main Firefox button. This
 // preference is a string so that localizers can alter it.
@@ -1737,7 +1724,7 @@ pref("loop.support_url", "https://support.mozilla.org/kb/group-conversations-fir
 pref("loop.contacts.gravatars.show", false);
 pref("loop.contacts.gravatars.promo", true);
 pref("loop.browserSharing.showInfoBar", true);
-pref("loop.contextInConverations.enabled", false);
+pref("loop.contextInConversations.enabled", true);
 
 pref("social.sidebar.unload_timeout_ms", 10000);
 
@@ -1757,6 +1744,10 @@ pref("security.mixed_content.block_active_content", true);
 
 // 1 = allow MITM for certificate pinning checks.
 pref("security.cert_pinning.enforcement_level", 1);
+
+// Required blocklist freshness for OneCRL OCSP bypass
+// (default should be at least as large as extensions.blocklist.interval)
+pref("security.onecrl.maximum_staleness_in_seconds", 0);
 
 // Override the Gecko-default value of false for Firefox.
 pref("plain_text.wrap_long_lines", true);
@@ -1807,6 +1798,9 @@ pref("identity.fxaccounts.remote.force_auth.uri", "https://accounts.firefox.com/
 
 // The remote content URL shown for signin in. Must use HTTPS.
 pref("identity.fxaccounts.remote.signin.uri", "https://accounts.firefox.com/signin?service=sync&context=fx_desktop_v1");
+
+// The remote content URL where FxAccountsWebChannel messages originate.
+pref("identity.fxaccounts.remote.webchannel.uri", "https://accounts.firefox.com/");
 
 // The URL we take the user to when they opt to "manage" their Firefox Account.
 // Note that this will always need to be in the same TLD as the
@@ -1872,7 +1866,7 @@ pref("browser.polaris.enabled", false);
 pref("privacy.trackingprotection.ui.enabled", false);
 #endif
 
-#ifdef E10S_TESTING_ONLY
+#ifdef NIGHTLY_BUILD
 // At the moment, autostart.2 is used, while autostart.1 is unused.
 // We leave it here set to false to reset users' defaults and allow
 // us to change everybody to true in the future, when desired.
@@ -1918,8 +1912,9 @@ pref("reader.parse-node-limit", 0);
 pref("dom.serviceWorkers.enabled", true);
 #endif
 
-pref("browser.pocket.enabled", false);
-pref("browser.pocket.hostname", "localhost");
+pref("browser.pocket.enabled", true);
+pref("browser.pocket.api", "api.getpocket.com");
+pref("browser.pocket.site", "getpocket.com");
 pref("browser.pocket.oAuthConsumerKey", "40249-e88c401e1b1f2242d9e441c4");
 pref("browser.pocket.useLocaleList", true);
 pref("browser.pocket.enabledLocales", "en-US");

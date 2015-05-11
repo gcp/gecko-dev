@@ -17,8 +17,8 @@ config = {
                 "tests/bin/js",
                 "--no-slow",
                 "--no-progress",
-                "--tinderbox",
-                "--tbpl"
+                "--format=automation",
+                "--jitflags=all"
             ],
             "run_filename": "jit_test.py",
             "testsdir": "jit-test/jit-test"
@@ -30,9 +30,6 @@ config = {
                 "--extra-profile-file=tests/bin/plugins",
                 "--symbols-path=%(symbols_path)s",
                 "--certificate-path=tests/certs",
-                "--autorun",
-                "--close-when-done",
-                "--console-level=INFO",
                 "--quiet",
                 "--log-raw=%(raw_log_file)s"
             ],

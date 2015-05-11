@@ -117,6 +117,9 @@ JitFrameIterator::JitFrameIterator(JSContext* cx)
         current_ = activation_->bailoutData()->fp();
         frameSize_ = activation_->bailoutData()->topFrameSize();
         type_ = JitFrame_Bailout;
+    } else if (activation_->isLazyLinkExitFrame()) {
+        type_ = JitFrame_LazyLink;
+        MOZ_ASSERT(isExitFrameLayout<LazyLinkExitFrameLayout>());
     }
 }
 
@@ -132,6 +135,9 @@ JitFrameIterator::JitFrameIterator(const ActivationIterator& activations)
         current_ = activation_->bailoutData()->fp();
         frameSize_ = activation_->bailoutData()->topFrameSize();
         type_ = JitFrame_Bailout;
+    } else if (activation_->isLazyLinkExitFrame()) {
+        type_ = JitFrame_LazyLink;
+        MOZ_ASSERT(isExitFrameLayout<LazyLinkExitFrameLayout>());
     }
 }
 
@@ -264,6 +270,7 @@ SizeOfFramePrefix(FrameType type)
       case JitFrame_Unwound_Rectifier:
         return IonUnwoundRectifierFrameLayout::Size();
       case JitFrame_Exit:
+      case JitFrame_LazyLink:
         return ExitFrameLayout::Size();
       case JitFrame_IonAccessorIC:
       case JitFrame_Unwound_IonAccessorIC:
@@ -957,6 +964,7 @@ EnsureExitFrame(CommonFrameLayout* frame)
 
       case JitFrame_Exit:
       case JitFrame_Bailout:
+      case JitFrame_LazyLink:
         // Fall-through to MOZ_CRASH below.
         break;
     }
@@ -1495,6 +1503,7 @@ MarkJitActivation(JSTracer* trc, const JitActivationIterator& activations)
     for (JitFrameIterator frames(activations); !frames.done(); ++frames) {
         switch (frames.type()) {
           case JitFrame_Exit:
+          case JitFrame_LazyLink:
             MarkJitExitFrame(trc, frames);
             break;
           case JitFrame_BaselineJS:
@@ -1569,7 +1578,7 @@ GetPcScript(JSContext* cx, JSScript** scriptRes, jsbytecode** pcRes)
     JitActivationIterator iter(rt);
     JitFrameIterator it(iter);
     uint8_t* retAddr;
-    if (it.type() == JitFrame_Exit) {
+    if (it.isExitFrame()) {
         ++it;
 
         // Skip rectifier frames.
@@ -2771,6 +2780,7 @@ JitFrameIterator::dump() const
         fprintf(stderr, "Warning! Unwound JS frames are not observable.\n");
         break;
       case JitFrame_Exit:
+      case JitFrame_LazyLink:
         break;
     };
     fputc('\n', stderr);
@@ -2925,7 +2935,21 @@ inline ReturnType
 GetPreviousRawFrame(FrameType* frame)
 {
     size_t prevSize = frame->prevFrameLocalSize() + FrameType::Size();
-    return (ReturnType) (((uint8_t*) frame) + prevSize);
+    return ReturnType(((uint8_t*) frame) + prevSize);
+}
+
+template <typename ReturnType=CommonFrameLayout*>
+inline ReturnType
+GetPreviousRawFrameOfExitFrame(ExitFrameLayout* frame)
+{
+    // Unwound exit frames are fake exit frames, and have the size of a
+    // JitFrameLayout instead of ExitFrameLayout. See
+    // JitFrameIterator::prevFp.
+    size_t frameSize = IsUnwoundFrame(frame->prevType())
+                       ? JitFrameLayout::Size()
+                       : ExitFrameLayout::Size();
+    size_t prevSize = frame->prevFrameLocalSize() + frameSize;
+    return ReturnType(((uint8_t*) frame) + prevSize);
 }
 
 JitProfilingFrameIterator::JitProfilingFrameIterator(void* exitFrame)
@@ -2935,14 +2959,14 @@ JitProfilingFrameIterator::JitProfilingFrameIterator(void* exitFrame)
 
     if (prevType == JitFrame_IonJS || prevType == JitFrame_Unwound_IonJS) {
         returnAddressToFp_ = frame->returnAddress();
-        fp_ = GetPreviousRawFrame<ExitFrameLayout, uint8_t*>(frame);
+        fp_ = GetPreviousRawFrameOfExitFrame<uint8_t*>(frame);
         type_ = JitFrame_IonJS;
         return;
     }
 
-    if (prevType == JitFrame_BaselineJS) {
+    if (prevType == JitFrame_BaselineJS || prevType == JitFrame_Unwound_BaselineJS) {
         returnAddressToFp_ = frame->returnAddress();
-        fp_ = GetPreviousRawFrame<ExitFrameLayout, uint8_t*>(frame);
+        fp_ = GetPreviousRawFrameOfExitFrame<uint8_t*>(frame);
         type_ = JitFrame_BaselineJS;
         fixBaselineDebugModeOSRReturnAddress();
         return;
@@ -2950,7 +2974,7 @@ JitProfilingFrameIterator::JitProfilingFrameIterator(void* exitFrame)
 
     if (prevType == JitFrame_BaselineStub || prevType == JitFrame_Unwound_BaselineStub) {
         BaselineStubFrameLayout* stubFrame =
-            GetPreviousRawFrame<ExitFrameLayout, BaselineStubFrameLayout*>(frame);
+            GetPreviousRawFrameOfExitFrame<BaselineStubFrameLayout*>(frame);
         MOZ_ASSERT_IF(prevType == JitFrame_BaselineStub,
                       stubFrame->prevType() == JitFrame_BaselineJS);
         MOZ_ASSERT_IF(prevType == JitFrame_Unwound_BaselineStub,
@@ -3219,7 +3243,7 @@ AssertJitStackInvariants(JSContext* cx)
                   "The frame size is optimal");
             }
 
-            if (frames.type() == JitFrame_Exit) {
+            if (frames.isExitFrame()) {
                 // For the moment, we do not keep the JitStackAlignment
                 // alignment for exit frames.
                 frameSize -= ExitFrameLayout::Size();

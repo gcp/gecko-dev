@@ -7,127 +7,79 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 this.EXPORTED_SYMBOLS = ["Pocket"];
 
-Cu.import("resource://gre/modules/Http.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "PocketBundle", function() {
-  const kPocketBundle = "chrome://browser/content/browser-pocket.properties";
-  return Services.strings.createBundle(kPocketBundle);
-});
 XPCOMUtils.defineLazyModuleGetter(this, "CustomizableUI",
   "resource:///modules/CustomizableUI.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ReaderMode",
   "resource://gre/modules/ReaderMode.jsm");
 
 let Pocket = {
-  get isLoggedIn() {
-    return !!this._accessToken;
-  },
-
-  prefBranch: Services.prefs.getBranch("browser.pocket.settings."),
-
-  get hostname() Services.prefs.getCharPref("browser.pocket.hostname"),
-
-  get _accessToken() {
-    let sessionId, accessToken;
-    let cookies = Services.cookies.getCookiesFromHost(this.hostname);
-    while (cookies.hasMoreElements()) {
-      let cookie = cookies.getNext().QueryInterface(Ci.nsICookie2);
-      if (cookie.name == "ftv1")
-        accessToken = cookie.value;
-      else if (cookie.name == "fsv1")
-        sessionId = cookie.value;
-    }
-
-    if (!accessToken)
-      return null;
-
-    let lastSessionId;
-    try {
-      lastSessionId = this.prefBranch.getCharPref("sessionId");
-    } catch (e) { }
-    if (sessionId != lastSessionId)
-      this.prefBranch.deleteBranch("");
-    this.prefBranch.setCharPref("sessionId", sessionId);
-
-    return accessToken;
-  },
-
-  save(url, title) {
-    let since = "0";
-    try {
-      since = this.prefBranch.getCharPref("latestSince");
-    } catch (e) { }
-
-    let data = {url: url, since: since, title: title};
-
-    return new Promise((resolve, reject) => {
-      this._send("firefox/save", data,
-        data => {
-          this.prefBranch.setCharPref("latestSince", data.since);
-          resolve(data.item);
-        },
-        error => { reject(error); }
-      );
-    });
-  },
-
-  remove(itemId) {
-    let actions = [{ action: "delete", item_id: itemId }];
-    this._send("send", {actions: JSON.stringify(actions)});
-  },
-
-  tag(itemId, tags) {
-    let actions = [{ action: "tags_add", item_id: itemId, tags: tags }];
-    this._send("send", {actions: JSON.stringify(actions)});
-  },
-
-  _send(url, data, onSuccess, onError) {
-    let token = this._accessToken;
-    if (!token)
-      throw "Attempted to send a request to Pocket while not logged in";
-
-    let browserLocale = Cc["@mozilla.org/chrome/chrome-registry;1"]
-                          .getService(Ci.nsIXULChromeRegistry)
-                          .getSelectedLocale("browser");
-
-    let postData = [
-      ["access_token", token],
-      ["consumer_key", "40249-e88c401e1b1f2242d9e441c4"],
-      ["locale_lang", browserLocale]
-    ];
-
-    for (let key in data)
-      postData.push([key, data[key]]);
-
-    httpRequest("https://" + this.hostname + "/v3/" + url, {
-      headers: [["X-Accept", "application/json"]],
-      postData: postData,
-      onLoad: (responseText) => {
-        if (onSuccess)
-          onSuccess(JSON.parse(responseText));
-      },
-      onError: function(error, responseText, xhr) {
-        if (!onError)
-          return;
-        let errorMessage = xhr.getResponseHeader("X-Error");
-        onError(new Error(error + " - " + errorMessage));
-      }
-    });
-  },
+  get site() Services.prefs.getCharPref("browser.pocket.site"),
+  get listURL() { return "https://" + Pocket.site; },
 
   /**
    * Functions related to the Pocket panel UI.
    */
   onPanelViewShowing(event) {
-    let window = event.target.ownerDocument.defaultView;
-    window.pktUI.pocketButtonOnCommand(event);
-    window.pktUI.pocketPanelDidShow(event)
+    let document = event.target.ownerDocument;
+    let window = document.defaultView;
+    let iframe = document.getElementById('pocket-panel-iframe');
+
+    // ViewShowing fires immediately before it creates the contents,
+    // in lieu of an AfterViewShowing event, just spin the event loop.
+    window.setTimeout(function() {
+      window.pktUI.pocketButtonOnCommand();
+
+      if (iframe.contentDocument &&
+          iframe.contentDocument.readyState == "complete")
+      {
+        window.pktUI.pocketPanelDidShow();
+      } else {
+        // iframe didn't load yet. This seems to always be the case when in
+        // the toolbar panel, but never the case for a subview.
+        // XXX this only being fired when it's a _capturing_ listener!
+        iframe.addEventListener("load", Pocket.onFrameLoaded, true);
+      }
+    }, 0);
+  },
+
+  onFrameLoaded(event) {
+    let document = event.currentTarget.ownerDocument;
+    let window = document.defaultView;
+    let iframe = document.getElementById('pocket-panel-iframe');
+
+    iframe.removeEventListener("load", Pocket.onPanelLoaded, true);
+    window.pktUI.pocketPanelDidShow();
   },
 
   onPanelViewHiding(event) {
     let window = event.target.ownerDocument.defaultView;
     window.pktUI.pocketPanelDidHide(event);
+  },
+
+  // Called on tab/urlbar/location changes and after customization. Update
+  // anything that is tab specific.
+  onLocationChange(browser, locationURI) {
+    if (!locationURI) {
+      return;
+    }
+    let widget = CustomizableUI.getWidget("pocket-button");
+    for (let instance of widget.instances) {
+      let node = instance.node;
+      if (!node ||
+          node.ownerDocument != browser.ownerDocument) {
+        continue;
+      }
+      if (node) {
+        let win = browser.ownerDocument.defaultView;
+        node.disabled = win.pktApi.isUserLoggedIn() &&
+                        !locationURI.schemeIs("http") &&
+                        !locationURI.schemeIs("https") &&
+                        !(locationURI.schemeIs("about") &&
+                          locationURI.spec.toLowerCase().startsWith("about:reader?url="));
+      }
+    }
   },
 };

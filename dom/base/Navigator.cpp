@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=2 ts=2 et tw=78: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -32,6 +32,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 #include "BatteryManager.h"
+#include "mozilla/dom/DeviceStorageAreaListener.h"
 #include "mozilla/dom/PowerManager.h"
 #include "mozilla/dom/WakeLock.h"
 #include "mozilla/dom/power/PowerManagerService.h"
@@ -210,6 +211,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
 #ifdef MOZ_EME
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMediaKeySystemAccessManager)
 #endif
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDeviceStorageAreaListener)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -334,6 +336,10 @@ Navigator::Invalidate()
     mMediaKeySystemAccessManager = nullptr;
   }
 #endif
+
+  if (mDeviceStorageAreaListener) {
+    mDeviceStorageAreaListener = nullptr;
+  }
 }
 
 //*****************************************************************************
@@ -914,6 +920,20 @@ Navigator::RegisterProtocolHandler(const nsAString& aProtocol,
                                            mWindow->GetOuterWindow());
 }
 
+DeviceStorageAreaListener*
+Navigator::GetDeviceStorageAreaListener(ErrorResult& aRv)
+{
+  if (!mDeviceStorageAreaListener) {
+    if (!mWindow || !mWindow->GetOuterWindow() || !mWindow->GetDocShell()) {
+      aRv.Throw(NS_ERROR_FAILURE);
+      return nullptr;
+    }
+    mDeviceStorageAreaListener = new DeviceStorageAreaListener(mWindow);
+  }
+
+  return mDeviceStorageAreaListener;
+}
+
 nsDOMDeviceStorage*
 Navigator::GetDeviceStorage(const nsAString& aType, ErrorResult& aRv)
 {
@@ -947,6 +967,28 @@ Navigator::GetDeviceStorages(const nsAString& aType,
   nsDOMDeviceStorage::CreateDeviceStoragesFor(mWindow, aType, aStores);
 
   mDeviceStorageStores.AppendElements(aStores);
+}
+
+nsDOMDeviceStorage*
+Navigator::GetDeviceStorageByNameAndType(const nsAString& aName,
+                                         const nsAString& aType,
+                                         ErrorResult& aRv)
+{
+  if (!mWindow || !mWindow->GetOuterWindow() || !mWindow->GetDocShell()) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  nsRefPtr<nsDOMDeviceStorage> storage;
+  nsDOMDeviceStorage::CreateDeviceStorageByNameAndType(mWindow, aName, aType,
+                                                       getter_AddRefs(storage));
+
+  if (!storage) {
+    return nullptr;
+  }
+
+  mDeviceStorageStores.AppendElement(storage);
+  return storage;
 }
 
 Geolocation*

@@ -54,7 +54,6 @@
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
-#include "mozilla/media/webrtc/WebrtcGlobalChild.h"
 #include "mozilla/widget/WidgetMessageUtils.h"
 
 #if defined(MOZ_CONTENT_SANDBOX)
@@ -120,6 +119,10 @@
 #include "mozilla/dom/PCycleCollectWithLogsChild.h"
 
 #include "nsIScriptSecurityManager.h"
+
+#ifdef MOZ_WEBRTC
+#include "signaling/src/peerconnection/WebrtcGlobalChild.h"
+#endif
 
 #ifdef MOZ_PERMISSIONS
 #include "nsPermission.h"
@@ -1250,6 +1253,26 @@ ContentChild::RecvUpdateServiceWorkerRegistrations()
     return true;
 }
 
+bool
+ContentChild::RecvRemoveServiceWorkerRegistrationsForDomain(const nsString& aDomain)
+{
+    nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
+    if (swm) {
+        swm->Remove(NS_ConvertUTF16toUTF8(aDomain));
+    }
+    return true;
+}
+
+bool
+ContentChild::RecvRemoveServiceWorkerRegistrations()
+{
+    nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
+    if (swm) {
+        swm->RemoveAll();
+    }
+    return true;
+}
+
 static CancelableTask* sFirstIdleTask;
 
 static void FirstIdle(void)
@@ -1821,15 +1844,23 @@ ContentChild::DeallocPSpeechSynthesisChild(PSpeechSynthesisChild* aActor)
 PWebrtcGlobalChild *
 ContentChild::AllocPWebrtcGlobalChild()
 {
+#ifdef MOZ_WEBRTC
     WebrtcGlobalChild *child = new WebrtcGlobalChild();
     return child;
+#else
+    return nullptr;
+#endif
 }
 
 bool
 ContentChild::DeallocPWebrtcGlobalChild(PWebrtcGlobalChild *aActor)
 {
+#ifdef MOZ_WEBRTC
     delete static_cast<WebrtcGlobalChild*>(aActor);
     return true;
+#else
+    return false;
+#endif
 }
 
 
@@ -2362,6 +2393,21 @@ ContentChild::RecvFileSystemUpdate(const nsString& aFsName,
 }
 
 bool
+ContentChild::RecvVolumeRemoved(const nsString& aFsName)
+{
+#ifdef MOZ_WIDGET_GONK
+    nsRefPtr<nsVolumeService> vs = nsVolumeService::GetSingleton();
+    if (vs) {
+        vs->RemoveVolumeByName(aFsName);
+    }
+#else
+    // Remove warnings about unused arguments
+    unused << aFsName;
+#endif
+    return true;
+}
+
+bool
 ContentChild::RecvNotifyProcessPriorityChanged(
     const hal::ProcessPriority& aPriority)
 {
@@ -2872,7 +2918,16 @@ ContentChild::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
           } else if (item.data().type() == IPCDataTransferData::TPBlobChild) {
             BlobChild* blob = static_cast<BlobChild*>(item.data().get_PBlobChild());
             nsRefPtr<FileImpl> fileImpl = blob->GetBlobImpl();
-            variant->SetAsISupports(fileImpl);
+            nsString path;
+            ErrorResult result;
+            fileImpl->GetMozFullPathInternal(path, result);
+            if (result.Failed()) {
+              variant->SetAsISupports(fileImpl);
+            } else {
+              nsCOMPtr<nsIFile> file;
+              NS_NewNativeLocalFile(NS_ConvertUTF16toUTF8(path), true, getter_AddRefs(file));
+              variant->SetAsISupports(file);
+            }
           } else {
             continue;
           }

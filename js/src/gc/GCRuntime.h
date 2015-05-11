@@ -656,9 +656,7 @@ class GCRuntime
     bool parseAndSetZeal(const char* str);
     void setNextScheduled(uint32_t count);
     void verifyPreBarriers();
-    void verifyPostBarriers();
     void maybeVerifyPreBarriers(bool always);
-    void maybeVerifyPostBarriers(bool always);
     bool selectForMarking(JSObject* object);
     void clearSelectedForMarking();
     void setDeterministic(bool enable);
@@ -826,8 +824,6 @@ class GCRuntime
 #ifdef JS_GC_ZEAL
     void startVerifyPreBarriers();
     bool endVerifyPreBarriers();
-    void startVerifyPostBarriers();
-    bool endVerifyPostBarriers();
     void finishVerifier();
     bool isVerifyPreBarriersEnabled() const { return !!verifyPreData; }
 #else
@@ -1018,7 +1014,6 @@ class GCRuntime
      */
     mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> numArenasFreeCommitted;
     void* verifyPreData;
-    void* verifyPostData;
     bool chunkAllocationSinceLastGC;
     int64_t nextFullGCTime;
     int64_t lastGCTime;

@@ -140,7 +140,7 @@ loop.conversationViews = (function(mozL10n) {
   var EMAIL_OR_PHONE_RE = /^(:?\S+@\S+|\+\d+)$/;
 
   var AcceptCallView = React.createClass({displayName: "AcceptCallView",
-    mixins: [sharedMixins.DropdownMenuMixin],
+    mixins: [sharedMixins.DropdownMenuMixin()],
 
     propTypes: {
       callType: React.PropTypes.string.isRequired,
@@ -153,7 +153,7 @@ loop.conversationViews = (function(mozL10n) {
 
     getDefaultProps: function() {
       return {
-        showMenu: false,
+        showMenu: false
       };
     },
 
@@ -285,7 +285,7 @@ loop.conversationViews = (function(mozL10n) {
   var AcceptCallButton = React.createClass({displayName: "AcceptCallButton",
 
     propTypes: {
-      mode: React.PropTypes.object.isRequired,
+      mode: React.PropTypes.object.isRequired
     },
 
     render: function() {
@@ -761,7 +761,7 @@ loop.conversationViews = (function(mozL10n) {
           return this._renderViewFromCallType();
         }
       }
-    },
+    }
   });
 
   return {

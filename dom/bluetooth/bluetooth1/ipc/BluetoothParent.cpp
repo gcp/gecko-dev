@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -343,9 +343,7 @@ BluetoothRequestParent::DoRequest(const StartDiscoveryRequest& aRequest)
   MOZ_ASSERT(mService);
   MOZ_ASSERT(mRequestType == Request::TStartDiscoveryRequest);
 
-  nsresult rv =
-    mService->StartDiscoveryInternal(mReplyRunnable.get());
-  NS_ENSURE_SUCCESS(rv, false);
+  mService->StartDiscoveryInternal(mReplyRunnable.get());
 
   return true;
 }
@@ -356,9 +354,7 @@ BluetoothRequestParent::DoRequest(const StopDiscoveryRequest& aRequest)
   MOZ_ASSERT(mService);
   MOZ_ASSERT(mRequestType == Request::TStopDiscoveryRequest);
 
-  nsresult rv =
-    mService->StopDiscoveryInternal(mReplyRunnable.get());
-  NS_ENSURE_SUCCESS(rv, false);
+  mService->StopDiscoveryInternal(mReplyRunnable.get());
 
   return true;
 }

@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -1084,6 +1084,7 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
     mAddActiveEventFuzzTime(true),
     mIsFrozen(false),
     mFullScreen(false),
+    mFullscreenMode(false),
     mIsClosed(false),
     mInClose(false),
     mHavePendingClose(false),
@@ -1801,6 +1802,9 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindow)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mConsole)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mExternal)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMozSelfSupport)
+
+  tmp->TraverseHostObjectURIs(cb);
+
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -1865,6 +1869,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindow)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mConsole)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mExternal)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mMozSelfSupport)
+
+  tmp->UnlinkHostObjectURIs();
+
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -6081,6 +6088,22 @@ nsGlobalWindow::SetFullScreenInternal(bool aFullScreen, bool aRequireTrust, gfx:
   // If we are already in full screen mode, just return.
   if (mFullScreen == aFullScreen)
     return NS_OK;
+
+  // If a fullscreen is originated from chrome, we are switching to
+  // the fullscreen mode, otherwise, we are entering DOM fullscreen.
+  // Note that although entering DOM fullscreen could also cause
+  // consequential calls to this method, those calls will be skipped
+  // at the condition above.
+  if (aRequireTrust) {
+    mFullscreenMode = aFullScreen;
+  } else {
+    // If we are exiting from DOM fullscreen while we
+    // initially make the window fullscreen because of
+    // fullscreen mode, don't restore the window.
+    if (!aFullScreen && mFullscreenMode) {
+      return NS_OK;
+    }
+  }
 
   // dispatch a "fullscreen" DOM event so that XUL apps can
   // respond visually if we are kicked into full screen mode
@@ -12415,6 +12438,12 @@ nsGlobalWindow::RunTimeoutHandler(nsTimeout* aTimeout,
   // point anyway, and the script context should have already reported
   // the script error in the usual way - so we just drop it.
 
+  // Since we might be processing more timeouts, go ahead and flush the promise
+  // queue now before we do that.  We need to do that while we're still in our
+  // "running JS is safe" state (e.g. mRunningTimeout is set, timeout->mRunning
+  // is false).
+  Promise::PerformMicroTaskCheckpoint();
+
   if (trackNestingLevel) {
     sNestingLevel = nestingLevel;
   }
@@ -12424,6 +12453,7 @@ nsGlobalWindow::RunTimeoutHandler(nsTimeout* aTimeout,
 
   mRunningTimeout = last_running_timeout;
   timeout->mRunning = false;
+
   return timeout->mCleared;
 }
 
@@ -12543,14 +12573,17 @@ nsGlobalWindow::RunTimeout(nsTimeout *aTimeout)
     deadline = now;
   }
 
-  // The timeout list is kept in deadline order. Discover the latest
-  // timeout whose deadline has expired. On some platforms, native
-  // timeout events fire "early", so we need to test the timer as well
-  // as the deadline.
+  // The timeout list is kept in deadline order. Discover the latest timeout
+  // whose deadline has expired. On some platforms, native timeout events fire
+  // "early", but we handled that above by setting deadline to aTimeout->mWhen
+  // if the timer fired early.  So we can stop walking if we get to timeouts
+  // whose mWhen is greater than deadline, since once that happens we know
+  // nothing past that point is expired.
   last_expired_timeout = nullptr;
-  for (nsTimeout *timeout = mTimeouts.getFirst(); timeout; timeout = timeout->getNext()) {
-    if (((timeout == aTimeout) || (timeout->mWhen <= deadline)) &&
-        (timeout->mFiringDepth == 0)) {
+  for (nsTimeout *timeout = mTimeouts.getFirst();
+       timeout && timeout->mWhen <= deadline;
+       timeout = timeout->getNext()) {
+    if (timeout->mFiringDepth == 0) {
       // Mark any timeouts that are on the list to be fired with the
       // firing depth so that we can reentrantly run timeouts
       timeout->mFiringDepth = firingDepth;

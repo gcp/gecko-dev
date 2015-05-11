@@ -113,12 +113,15 @@ nsXREDirProvider::Initialize(nsIFile *aXULAppDir,
     if (app) {
       bool per = false;
       app->GetFile(NS_APP_USER_PROFILE_50_DIR, &per, getter_AddRefs(mProfileDir));
-      NS_ASSERTION(per, "NS_APP_USER_PROFILE_50_DIR must be persistent!"); 
-      NS_ASSERTION(mProfileDir, "NS_APP_USER_PROFILE_50_DIR not defined! This shouldn't happen!"); 
+      NS_ASSERTION(per, "NS_APP_USER_PROFILE_50_DIR must be persistent!");
+      NS_ASSERTION(mProfileDir, "NS_APP_USER_PROFILE_50_DIR not defined! This shouldn't happen!");
     }
   }
 
+#ifdef MOZ_B2G
   LoadAppBundleDirs();
+#endif
+
   return NS_OK;
 }
 
@@ -635,12 +638,13 @@ nsXREDirProvider::LoadExtensionBundleDirectories()
 
     RegisterExtensionInterpositions(parser);
     LoadExtensionDirectories(parser, "ExtensionDirs", mExtensionDirectories,
-                             NS_COMPONENT_LOCATION);
+                             NS_EXTENSION_LOCATION);
     LoadExtensionDirectories(parser, "ThemeDirs", mThemeDirectories,
                              NS_SKIN_LOCATION);
   }
 }
 
+#ifdef MOZ_B2G
 void
 nsXREDirProvider::LoadAppBundleDirs()
 {
@@ -667,9 +671,10 @@ nsXREDirProvider::LoadAppBundleDirs()
 
     nsCOMPtr<nsIFile> manifest =
       CloneAndAppend(subdir, "chrome.manifest");
-    XRE_AddManifestLocation(NS_COMPONENT_LOCATION, manifest);
+    XRE_AddManifestLocation(NS_APP_LOCATION, manifest);
   }
 }
+#endif
 
 static const char *const kAppendPrefDir[] = { "defaults", "preferences", nullptr };
 
