@@ -256,14 +256,20 @@ BackgroundParentImpl::DeallocPVsyncParent(PVsyncParent* aActor)
 camera::PCamerasParent*
 BackgroundParentImpl::AllocPCamerasParent()
 {
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+
   return camera::CreateCamerasParent();
 }
 
 bool
 BackgroundParentImpl::DeallocPCamerasParent(camera::PCamerasParent *aActor)
 {
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+
   MOZ_ASSERT(aActor);
- delete aActor;
+  delete static_cast<camera::CamerasParent*>(aActor);
   return true;
 }
 

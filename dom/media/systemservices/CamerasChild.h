@@ -61,7 +61,6 @@ int StartCapture(CaptureEngine aCapEngine,
                  const int capture_id, webrtc::CaptureCapability& capability,
                  webrtc::ExternalRenderer* func);
 int StopCapture(CaptureEngine aCapEngine, const int capture_id);
-void Shutdown();
 
 class CamerasChild :
   public PCamerasChild
@@ -82,6 +81,8 @@ public:
   virtual ~CamerasChild();
 
 private:
+  void XShutdown();
+  
   nsTArray<CapturerElement> mCallbacks;
   // Protects the callback arrays
   Mutex mMutex;

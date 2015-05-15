@@ -249,7 +249,7 @@ bool
 BackgroundChildImpl::DeallocPCamerasChild(camera::PCamerasChild *aActor)
 {
   MOZ_ASSERT(aActor);
-  delete aActor;
+  delete static_cast<camera::CamerasChild*>(aActor);
   return true;
 }
 

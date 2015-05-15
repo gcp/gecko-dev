@@ -30,18 +30,49 @@ PRLogModuleInfo *gCamerasChildLog;
 namespace mozilla {
 namespace camera {
 
-static PCamerasChild* sCameras;
-nsCOMPtr<nsIThread> sCamerasChildThread;
+class CamerasSingleton {
+public:
+  CamerasSingleton()
+    : sCamerasMutex("CamerasChild::sCamerasMutex"),
+      sCameras(nullptr),
+      sCamerasChildThread(nullptr) {
+#if defined(PR_LOGGING)
+    if (!gCamerasChildLog)
+      gCamerasChildLog = PR_NewLogModule("CamerasChild");
+#endif
+    LOG(("CamerasSingleton: %p", this));
+  }
 
-static CamerasChild*
-Cameras()
-{
-  if (!sCameras) {
+  ~CamerasSingleton() {
+    sCameras = nullptr;
+    sCamerasChildThread = nullptr;
+    LOG(("~CamerasSingleton: %p", this));
+  }
+
+  static CamerasSingleton& getInstance() {
+    static CamerasSingleton instance;
+    return instance;
+  }
+
+  mozilla::Mutex sCamerasMutex;
+  Atomic<CamerasChild*> sCameras;
+  nsCOMPtr<nsIThread> sCamerasChildThread;
+};
+
+static CamerasChild* Cameras(bool trace) {
+  MutexAutoLock lock(CamerasSingleton::getInstance().sCamerasMutex);
+#if defined(PR_LOGGING)
+  if (!gCamerasChildLog)
+    gCamerasChildLog = PR_NewLogModule("CamerasChild");
+#endif
+  if (!CamerasSingleton::getInstance().sCameras) {
+    LOG(("No sCameras, setting up"));
     // Try to get the PBackground handle
     ipc::PBackgroundChild* existingBackgroundChild =
       ipc::BackgroundChild::GetForCurrentThread();
     // If it's not spun up yet, block until it is, and retry
     if (!existingBackgroundChild) {
+      LOG(("No existingBackgroundChild"));
       SynchronouslyCreatePBackground();
       existingBackgroundChild =
         ipc::BackgroundChild::GetForCurrentThread();
@@ -49,11 +80,17 @@ Cameras()
     // By now PBackground is guaranteed to be up
     MOZ_RELEASE_ASSERT(existingBackgroundChild);
     // Create PCameras by sending a message to the parent
-    sCameras = existingBackgroundChild->SendPCamerasConstructor();
-    sCamerasChildThread = NS_GetCurrentThread();
+    CamerasSingleton::getInstance().sCameras =
+      static_cast<CamerasChild*>(existingBackgroundChild->SendPCamerasConstructor());
+    CamerasSingleton::getInstance().sCamerasChildThread =
+      NS_GetCurrentThread();
   }
-  MOZ_ASSERT(sCameras);
-  return static_cast<CamerasChild*>(sCameras);
+  if (trace) {
+    CamerasChild* tmp = CamerasSingleton::getInstance().sCameras;
+    LOG(("Returning sCameras: %p", tmp));
+  }
+  MOZ_ASSERT(CamerasSingleton::getInstance().sCameras);
+  return CamerasSingleton::getInstance().sCameras;
 }
 
 int NumberOfCapabilities(CaptureEngine aCapEngine, const char* deviceUniqueIdUTF8)
@@ -61,7 +98,7 @@ int NumberOfCapabilities(CaptureEngine aCapEngine, const char* deviceUniqueIdUTF
   int numCaps = 0;
   LOG(("NumberOfCapabilities for %s", deviceUniqueIdUTF8));
   nsCString unique_id(deviceUniqueIdUTF8);
-  Cameras()->SendNumberOfCapabilities(aCapEngine, unique_id, &numCaps);
+  Cameras(true)->SendNumberOfCapabilities(aCapEngine, unique_id, &numCaps);
   LOG(("Capture capability count: %d", numCaps));
   return numCaps;
 }
@@ -73,7 +110,7 @@ int GetCaptureCapability(CaptureEngine aCapEngine, const char* unique_idUTF8,
   LOG(("GetCaptureCapability: %s %d", unique_idUTF8, capability_number));
   nsCString unique_id(unique_idUTF8);
   CaptureCapability ipcCapability;
-  Cameras()->SendGetCaptureCapability(aCapEngine,
+  Cameras(true)->SendGetCaptureCapability(aCapEngine,
                                       unique_id,
                                       capability_number, &ipcCapability);
   capability.width = ipcCapability.width();
@@ -89,7 +126,7 @@ int GetCaptureCapability(CaptureEngine aCapEngine, const char* unique_idUTF8,
 int NumberOfCaptureDevices(CaptureEngine aCapEngine)
 {
   int numCapDevs = 0;
-  Cameras()->SendNumberOfCaptureDevices(aCapEngine, &numCapDevs);
+  Cameras(true)->SendNumberOfCaptureDevices(aCapEngine, &numCapDevs);
   // Note: This is typically the first call, so there's no guarantee
   // gLog is initialized yet before the Cameras() call.
   LOG(("Capture Devices: %d", numCapDevs));
@@ -105,7 +142,7 @@ int GetCaptureDevice(CaptureEngine aCapEngine,
   LOG((__PRETTY_FUNCTION__));
   nsCString device_name;
   nsCString unique_id;
-  if (Cameras()->SendGetCaptureDevice(aCapEngine,
+  if (Cameras(true)->SendGetCaptureDevice(aCapEngine,
                                       list_number, &device_name, &unique_id)) {
     base::strlcpy(device_nameUTF8, device_name.get(), device_nameUTF8Length);
     base::strlcpy(unique_idUTF8, unique_id.get(), unique_idUTF8Length);
@@ -123,7 +160,7 @@ int AllocateCaptureDevice(CaptureEngine aCapEngine,
 {
   LOG((__PRETTY_FUNCTION__));
   nsCString unique_id(unique_idUTF8);
-  if (Cameras()->SendAllocateCaptureDevice(aCapEngine,
+  if (Cameras(true)->SendAllocateCaptureDevice(aCapEngine,
                                            unique_id, &capture_id)) {
     LOG(("Success allocating %s %d", unique_idUTF8, capture_id));
     return 0;
@@ -136,7 +173,7 @@ int AllocateCaptureDevice(CaptureEngine aCapEngine,
 int ReleaseCaptureDevice(CaptureEngine aCapEngine, const int capture_id)
 {
   LOG((__PRETTY_FUNCTION__));
-  if (Cameras()->SendReleaseCaptureDevice(aCapEngine, capture_id)) {
+  if (Cameras(true)->SendReleaseCaptureDevice(aCapEngine, capture_id)) {
     return 0;
   } else {
     return -1;
@@ -174,7 +211,7 @@ int StartCapture(CaptureEngine aCapEngine,
                  webrtc::ExternalRenderer* cb)
 {
   LOG((__PRETTY_FUNCTION__));
-  Cameras()->AddCallback(aCapEngine, capture_id, cb);
+  Cameras(true)->AddCallback(aCapEngine, capture_id, cb);
   CaptureCapability capCap(webrtcCaps.width,
                            webrtcCaps.height,
                            webrtcCaps.maxFPS,
@@ -182,7 +219,7 @@ int StartCapture(CaptureEngine aCapEngine,
                            webrtcCaps.rawType,
                            webrtcCaps.codecType,
                            webrtcCaps.interlaced);
-  if (Cameras()->SendStartCapture(aCapEngine, capture_id, capCap)) {
+  if (Cameras(true)->SendStartCapture(aCapEngine, capture_id, capCap)) {
     return 0;
   } else {
     return -1;
@@ -193,8 +230,8 @@ int StopCapture(CaptureEngine aCapEngine, const int capture_id)
 
 {
   LOG((__PRETTY_FUNCTION__));
-  if (Cameras()->SendStopCapture(aCapEngine, capture_id)) {
-    Cameras()->RemoveCallback(aCapEngine, capture_id);
+  if (Cameras(true)->SendStopCapture(aCapEngine, capture_id)) {
+    Cameras(true)->RemoveCallback(aCapEngine, capture_id);
     return 0;
   } else {
     return -1;
@@ -206,20 +243,30 @@ public:
   ShutdownRunnable() {};
 
   NS_IMETHOD Run() {
-    // Note this is called synchronously with the lock held
+    MutexAutoLock lock(CamerasSingleton::getInstance().sCamerasMutex);
+    LOG(("Closing BackgroundChild"));
     ipc::BackgroundChild::CloseForCurrentThread();
-    sCameras = nullptr;
+    LOG(("Erasing sCameras & thread (runnable)"));
+    CamerasSingleton::getInstance().sCameras = nullptr;
+    CamerasSingleton::getInstance().sCamerasChildThread = nullptr;
     return NS_OK;
   }
 };
 
-void Shutdown()
+void
+CamerasChild::XShutdown()
 {
-  if (sCamerasChildThread) {
+  MutexAutoLock lock(CamerasSingleton::getInstance().sCamerasMutex);
+  if (CamerasSingleton::getInstance().sCamerasChildThread) {
+    LOG(("Thread exists, dispatching"));
     nsRefPtr<ShutdownRunnable> runnable = new ShutdownRunnable();
-    sCamerasChildThread->Dispatch(runnable, NS_DISPATCH_SYNC);
-    sCamerasChildThread = nullptr;
+    CamerasSingleton::getInstance().sCamerasChildThread->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  } else {
+    LOG(("XShutdown called without camera thread"));
   }
+  LOG(("Erasing sCameras & thread (original thread)"));
+  CamerasSingleton::getInstance().sCameras = nullptr;
+  CamerasSingleton::getInstance().sCamerasChildThread = nullptr;
 }
 
 bool
@@ -231,19 +278,19 @@ CamerasChild::RecvDeliverFrame(const int& capEngine,
                                const int64_t& ntp_time,
                                const int64_t& render_time)
 {
-  LOG((__PRETTY_FUNCTION__));
+  //LOG((__PRETTY_FUNCTION__));
   MutexAutoLock lock(mMutex);
   CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
-  if (Cameras()->Callback(capEng, capId)) {
+  if (Cameras(false)->Callback(capEng, capId)) {
     unsigned char* image = shmem.get<unsigned char>();
-    Cameras()->Callback(capEng, capId)->DeliverFrame(image, size,
+    Cameras(false)->Callback(capEng, capId)->DeliverFrame(image, size,
                                                      time_stamp,
                                                      ntp_time, render_time,
                                                      nullptr);
-    Cameras()->SendReleaseFrame(shmem);
   } else {
     LOG(("DeliverFrame called with dead callback"));
   }
+  Cameras(false)->SendReleaseFrame(shmem);
   return true;
 }
 
@@ -255,8 +302,8 @@ CamerasChild::RecvFrameSizeChange(const int& capEngine,
   LOG((__PRETTY_FUNCTION__));
   MutexAutoLock lock(mMutex);
   CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
-  if (Cameras()->Callback(capEng, capId)) {
-    Cameras()->Callback(capEng, capId)->FrameSizeChange(w, h, 0);
+  if (Cameras(true)->Callback(capEng, capId)) {
+    Cameras(true)->Callback(capEng, capId)->FrameSizeChange(w, h, 0);
   } else {
     LOG(("Frame size change with dead callback"));
   }
@@ -280,7 +327,7 @@ CamerasChild::~CamerasChild()
 {
   LOG(("~CamerasChild: %p", this));
 
-  Shutdown();
+  XShutdown();
 
   MOZ_COUNT_DTOR(CamerasChild);
 }

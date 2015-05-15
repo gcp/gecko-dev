@@ -61,14 +61,14 @@ int
 CallbackHelper::FrameSizeChange(unsigned int w, unsigned int h,
                                 unsigned int streams)
 {
-  LOG(("Video FrameSizeChange: %ux%u", w, h));
+  LOG(("CallbackHelper Video FrameSizeChange: %ux%u", w, h));
   nsRefPtr<FrameSizeChangeRunnable> runnable =
     new FrameSizeChangeRunnable(mCapEngine, mCapturerId, w, h);
   MOZ_ASSERT(sCamerasParent != nullptr);
   nsIThread * thread = sCamerasParent->GetBackgroundThread();
   MOZ_ASSERT(thread != nullptr);
-  thread->Dispatch(runnable, NS_DISPATCH_SYNC);
-  return runnable->GetResult();
+  thread->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  return 0;
 }
 
 class DeliverFrameRunnable : public nsRunnable {
@@ -80,8 +80,15 @@ public:
                        uint32_t time_stamp,
                        int64_t ntp_time,
                        int64_t render_time)
-    : mCapEngine(engine), mCapId(cap_id), mBuffer(buffer), mSize(size),
-      mTimeStamp(time_stamp), mNtpTime(ntp_time), mRenderTime(render_time) {};
+    : mCapEngine(engine), mCapId(cap_id), mSize(size),
+      mTimeStamp(time_stamp), mNtpTime(ntp_time), mRenderTime(render_time) {
+    mBuffer = (unsigned char*)malloc(size);
+    memcpy(mBuffer, buffer, size);
+  };
+
+  virtual ~DeliverFrameRunnable() {
+    free(mBuffer);
+  }
 
   NS_IMETHOD Run() {
     if (!sCamerasParent->DeliverFrameOverIPC(mCapEngine, mCapId,
@@ -159,15 +166,15 @@ CallbackHelper::DeliverFrame(unsigned char* buffer,
                              int64_t render_time,
                              void *handle)
 {
-  LOG((__PRETTY_FUNCTION__));
+  //LOG((__PRETTY_FUNCTION__));
   nsRefPtr<DeliverFrameRunnable> runnable =
     new DeliverFrameRunnable(mCapEngine, mCapturerId,
                              buffer, size, time_stamp, ntp_time, render_time);
   MOZ_ASSERT(sCamerasParent != nullptr);
   nsIThread * thread = sCamerasParent->GetBackgroundThread();
   MOZ_ASSERT(thread != nullptr);
-  thread->Dispatch(runnable, NS_DISPATCH_SYNC);
-  return runnable->GetResult();
+  thread->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  return 0;
 }
 
 bool
@@ -503,9 +510,9 @@ CamerasParent::RecvStopCapture(const int& aCapEngine,
     return false;
   }
 
+  mPtrViECapture->StopCapture(capnum);
   mPtrViERender->StopRender(capnum);
   mPtrViERender->RemoveRenderer(capnum);
-  mPtrViECapture->StopCapture(capnum);
 
   for (unsigned int i = 0; i < mCallbacks.Length(); i++) {
     if (mCallbacks[i]->mCapEngine == aCapEngine

@@ -64,7 +64,7 @@ public:
   virtual bool RecvReleaseFrame(mozilla::ipc::Shmem&&) override;
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  nsCOMPtr<nsIThread> GetBackgroundThread() { return mPBackgroundThread; };
+  nsIThread* GetBackgroundThread() { return mPBackgroundThread; };
 
   // forwarded to PBackground thread
   int DeliverFrameOverIPC(CaptureEngine capEng,
@@ -105,7 +105,7 @@ protected:
   mozilla::ipc::Shmem mShmem;
 
   // PBackground parent thread
-  nsCOMPtr<nsIThread> mPBackgroundThread;
+  nsIThread* mPBackgroundThread;
 };
 
 PCamerasParent* CreateCamerasParent();

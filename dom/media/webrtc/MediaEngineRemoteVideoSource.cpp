@@ -79,7 +79,6 @@ MediaEngineRemoteVideoSource::Shutdown() {
     Deallocate();
   }
 
-  mozilla::camera::Shutdown();
   mInitDone = false;
   return;
 }
@@ -227,7 +226,7 @@ MediaEngineRemoteVideoSource::FrameSizeChange(unsigned int w, unsigned int h,
 {
   mWidth = w;
   mHeight = h;
-  LOG(("Video FrameSizeChange: %ux%u", w, h));
+  LOG(("MediaEngineRemoteVideoSource Video FrameSizeChange: %ux%u", w, h));
   return 0;
 }
 
