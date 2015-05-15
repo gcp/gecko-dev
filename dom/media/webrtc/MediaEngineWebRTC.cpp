@@ -11,7 +11,6 @@
 #include "CSFLog.h"
 #include "prenv.h"
 
-#ifdef PR_LOGGING
 static PRLogModuleInfo*
 GetUserMediaLog()
 {
@@ -20,7 +19,6 @@ GetUserMediaLog()
     sLog = PR_NewLogModule("GetUserMedia");
   return sLog;
 }
-#endif
 
 #include "MediaEngineWebRTC.h"
 #include "ImageContainer.h"

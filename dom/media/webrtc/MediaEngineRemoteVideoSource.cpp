@@ -11,14 +11,9 @@
 #include "MediaTrackConstraints.h"
 #include "CamerasChild.h"
 
-#ifdef PR_LOGGING
 extern PRLogModuleInfo* GetMediaManagerLog();
 #define LOG(msg) PR_LOG(GetMediaManagerLog(), PR_LOG_DEBUG, msg)
 #define LOGFRAME(msg) PR_LOG(GetMediaManagerLog(), 6, msg)
-#else
-#define LOG(msg)
-#define LOGFRAME(msg)
-#endif
 
 namespace mozilla {
 
@@ -110,15 +105,13 @@ MediaEngineRemoteVideoSource::Allocate(const dom::MediaTrackConstraints& aConstr
     }
     mState = kAllocated;
     LOG(("Video device %d allocated", mCaptureIndex));
-  } else {
-#ifdef PR_LOGGING
+  } else if (PR_LOG_TEST(GetMediaManagerLog(), PR_LOG_DEBUG)) {
     MonitorAutoLock lock(mMonitor);
     if (mSources.IsEmpty()) {
       LOG(("Video device %d reallocated", mCaptureIndex));
     } else {
       LOG(("Video device %d allocated shared", mCaptureIndex));
     }
-#endif
   }
 
   return NS_OK;
