@@ -216,6 +216,7 @@ public:
     virtual bool RecvGetTabOffset(LayoutDeviceIntPoint* aPoint) override;
     virtual bool RecvGetDPI(float* aValue) override;
     virtual bool RecvGetDefaultScale(double* aValue) override;
+    virtual bool RecvGetMaxTouchPoints(uint32_t* aTouchPoints) override;
     virtual bool RecvGetWidgetNativeData(WindowsHandle* aValue) override;
     virtual bool RecvZoomToRect(const uint32_t& aPresShellId,
                                 const ViewID& aViewId,
@@ -458,6 +459,8 @@ protected:
     bool InitBrowserConfiguration(const nsCString& aURI,
                                   BrowserConfiguration& aConfiguration);
 
+    void SetHasContentOpener(bool aHasContentOpener);
+
     // IME
     static TabParent *mIMETabParent;
     nsString mIMECacheText;
@@ -499,18 +502,17 @@ private:
 
     // Update state prior to routing an APZ-aware event to the child process.
     // |aOutTargetGuid| will contain the identifier
-    // of the APZC instance that handled the event. aOutTargetGuid may be
-    // null.
+    // of the APZC instance that handled the event. aOutTargetGuid may be null.
     // |aOutInputBlockId| will contain the identifier of the input block
-    // that this event was added to, if there was one. aOutInputBlockId may
-    // be null.
+    // that this event was added to, if there was one. aOutInputBlockId may be null.
+    // |aOutApzResponse| will contain the response that the APZ gave when processing
+    // the input block; this is used for generating appropriate pointercancel events.
     void ApzAwareEventRoutingToChild(ScrollableLayerGuid* aOutTargetGuid,
-                                     uint64_t* aOutInputBlockId);
-    // When true, we've initiated normal shutdown and notified our
-    // managing PContent.
+                                     uint64_t* aOutInputBlockId,
+                                     nsEventStatus* aOutApzResponse);
+    // When true, we've initiated normal shutdown and notified our managing PContent.
     bool mMarkedDestroying;
-    // When true, the TabParent is invalid and we should not send IPC messages
-    // anymore.
+    // When true, the TabParent is invalid and we should not send IPC messages anymore.
     bool mIsDestroyed;
     // Whether we have already sent a FileDescriptor for the app package.
     bool mAppPackageFileDescriptorSent;
@@ -605,6 +607,7 @@ private:
 
     nsRefPtr<nsIPresShell> mPresShellWithRefreshListener;
 
+    bool mHasContentOpener;
 private:
     // This is used when APZ needs to find the TabParent associated with a layer
     // to dispatch events.

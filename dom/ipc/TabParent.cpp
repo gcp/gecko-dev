@@ -284,6 +284,7 @@ TabParent::TabParent(nsIContentParent* aManager,
   , mNeedLayerTreeReadyNotification(false)
   , mCursor(nsCursor(-1))
   , mTabSetsCursor(false)
+  , mHasContentOpener(false)
 {
   MOZ_ASSERT(aManager);
 }
@@ -609,6 +610,11 @@ TabParent::RecvCreateWindow(PBrowserParent* aNewTab,
   NS_ENSURE_SUCCESS(rv, false);
 
   TabParent* newTab = TabParent::GetFrom(aNewTab);
+  MOZ_ASSERT(newTab);
+
+  // Content has requested that we open this new content window, so
+  // we must have an opener.
+  newTab->SetHasContentOpener(true);
 
   nsCOMPtr<nsIContent> frame(do_QueryInterface(mFrameElement));
 
@@ -1303,7 +1309,7 @@ bool TabParent::SendMouseWheelEvent(WidgetWheelEvent& event)
 
   ScrollableLayerGuid guid;
   uint64_t blockId;
-  ApzAwareEventRoutingToChild(&guid, &blockId);
+  ApzAwareEventRoutingToChild(&guid, &blockId, nullptr);
   event.refPoint += GetChildProcessOffset();
   return PBrowserParent::SendMouseWheelEvent(event, guid, blockId);
 }
@@ -1618,7 +1624,8 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
 
   ScrollableLayerGuid guid;
   uint64_t blockId;
-  ApzAwareEventRoutingToChild(&guid, &blockId);
+  nsEventStatus apzResponse;
+  ApzAwareEventRoutingToChild(&guid, &blockId, &apzResponse);
 
   if (mIsDestroyed) {
     return false;
@@ -1630,8 +1637,8 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
   }
 
   return (event.message == NS_TOUCH_MOVE) ?
-    PBrowserParent::SendRealTouchMoveEvent(event, guid, blockId) :
-    PBrowserParent::SendRealTouchEvent(event, guid, blockId);
+    PBrowserParent::SendRealTouchMoveEvent(event, guid, blockId, apzResponse) :
+    PBrowserParent::SendRealTouchEvent(event, guid, blockId, apzResponse);
 }
 
 bool
@@ -1894,6 +1901,15 @@ TabParent::RecvNotifyIMESelection(const uint32_t& aSeqno,
         (updatePreference.WantChangesCausedByComposition() ||
          !aCausedByComposition)) {
       IMENotification notification(NOTIFY_IME_OF_SELECTION_CHANGE);
+      notification.mSelectionChangeData.mOffset =
+        std::min(mIMESelectionAnchor, mIMESelectionFocus);
+      notification.mSelectionChangeData.mLength =
+        mIMESelectionAnchor > mIMESelectionFocus ?
+          mIMESelectionAnchor - mIMESelectionFocus :
+          mIMESelectionFocus - mIMESelectionAnchor;
+      notification.mSelectionChangeData.mReversed =
+        mIMESelectionFocus < mIMESelectionAnchor;
+      notification.mSelectionChangeData.SetWritingMode(mWritingMode);
       notification.mSelectionChangeData.mCausedByComposition =
         aCausedByComposition;
       widget->NotifyIME(notification);
@@ -2496,6 +2512,18 @@ TabParent::RecvGetDefaultScale(double* aValue)
 }
 
 bool
+TabParent::RecvGetMaxTouchPoints(uint32_t* aTouchPoints)
+{
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (widget) {
+    *aTouchPoints = widget->GetMaxTouchPoints();
+  } else {
+    *aTouchPoints = 0;
+  }
+  return true;
+}
+
+bool
 TabParent::RecvGetWidgetNativeData(WindowsHandle* aValue)
 {
   *aValue = 0;
@@ -2700,7 +2728,8 @@ TabParent::GetWidget() const
 
 void
 TabParent::ApzAwareEventRoutingToChild(ScrollableLayerGuid* aOutTargetGuid,
-                                       uint64_t* aOutInputBlockId)
+                                       uint64_t* aOutInputBlockId,
+                                       nsEventStatus* aOutApzResponse)
 {
   if (gfxPrefs::AsyncPanZoomEnabled()) {
     if (aOutTargetGuid) {
@@ -2719,6 +2748,9 @@ TabParent::ApzAwareEventRoutingToChild(ScrollableLayerGuid* aOutTargetGuid,
     }
     if (aOutInputBlockId) {
       *aOutInputBlockId = InputAPZContext::GetInputBlockId();
+    }
+    if (aOutApzResponse) {
+      *aOutApzResponse = InputAPZContext::GetApzResponse();
     }
 
     // Let the widget know that the event will be sent to the child process,
@@ -2897,6 +2929,19 @@ TabParent::GetTabId(uint64_t* aId)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+TabParent::GetHasContentOpener(bool* aResult)
+{
+  *aResult = mHasContentOpener;
+  return NS_OK;
+}
+
+void
+TabParent::SetHasContentOpener(bool aHasContentOpener)
+{
+  mHasContentOpener = aHasContentOpener;
+}
+
 class LayerTreeUpdateRunnable final
   : public nsRunnable
 {
@@ -3069,15 +3114,16 @@ public:
   NS_IMETHOD SetOriginalURI(nsIURI*) NO_IMPL
   NS_IMETHOD GetURI(nsIURI** aUri) override
   {
-    NS_IF_ADDREF(mUri);
-    *aUri = mUri;
+    nsCOMPtr<nsIURI> copy = mUri;
+    copy.forget(aUri);
     return NS_OK;
   }
   NS_IMETHOD GetOwner(nsISupports**) NO_IMPL
   NS_IMETHOD SetOwner(nsISupports*) NO_IMPL
   NS_IMETHOD GetLoadInfo(nsILoadInfo** aLoadInfo) override
   {
-    NS_IF_ADDREF(*aLoadInfo = mLoadInfo);
+    nsCOMPtr<nsILoadInfo> copy = mLoadInfo;
+    copy.forget(aLoadInfo);
     return NS_OK;
   }
   NS_IMETHOD SetLoadInfo(nsILoadInfo* aLoadInfo) override

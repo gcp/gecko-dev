@@ -234,7 +234,14 @@ ElementStyle.prototype = {
 
         return null;
       });
-    }).then(null, promiseWarn);
+    }).then(null, e => {
+      // populate is often called after a setTimeout,
+      // the connection may already be closed.
+      if (this.destroyed) {
+        return;
+      }
+      return promiseWarn(e);
+    });
     this.populated = populated;
     return this.populated;
   },
@@ -1135,6 +1142,7 @@ function CssRuleView(aInspector, aDoc, aStore, aPageStyle) {
   this._onFilterTextboxContextMenu = this._onFilterTextboxContextMenu.bind(this);
 
   this.element = this.doc.getElementById("ruleview-container");
+  this.addRuleButton = this.doc.getElementById("ruleview-add-rule-button");
   this.searchField = this.doc.getElementById("ruleview-searchbox");
   this.searchClearButton = this.doc.getElementById("ruleview-searchinput-clear");
 
@@ -1142,6 +1150,7 @@ function CssRuleView(aInspector, aDoc, aStore, aPageStyle) {
 
   this.element.addEventListener("copy", this._onCopy);
   this.element.addEventListener("contextmenu", this._onContextMenu);
+  this.addRuleButton.addEventListener("click", this._onAddRule);
   this.searchField.addEventListener("input", this._onFilterStyles);
   this.searchField.addEventListener("keypress", this._onFilterKeyPress);
   this.searchField.addEventListener("contextmenu", this._onFilterTextboxContextMenu);
@@ -1197,8 +1206,8 @@ CssRuleView.prototype = {
     this._contextmenu.id = "rule-view-context-menu";
 
     this.menuitemAddRule = createMenuItem(this._contextmenu, {
-      label: "ruleView.contextmenu.addRule",
-      accesskey: "ruleView.contextmenu.addRule.accessKey",
+      label: "ruleView.contextmenu.addNewRule",
+      accesskey: "ruleView.contextmenu.addNewRule.accessKey",
       command: this._onAddRule
     });
     this.menuitemSelectAll = createMenuItem(this._contextmenu, {
@@ -1749,6 +1758,7 @@ CssRuleView.prototype = {
     // Remove bound listeners
     this.element.removeEventListener("copy", this._onCopy);
     this.element.removeEventListener("contextmenu", this._onContextMenu);
+    this.addRuleButton.removeEventListener("click", this._onAddRule);
     this.searchField.removeEventListener("input", this._onFilterStyles);
     this.searchField.removeEventListener("keypress", this._onFilterKeyPress);
     this.searchField.removeEventListener("contextmenu",

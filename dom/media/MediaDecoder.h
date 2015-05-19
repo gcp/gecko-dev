@@ -192,31 +192,23 @@ destroying the MediaDecoder object.
 #include "MediaPromise.h"
 #include "MediaResource.h"
 #include "mozilla/dom/AudioChannelBinding.h"
-#include "mozilla/gfx/Rect.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "MediaDecoderOwner.h"
 #include "MediaStreamGraph.h"
 #include "AbstractMediaDecoder.h"
+#include "DecodedStream.h"
 #include "StateMirroring.h"
 #include "StateWatching.h"
 #include "necko-config.h"
 #ifdef MOZ_EME
 #include "mozilla/CDMProxy.h"
 #endif
+#include "TimeUnits.h"
 
 class nsIStreamListener;
 class nsIPrincipal;
 
 namespace mozilla {
-namespace dom {
-class TimeRanges;
-}
-}
-
-namespace mozilla {
-namespace layers {
-class Image;
-} //namespace layers
 
 class VideoFrameContainer;
 class MediaDecoderStateMachine;
@@ -284,7 +276,6 @@ public:
   };
 
   typedef MediaPromise<SeekResolveValue, bool /* aIgnored */, /* IsExclusive = */ true> SeekPromise;
-  class DecodedStreamGraphListener;
 
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIOBSERVER
@@ -404,110 +395,6 @@ public:
   // replaying after the input as ended. In the latter case, the new source is
   // not connected to streams created by captureStreamUntilEnded.
 
-  struct DecodedStreamData {
-    typedef gfx::IntSize IntSize;
-
-    DecodedStreamData(MediaDecoder* aDecoder,
-                      int64_t aInitialTime, SourceMediaStream* aStream);
-    ~DecodedStreamData();
-
-    // microseconds
-    bool IsFinished() const {
-      return mListener->IsFinishedOnMainThread();
-    }
-
-    int64_t GetClock() const {
-      return mInitialTime + mListener->GetLastOutputTime();
-    }
-
-    // The following group of fields are protected by the decoder's monitor
-    // and can be read or written on any thread.
-    // Count of audio frames written to the stream
-    int64_t mAudioFramesWritten;
-    // Saved value of aInitialTime. Timestamp of the first audio and/or
-    // video packet written.
-    const int64_t mInitialTime; // microseconds
-    // mNextVideoTime is the end timestamp for the last packet sent to the stream.
-    // Therefore video packets starting at or after this time need to be copied
-    // to the output stream.
-    int64_t mNextVideoTime; // microseconds
-    int64_t mNextAudioTime; // microseconds
-    MediaDecoder* mDecoder;
-    // The last video image sent to the stream. Useful if we need to replicate
-    // the image.
-    nsRefPtr<layers::Image> mLastVideoImage;
-    IntSize mLastVideoImageDisplaySize;
-    // This is set to true when the stream is initialized (audio and
-    // video tracks added).
-    bool mStreamInitialized;
-    bool mHaveSentFinish;
-    bool mHaveSentFinishAudio;
-    bool mHaveSentFinishVideo;
-
-    // The decoder is responsible for calling Destroy() on this stream.
-    // Can be read from any thread.
-    const nsRefPtr<SourceMediaStream> mStream;
-    // Can be read from any thread.
-    nsRefPtr<DecodedStreamGraphListener> mListener;
-    // True when we've explicitly blocked this stream because we're
-    // not in PLAY_STATE_PLAYING. Used on the main thread only.
-    bool mHaveBlockedForPlayState;
-    // We also have an explicit blocker on the stream when
-    // mDecoderStateMachine is non-null and MediaDecoderStateMachine is false.
-    bool mHaveBlockedForStateMachineNotPlaying;
-  };
-
-  class DecodedStreamGraphListener : public MediaStreamListener {
-  public:
-    DecodedStreamGraphListener(MediaStream* aStream, DecodedStreamData* aData);
-    virtual void NotifyOutput(MediaStreamGraph* aGraph, GraphTime aCurrentTime) override;
-    virtual void NotifyEvent(MediaStreamGraph* aGraph,
-                             MediaStreamListener::MediaStreamGraphEvent event) override;
-
-    void DoNotifyFinished();
-
-    int64_t GetLastOutputTime() // microseconds
-    {
-      MutexAutoLock lock(mMutex);
-      return mLastOutputTime;
-    }
-    void Forget()
-    {
-      NS_ASSERTION(NS_IsMainThread(), "Main thread only");
-      mData = nullptr;
-
-      MutexAutoLock lock(mMutex);
-      mStream = nullptr;
-    }
-    bool IsFinishedOnMainThread()
-    {
-      MutexAutoLock lock(mMutex);
-      return mStreamFinishedOnMainThread;
-    }
-  private:
-    // Main thread only
-    DecodedStreamData* mData;
-
-    Mutex mMutex;
-    // Protected by mMutex
-    nsRefPtr<MediaStream> mStream;
-    // Protected by mMutex
-    int64_t mLastOutputTime; // microseconds
-    // Protected by mMutex
-    bool mStreamFinishedOnMainThread;
-  };
-
-  class OutputStreamListener;
-
-  struct OutputStreamData {
-    void Init(MediaDecoder* aDecoder, ProcessedMediaStream* aStream);
-    ~OutputStreamData();
-    nsRefPtr<ProcessedMediaStream> mStream;
-    // mPort connects mDecodedStream->mStream to our mStream.
-    nsRefPtr<MediaInputPort> mPort;
-    nsRefPtr<OutputStreamListener> mListener;
-  };
-
   /**
    * Connects mDecodedStream->mStream to aStream->mStream.
    */
@@ -533,15 +420,17 @@ public:
    * Decoder monitor must be held.
    */
   void UpdateStreamBlockingForStateMachinePlaying();
+
   nsTArray<OutputStreamData>& OutputStreams()
   {
     GetReentrantMonitor().AssertCurrentThreadIn();
-    return mOutputStreams;
+    return mDecodedStream.OutputStreams();
   }
+
   DecodedStreamData* GetDecodedStream()
   {
     GetReentrantMonitor().AssertCurrentThreadIn();
-    return mDecodedStream;
+    return mDecodedStream.GetData();
   }
 
   // Add an output stream. All decoder output will be sent to the stream.
@@ -634,7 +523,7 @@ public:
   virtual bool IsTransportSeekable() override;
 
   // Return the time ranges that can be seeked into.
-  virtual nsresult GetSeekable(dom::TimeRanges* aSeekable);
+  virtual media::TimeIntervals GetSeekable();
 
   // Set the end time of the media resource. When playback reaches
   // this point the media pauses. aTime is in seconds.
@@ -692,7 +581,7 @@ public:
 
   // Constructs the time ranges representing what segments of the media
   // are buffered and playable.
-  virtual nsresult GetBuffered(dom::TimeRanges* aBuffered);
+  virtual media::TimeIntervals GetBuffered();
 
   // Returns the size, in bytes, of the heap memory used by the currently
   // queued decoded video and audio data.
@@ -1143,14 +1032,12 @@ private:
 #endif
 
 protected:
-  // Data about MediaStreams that are being fed by this decoder.
-  nsTArray<OutputStreamData> mOutputStreams;
   // The SourceMediaStream we are using to feed the mOutputStreams. This stream
   // is never exposed outside the decoder.
   // Only written on the main thread while holding the monitor. Therefore it
   // can be read on any thread while holding the monitor, or on the main thread
   // without holding the monitor.
-  nsAutoPtr<DecodedStreamData> mDecodedStream;
+  DecodedStream mDecodedStream;
 
   // Set to one of the valid play states.
   // This can only be changed on the main thread while holding the decoder

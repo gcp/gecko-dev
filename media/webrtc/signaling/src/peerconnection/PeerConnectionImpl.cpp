@@ -966,6 +966,10 @@ PeerConnectionImpl::ConfigureJsepSessionCodecs() {
             videoCodec.mMaxFr = maxFr;
 
           }
+
+          videoCodec.mUseTmmbr = false;
+          branch->GetBoolPref("media.navigator.video.use_tmmbr",
+            &videoCodec.mUseTmmbr);
         }
         break;
       case SdpMediaSection::kText:
@@ -2788,9 +2792,15 @@ PeerConnectionImpl::IceGatheringStateChange(
 void
 PeerConnectionImpl::EndOfLocalCandidates(const std::string& defaultAddr,
                                          uint16_t defaultPort,
+                                         const std::string& defaultRtcpAddr,
+                                         uint16_t defaultRtcpPort,
                                          uint16_t level) {
   CSFLogDebug(logTag, "%s", __FUNCTION__);
-  mJsepSession->EndOfLocalCandidates(defaultAddr, defaultPort, level);
+  mJsepSession->EndOfLocalCandidates(defaultAddr,
+                                     defaultPort,
+                                     defaultRtcpAddr,
+                                     defaultRtcpPort,
+                                     level);
 }
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)

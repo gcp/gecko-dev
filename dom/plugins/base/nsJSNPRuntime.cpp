@@ -83,7 +83,7 @@ static JSObjWrapperTable sJSObjWrappers;
 static bool sJSObjWrappersAccessible = false;
 
 // Hash of NPObject wrappers that wrap NPObjects as JSObjects.
-static PLDHashTable* sNPObjWrappers;
+static PLDHashTable2* sNPObjWrappers;
 
 // Global wrapper count. This includes JSObject wrappers *and*
 // NPObject wrappers. When this count goes to zero, there are no more
@@ -408,7 +408,7 @@ CreateNPObjWrapperTable()
   }
 
   sNPObjWrappers =
-    new PLDHashTable(PL_DHashGetStubOps(), sizeof(NPObjWrapperHashEntry));
+    new PLDHashTable2(PL_DHashGetStubOps(), sizeof(NPObjWrapperHashEntry));
   return true;
 }
 
@@ -1968,10 +1968,10 @@ NPObjWrapperPluginDestroyedCallback(PLDHashTable *table, PLDHashEntryHdr *hdr,
   NppAndCx *nppcx = reinterpret_cast<NppAndCx *>(arg);
 
   if (entry->mNpp == nppcx->npp) {
-    // Prevent invalidate() and deallocate() from touching the hash
-    // we're enumerating.
-    const PLDHashTableOps *ops = table->Ops();
-    table->SetOps(nullptr);
+    // HACK: temporarily hide the hash we're enumerating so that invalidate()
+    // and deallocate() don't touch it.
+    PLDHashTable2 *tmp = static_cast<PLDHashTable2*>(table);
+    sNPObjWrappers = nullptr;
 
     NPObject *npobj = entry->mNPObj;
 
@@ -1999,7 +1999,7 @@ NPObjWrapperPluginDestroyedCallback(PLDHashTable *table, PLDHashEntryHdr *hdr,
 
     ::JS_SetPrivate(entry->mJSObj, nullptr);
 
-    table->SetOps(ops);
+    sNPObjWrappers = tmp;
 
     if (sDelayedReleases && sDelayedReleases->RemoveElement(npobj)) {
       OnWrapperDestroyed();

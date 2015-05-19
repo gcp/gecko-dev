@@ -150,17 +150,6 @@ typedef size_t (*PLDHashSizeOfEntryExcludingThisFun)(
  * means that empty hash tables are cheap, which is good because they are
  * common.
  *
- * Due to historical reasons, there are two ways to manage the initialization
- * and finalization of a PLDHashTable. There are assertions that will trigger
- * if the two styles are mixed for a single table.
- *
- * - Automatic, C++ style: via the multi-arg constructor and the destructor.
- *   This is the preferred style.
- *
- * - Manual, C style: via the Init() and Finish() methods. If Init() is
- *   called on a table, then the Finish() must be called to finalize the
- *   table, and the destructor will be a no-op.
- *
  * There used to be a long, math-heavy comment here about the merits of
  * double hashing vs. chaining; it was removed in bug 1058335. In short, double
  * hashing is more space-efficient unless the element size gets large (in which
@@ -178,8 +167,7 @@ private:
   uint32_t            mEntrySize;     /* number of bytes in an entry */
   uint32_t            mEntryCount;    /* number of entries in table */
   uint32_t            mRemovedCount;  /* removed entry sentinels in table */
-  uint32_t            mGeneration:31; /* entry storage generation number */
-  uint32_t            mAutoFinish:1;  /* should the destructor call Finish()? */
+  uint32_t            mGeneration;    /* entry storage generation number */
   char*               mEntryStore;    /* entry storage; allocated lazily */
 #ifdef PL_DHASHMETER
   struct PLDHashStats
@@ -224,7 +212,6 @@ public:
     , mEntryCount(0)
     , mRemovedCount(0)
     , mGeneration(0)
-    , mAutoFinish(0)
     , mEntryStore(nullptr)
 #ifdef PL_DHASHMETER
     , mStats()
@@ -234,21 +221,8 @@ public:
 #endif
   {}
 
-  // Initialize the table with aOps and aEntrySize. The table's initial
-  // capacity will be chosen such that |aLength| elements can be inserted
-  // without rehashing; if |aLength| is a power-of-two, this capacity will be
-  // |2*length|. However, because entry storage is allocated lazily, this
-  // initial capacity won't be relevant until the first element is added; prior
-  // to that the capacity will be zero.
-  //
-  // This function will crash if |aEntrySize| and/or |aLength| are too large.
-  //
-  PLDHashTable(const PLDHashTableOps* aOps, uint32_t aEntrySize,
-               uint32_t aLength = PL_DHASH_DEFAULT_INITIAL_LENGTH);
-
   PLDHashTable(PLDHashTable&& aOther)
     : mOps(nullptr)
-    , mAutoFinish(0)
     , mEntryStore(nullptr)
 #ifdef DEBUG
     , mRecursionLevel(0)
@@ -258,8 +232,6 @@ public:
   }
 
   PLDHashTable& operator=(PLDHashTable&& aOther);
-
-  ~PLDHashTable();
 
   bool IsInitialized() const { return !!mOps; }
 
@@ -361,6 +333,47 @@ private:
 
   PLDHashTable(const PLDHashTable& aOther) = delete;
   PLDHashTable& operator=(const PLDHashTable& aOther) = delete;
+};
+
+// PLDHashTable uses C style, manual initialization and finalization, via the
+// Init() and Finish() methods. PLDHashTable2 is a slight extension of
+// PLDHashTable that provides C++-style, automatic initialization and
+// finalization via an initializing constructor and a destructor. It also
+// overrides the Init() and Finish() methods with versions that will crash
+// immediately if called.
+//
+// XXX: We're using a subclass here so that instances of PLDHashTable can be
+// converted incrementally to PLDHashTable2. Once all instances have been
+// converted, we can merge the two and call the merged class PLDHashTable
+// again.
+class PLDHashTable2 : public PLDHashTable
+{
+public:
+  PLDHashTable2(const PLDHashTableOps* aOps, uint32_t aEntrySize,
+                uint32_t aLength = PL_DHASH_DEFAULT_INITIAL_LENGTH);
+
+  PLDHashTable2(PLDHashTable2&& aOther)
+    : PLDHashTable(mozilla::Move(aOther))
+  {}
+
+  PLDHashTable2& operator=(PLDHashTable2&& aOther)
+  {
+    return static_cast<PLDHashTable2&>(
+      PLDHashTable::operator=(mozilla::Move(aOther)));
+  }
+
+  ~PLDHashTable2();
+
+  void Init(const PLDHashTableOps* aOps, uint32_t aEntrySize, uint32_t aLength)
+  {
+    MOZ_CRASH("PLDHashTable2::Init()");
+  }
+
+  void Finish() { MOZ_CRASH("PLDHashTable2::Finish()"); }
+
+private:
+  PLDHashTable2(const PLDHashTable2& aOther) = delete;
+  PLDHashTable2& operator=(const PLDHashTable2& aOther) = delete;
 };
 
 /*
@@ -477,22 +490,44 @@ void PL_DHashFreeStringKey(PLDHashTable* aTable, PLDHashEntryHdr* aEntry);
 const PLDHashTableOps* PL_DHashGetStubOps(void);
 
 /*
- * This function works similarly to the multi-arg constructor.
+ * Dynamically allocate a new PLDHashTable, initialize it using
+ * PL_DHashTableInit, and return its address. Never returns null.
+ */
+PLDHashTable* PL_NewDHashTable(
+  const PLDHashTableOps* aOps, uint32_t aEntrySize,
+  uint32_t aLength = PL_DHASH_DEFAULT_INITIAL_LENGTH);
+
+/*
+ * Free |aTable|'s entry storage and |aTable| itself (both via
+ * aTable->mOps->freeTable). Use this function to destroy a PLDHashTable that
+ * was allocated on the heap via PL_NewDHashTable().
+ */
+void PL_DHashTableDestroy(PLDHashTable* aTable);
+
+/*
+ * Initialize aTable with aOps and aEntrySize. The table's initial capacity
+ * will be chosen such that |aLength| elements can be inserted without
+ * rehashing; if |aLength| is a power-of-two, this capacity will be |2*length|.
+ * However, because entry storage is allocated lazily, this initial capacity
+ * won't be relevant until the first element is added; prior to that the
+ * capacity will be zero.
  *
- * Any table initialized with this function must be finalized via
- * PL_DHashTableFinish(). The alternative (and preferred) way to
- * initialize a PLDHashTable is via the multi-arg constructor; any such table
- * will be auto-finalized by the destructor.
+ * This function will crash if |aEntrySize| and/or |aLength| are too large.
  */
 void PL_DHashTableInit(
   PLDHashTable* aTable, const PLDHashTableOps* aOps,
   uint32_t aEntrySize, uint32_t aLength = PL_DHASH_DEFAULT_INITIAL_LENGTH);
+void PL_DHashTableInit(
+  PLDHashTable2* aTable, const PLDHashTableOps* aOps,
+  uint32_t aEntrySize, uint32_t aLength = PL_DHASH_DEFAULT_INITIAL_LENGTH);
 
 /*
- * Free |aTable|'s entry storage. Use this function to finalize a PLDHashTable
- * that was initialized with PL_DHashTableInit().
+ * Free |aTable|'s entry storage (via aTable->mOps->freeTable). Use this
+ * function to destroy a PLDHashTable that is allocated on the stack or in
+ * static memory and was created via PL_DHashTableInit().
  */
 void PL_DHashTableFinish(PLDHashTable* aTable);
+void PL_DHashTableFinish(PLDHashTable2* aTable);
 
 /*
  * To search for a key in |table|, call:

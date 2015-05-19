@@ -2120,13 +2120,13 @@ CodeGenerator::visitMoveGroup(LMoveGroup* group)
     for (size_t i = 0; i < group->numMoves(); i++) {
         const LMove& move = group->getMove(i);
 
-        const LAllocation* from = move.from();
-        const LAllocation* to = move.to();
+        LAllocation from = move.from();
+        LAllocation to = move.to();
         LDefinition::Type type = move.type();
 
         // No bogus moves.
-        MOZ_ASSERT(*from != *to);
-        MOZ_ASSERT(!from->isConstant());
+        MOZ_ASSERT(from != to);
+        MOZ_ASSERT(!from.isConstant());
         MoveOp::Type moveType;
         switch (type) {
           case LDefinition::OBJECT:
@@ -3044,7 +3044,7 @@ CodeGenerator::visitCallKnown(LCallKnown* call)
     // Missing arguments must have been explicitly appended by the IonBuilder.
     MOZ_ASSERT(target->nargs() <= call->mir()->numStackArgs() - 1);
 
-    MOZ_ASSERT_IF(call->mir()->isConstructing(), target->isInterpretedConstructor());
+    MOZ_ASSERT_IF(call->mir()->isConstructing(), target->isConstructor());
 
     masm.checkStackAlignment();
 

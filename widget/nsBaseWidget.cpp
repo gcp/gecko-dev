@@ -54,6 +54,7 @@
 #include "mozilla/dom/TabParent.h"
 #include "nsRefPtrHashtable.h"
 #include "TouchEvents.h"
+#include "WritingModes.h"
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
 #endif
@@ -97,6 +98,25 @@ int32_t nsIWidget::sPointerIdCounter = 0;
 // Some statics from nsIWidget.h
 /*static*/ uint64_t AutoObserverNotifier::sObserverId = 0;
 /*static*/ nsDataHashtable<nsUint64HashKey, nsCOMPtr<nsIObserver>> AutoObserverNotifier::sSavedObservers;
+
+namespace mozilla {
+namespace widget {
+
+void
+IMENotification::SelectionChangeData::SetWritingMode(
+                                        const WritingMode& aWritingMode)
+{
+  mWritingMode = aWritingMode.mWritingMode;
+}
+
+WritingMode
+IMENotification::SelectionChangeData::GetWritingMode() const
+{
+  return WritingMode(mWritingMode);
+}
+
+} // namespace widget
+} // namespace mozilla
 
 nsAutoRollup::nsAutoRollup()
 {
@@ -994,7 +1014,7 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
                                            nsEventStatus aApzResponse)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  InputAPZContext context(aGuid, aInputBlockId);
+  InputAPZContext context(aGuid, aInputBlockId, aApzResponse);
 
   // If this is a touch event and APZ has targeted it to an APZC in the root
   // process, apply that APZC's callback-transform before dispatching the

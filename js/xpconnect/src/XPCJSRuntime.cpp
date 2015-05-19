@@ -3387,15 +3387,15 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     // were not taken at the time of this writing, so we hazard a guess that
     // ASAN builds have roughly thrice the stack overhead as normal builds.
     // On normal builds, the largest stack frame size we might encounter is
-    // 9.0k (see above), so let's use a buffer of 9.0 * 3 * 10 = 270k.
+    // 9.0k (see above), so let's use a buffer of 9.0 * 5 * 10 = 450k.
     const size_t kStackQuota =  2 * kDefaultStackQuota;
-    const size_t kTrustedScriptBuffer = 270 * 1024;
+    const size_t kTrustedScriptBuffer = 450 * 1024;
 #elif defined(XP_WIN)
     // 1MB is the default stack size on Windows, so use 900k.
     // Windows PGO stack frames have unfortunately gotten pretty large lately. :-(
     const size_t kStackQuota = 900 * 1024;
-    const size_t kTrustedScriptBuffer = (sizeof(size_t) == 8) ? 160 * 1024
-                                                              : 100 * 1024;
+    const size_t kTrustedScriptBuffer = (sizeof(size_t) == 8) ? 180 * 1024   //win64
+                                                              : 120 * 1024;  //win32
     // The following two configurations are linux-only. Given the numbers above,
     // we use 50k and 100k trusted buffers on 32-bit and 64-bit respectively.
 #elif defined(DEBUG)

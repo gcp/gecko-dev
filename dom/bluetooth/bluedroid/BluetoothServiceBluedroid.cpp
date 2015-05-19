@@ -633,6 +633,7 @@ static nsTArray<nsRefPtr<BluetoothReplyRunnable> > sGetDeviceRunnableArray;
 static nsTArray<nsRefPtr<BluetoothReplyRunnable> > sBondingRunnableArray;
 static nsTArray<nsRefPtr<BluetoothReplyRunnable> > sUnbondingRunnableArray;
 static bool sAdapterDiscoverable(false);
+static bool sAdapterDiscovering(false);
 static bool sIsRestart(false);
 static bool sIsFirstTimeToggleOffBt(false);
 static uint32_t sAdapterDiscoverableTimeout(0);
@@ -1826,7 +1827,7 @@ BluetoothServiceBluedroid::SendFile(const nsAString& aDeviceAddress,
 
 void
 BluetoothServiceBluedroid::SendFile(const nsAString& aDeviceAddress,
-                                    nsIDOMBlob* aBlob,
+                                    Blob* aBlob,
                                     BluetoothReplyRunnable* aRunnable)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -2285,6 +2286,11 @@ BluetoothServiceBluedroid::AdapterStateChangedNotification(bool aState)
       BluetoothA2dpManager::DeinitA2dpInterface
     };
 
+    // Set discoverable cache to default value after state becomes BT_STATE_OFF.
+    if (sAdapterDiscoverable) {
+      sAdapterDiscoverable = false;
+    }
+
     // Cleanup bluetooth interfaces after BT state becomes BT_STATE_OFF.
     nsRefPtr<ProfileDeinitResultHandler> res =
       new ProfileDeinitResultHandler(MOZ_ARRAY_LENGTH(sDeinitManager));
@@ -2368,11 +2374,16 @@ BluetoothServiceBluedroid::AdapterPropertiesNotification(
       BT_APPEND_NAMED_VALUE(propertiesArray, "Name", sAdapterBdName);
 
     } else if (p.mType == PROPERTY_ADAPTER_SCAN_MODE) {
-      sAdapterDiscoverable =
-        (p.mScanMode == SCAN_MODE_CONNECTABLE_DISCOVERABLE);
-      BT_APPEND_NAMED_VALUE(propertiesArray, "Discoverable",
-                            sAdapterDiscoverable);
 
+      // If BT is not enabled, Bluetooth scan mode should be non-discoverable
+      // by defalut. 'AdapterStateChangedNotification' would set the default
+      // properties to bluetooth backend once Bluetooth is enabled.
+      if (IsEnabled()) {
+        sAdapterDiscoverable =
+          (p.mScanMode == SCAN_MODE_CONNECTABLE_DISCOVERABLE);
+        BT_APPEND_NAMED_VALUE(propertiesArray, "Discoverable",
+                              sAdapterDiscoverable);
+      }
     } else if (p.mType == PROPERTY_ADAPTER_BONDED_DEVICES) {
       // We have to cache addresses of bonded devices. Unlike BlueZ,
       // Bluedroid would not send another PROPERTY_ADAPTER_BONDED_DEVICES
@@ -2428,7 +2439,10 @@ BluetoothServiceBluedroid::AdapterPropertiesNotification(
     } else if (p.mType == PROPERTY_ADAPTER_SCAN_MODE) {
       BluetoothScanMode newMode = p.mScanMode;
 
-      if (newMode == SCAN_MODE_CONNECTABLE_DISCOVERABLE) {
+      // If BT is not enabled, Bluetooth scan mode should be non-discoverable
+      // by defalut. 'AdapterStateChangedNotification' would set the default
+      // properties to bluetooth backend once Bluetooth is enabled.
+      if (newMode == SCAN_MODE_CONNECTABLE_DISCOVERABLE && IsEnabled()) {
         propertyValue = sAdapterDiscoverable = true;
       } else {
         propertyValue = sAdapterDiscoverable = false;
@@ -2476,7 +2490,6 @@ BluetoothServiceBluedroid::AdapterPropertiesNotification(
                                    BluetoothValue(props)));
 
   // Send reply for SetProperty
-
   if (!sSetPropertyRunnableArray.IsEmpty()) {
     DispatchBluetoothReply(sSetPropertyRunnableArray[0],
                            BluetoothValue(true), EmptyString());
@@ -2490,8 +2503,9 @@ BluetoothServiceBluedroid::AdapterPropertiesNotification(
  *
  *   (1) automatically by Bluedroid when BT is turning on, or
  *   (2) as result of remote device properties update during discovery, or
- *   (3) as result of GetRemoteDeviceProperties, or
- *   (4) as result of GetRemoteServices.
+ *   (3) as result of CreateBond, or
+ *   (4) as result of GetRemoteDeviceProperties, or
+ *   (5) as result of GetRemoteServices.
  */
 void
 BluetoothServiceBluedroid::RemoteDevicePropertiesNotification(
@@ -2665,15 +2679,17 @@ BluetoothServiceBluedroid::RemoteDevicePropertiesNotification(
     /**
      * This is possible when
      *
-     *  (1) the callback is called after Bluetooth is turned on, or
-     *  (2) remote device properties get updated during discovery.
-     *
-     * For (2), fire 'devicefound' again to update device name.
-     * See bug 1076553 for more information.
+     *  (1) the callback is called when BT is turning on, or
+     *  (2) remote device properties get updated during discovery, or
+     *  (3) as result of CreateBond
      */
-    DistributeSignal(BluetoothSignal(NS_LITERAL_STRING("DeviceFound"),
-                                     NS_LITERAL_STRING(KEY_ADAPTER),
-                                     BluetoothValue(props)));
+    if (sAdapterDiscovering) {
+      // Fire 'devicefound' again to update device name for (2).
+      // See bug 1076553 for more information.
+      DistributeSignal(BluetoothSignal(NS_LITERAL_STRING("DeviceFound"),
+                                       NS_LITERAL_STRING(KEY_ADAPTER),
+                                       BluetoothValue(props)));
+    }
     return;
   }
 
@@ -2812,16 +2828,17 @@ BluetoothServiceBluedroid::DiscoveryStateChangedNotification(bool aState)
 #else
   MOZ_ASSERT(NS_IsMainThread());
 
-  bool isDiscovering = (aState == true);
+  sAdapterDiscovering = aState;
 
   DistributeSignal(
     BluetoothSignal(NS_LITERAL_STRING(DISCOVERY_STATE_CHANGED_ID),
-                    NS_LITERAL_STRING(KEY_ADAPTER), isDiscovering));
+                    NS_LITERAL_STRING(KEY_ADAPTER), sAdapterDiscovering));
 
   // Distribute "PropertyChanged" signal to notice adapter this change since
   // Bluedroid don' treat "discovering" as a property of adapter.
   InfallibleTArray<BluetoothNamedValue> props;
-  BT_APPEND_NAMED_VALUE(props, "Discovering", BluetoothValue(isDiscovering));
+  BT_APPEND_NAMED_VALUE(props, "Discovering",
+                        BluetoothValue(sAdapterDiscovering));
   DistributeSignal(BluetoothSignal(NS_LITERAL_STRING("PropertyChanged"),
                                    NS_LITERAL_STRING(KEY_ADAPTER),
                                    BluetoothValue(props)));

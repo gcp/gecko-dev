@@ -1713,8 +1713,11 @@ nsDocument::~nsDocument()
 
   // Kill the subdocument map, doing this will release its strong
   // references, if any.
-  delete mSubDocuments;
-  mSubDocuments = nullptr;
+  if (mSubDocuments) {
+    PL_DHashTableDestroy(mSubDocuments);
+
+    mSubDocuments = nullptr;
+  }
 
   // Destroy link map now so we don't waste time removing
   // links one by one
@@ -2118,8 +2121,10 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
     tmp->mStyleSheetSetList = nullptr;
   }
 
-  delete tmp->mSubDocuments;
-  tmp->mSubDocuments = nullptr;
+  if (tmp->mSubDocuments) {
+    PL_DHashTableDestroy(tmp->mSubDocuments);
+    tmp->mSubDocuments = nullptr;
+  }
 
   tmp->mFrameRequestCallbacks.Clear();
 
@@ -2315,8 +2320,11 @@ nsDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
 
   // Delete references to sub-documents and kill the subdocument map,
   // if any. It holds strong references
-  delete mSubDocuments;
-  mSubDocuments = nullptr;
+  if (mSubDocuments) {
+    PL_DHashTableDestroy(mSubDocuments);
+
+    mSubDocuments = nullptr;
+  }
 
   // Destroy link map now so we don't waste time removing
   // links one by one
@@ -3997,7 +4005,7 @@ nsDocument::SetSubDocumentFor(Element* aElement, nsIDocument* aSubDoc)
         SubDocInitEntry
       };
 
-      mSubDocuments = new PLDHashTable(&hash_table_ops, sizeof(SubDocMapEntry));
+      mSubDocuments = PL_NewDHashTable(&hash_table_ops, sizeof(SubDocMapEntry));
     }
 
     // Add a mapping to the hash table
@@ -11051,35 +11059,17 @@ private:
   nsRefPtr<gfx::VRHMDInfo> mHMD;
 };
 
-static nsIDocument*
-GetFullscreenRootDocument(nsIDocument* aDoc)
-{
-  if (!aDoc) {
-    return nullptr;
-  }
-  nsIDocument* doc = aDoc;
-  nsIDocument* parent;
-  while ((parent = doc->GetParentDocument()) &&
-         (!nsContentUtils::IsFullscreenApiContentOnly() ||
-          !nsContentUtils::IsChromeDoc(parent))) {
-    doc = parent;
-  }
-  return doc;
-}
-
 static void
 SetWindowFullScreen(nsIDocument* aDoc, bool aValue, gfx::VRHMDInfo *aVRHMD = nullptr)
 {
   // Maintain list of fullscreen root documents.
-  nsCOMPtr<nsIDocument> root = GetFullscreenRootDocument(aDoc);
+  nsCOMPtr<nsIDocument> root = nsContentUtils::GetRootDocument(aDoc);
   if (aValue) {
     FullscreenRoots::Add(root);
   } else {
     FullscreenRoots::Remove(root);
   }
-  if (!nsContentUtils::IsFullscreenApiContentOnly()) {
-    nsContentUtils::AddScriptRunner(new nsSetWindowFullScreen(aDoc, aValue, aVRHMD));
-  }
+  nsContentUtils::AddScriptRunner(new nsSetWindowFullScreen(aDoc, aValue, aVRHMD));
 }
 
 class nsCallExitFullscreen : public nsRunnable {
@@ -11284,7 +11274,7 @@ GetFullscreenLeaf(nsIDocument* aDoc)
   }
   // Otherwise we could be either in a non-fullscreen doc tree, or we're
   // below the fullscreen doc. Start the search from the root.
-  nsIDocument* root = GetFullscreenRootDocument(aDoc);
+  nsIDocument* root = nsContentUtils::GetRootDocument(aDoc);
   // Check that the root is actually fullscreen so we don't waste time walking
   // around its descendants.
   if (!root->IsFullScreenDoc()) {
@@ -11299,10 +11289,6 @@ nsDocument::RestorePreviousFullScreenState()
 {
   NS_ASSERTION(!IsFullScreenDoc() || !FullscreenRoots::IsEmpty(),
     "Should have at least 1 fullscreen root when fullscreen!");
-  NS_ASSERTION(!nsContentUtils::IsFullscreenApiContentOnly() ||
-               !nsContentUtils::IsChromeDoc(this),
-               "Should not run RestorePreviousFullScreenState() on "
-               "chrome document when fullscreen is content only");
 
   if (!IsFullScreenDoc() || !GetWindow() || FullscreenRoots::IsEmpty()) {
     return;
@@ -11377,7 +11363,7 @@ nsDocument::RestorePreviousFullScreenState()
         // as necessary.
         nsAutoString origin;
         nsContentUtils::GetUTFOrigin(doc->NodePrincipal(), origin);
-        nsIDocument* root = GetFullscreenRootDocument(doc);
+        nsIDocument* root = nsContentUtils::GetRootDocument(doc);
         nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
         os->NotifyObservers(root, "fullscreen-origin-change", origin.get());
       }
@@ -11389,8 +11375,8 @@ nsDocument::RestorePreviousFullScreenState()
   if (doc == nullptr) {
     // We moved all documents in this doctree out of fullscreen mode,
     // move the top-level window out of fullscreen mode.
-    NS_ASSERTION(!GetFullscreenRootDocument(this)->IsFullScreenDoc(),
-      "Should have cleared all docs' stacks");
+    NS_ASSERTION(!nsContentUtils::GetRootDocument(this)->IsFullScreenDoc(),
+                 "Should have cleared all docs' stacks");
     nsRefPtr<AsyncEventDispatcher> asyncDispatcher = new AsyncEventDispatcher(
       this, NS_LITERAL_STRING("MozExitedDomFullscreen"), true, true);
     asyncDispatcher->PostDOMEvent();
@@ -11477,8 +11463,7 @@ LogFullScreenDenied(bool aLogFailure, const char* aMessage, nsIDocument* aDoc)
 nsresult
 nsDocument::AddFullscreenApprovedObserver()
 {
-  if (mHasFullscreenApprovedObserver ||
-      !Preferences::GetBool("full-screen-api.approval-required")) {
+  if (mHasFullscreenApprovedObserver) {
     return NS_OK;
   }
 
@@ -11666,7 +11651,7 @@ nsresult nsDocument::RemoteFrameFullscreenChanged(nsIDOMElement* aFrameElement,
   // it can show a warning or approval UI.
   if (!aOrigin.IsEmpty()) {
     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-    os->NotifyObservers(GetFullscreenRootDocument(this),
+    os->NotifyObservers(nsContentUtils::GetRootDocument(this),
                         "fullscreen-origin-change",
                         PromiseFlatString(aOrigin).get());
   }
@@ -11709,13 +11694,6 @@ nsDocument::RequestFullScreen(Element* aElement,
   }
   if (!GetWindow()) {
     LogFullScreenDenied(true, "FullScreenDeniedLostWindow", this);
-    return;
-  }
-  if (nsContentUtils::IsFullscreenApiContentOnly() &&
-      nsContentUtils::IsChromeDoc(this)) {
-    // Block fullscreen requests in the chrome document when the fullscreen API
-    // is configured for content only.
-    LogFullScreenDenied(true, "FullScreenDeniedContentOnly", this);
     return;
   }
   if (!IsFullScreenEnabled(aWasCallerChrome, true)) {
@@ -11764,7 +11742,7 @@ nsDocument::RequestFullScreen(Element* aElement,
 
   // Remember the root document, so that if a full-screen document is hidden
   // we can reset full-screen state in the remaining visible full-screen documents.
-  nsIDocument* fullScreenRootDoc = GetFullscreenRootDocument(this);
+  nsIDocument* fullScreenRootDoc = nsContentUtils::GetRootDocument(this);
   if (fullScreenRootDoc->IsFullScreenDoc()) {
     // A document is already in fullscreen, unlock the mouse pointer
     // before setting a new document to fullscreen
@@ -11878,7 +11856,7 @@ nsDocument::RequestFullScreen(Element* aElement,
   if (aNotifyOnOriginChange &&
       !nsContentUtils::HaveEqualPrincipals(previousFullscreenDoc, this)) {
     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-    nsIDocument* root = GetFullscreenRootDocument(this);
+    nsIDocument* root = nsContentUtils::GetRootDocument(this);
     nsAutoString origin;
     nsContentUtils::GetUTFOrigin(NodePrincipal(), origin);
     os->NotifyObservers(root, "fullscreen-origin-change", origin.get());

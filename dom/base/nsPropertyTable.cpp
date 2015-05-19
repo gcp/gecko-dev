@@ -229,7 +229,7 @@ nsPropertyTable::SetPropertyInternal(nsPropertyOwner     aObject,
   // value is destroyed
   nsresult result = NS_OK;
   PropertyListMapEntry *entry = static_cast<PropertyListMapEntry*>
-    (PL_DHashTableAdd(&propertyList->mObjectValueMap, aObject, fallible));
+    (PL_DHashTableAdd(&propertyList->mObjectValueMap, aObject, mozilla::fallible));
   if (!entry)
     return NS_ERROR_OUT_OF_MEMORY;
   // A nullptr entry->key is the sign that the entry has just been allocated
@@ -287,17 +287,20 @@ nsPropertyTable::PropertyList::PropertyList(nsIAtom            *aName,
                                             void               *aDtorData,
                                             bool                aTransfer)
   : mName(aName),
-    mObjectValueMap(PL_DHashGetStubOps(), sizeof(PropertyListMapEntry)),
     mDtorFunc(aDtorFunc),
     mDtorData(aDtorData),
     mTransfer(aTransfer),
     mNext(nullptr)
 {
+  PL_DHashTableInit(&mObjectValueMap, PL_DHashGetStubOps(),
+                    sizeof(PropertyListMapEntry));
 }
 
 nsPropertyTable::PropertyList::~PropertyList()
 {
+  PL_DHashTableFinish(&mObjectValueMap);
 }
+
 
 static PLDHashOperator
 DestroyPropertyEnumerator(PLDHashTable *table, PLDHashEntryHdr *hdr,

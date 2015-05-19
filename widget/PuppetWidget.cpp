@@ -886,19 +886,12 @@ PuppetWidget::NotifyIMEOfSelectionChange(
   if (!mTabChild)
     return NS_ERROR_FAILURE;
 
-  nsEventStatus status;
-  WidgetQueryContentEvent queryEvent(true, NS_QUERY_SELECTED_TEXT, this);
-  InitEvent(queryEvent, nullptr);
-  DispatchEvent(&queryEvent, status);
-
-  if (queryEvent.mSucceeded) {
-    mTabChild->SendNotifyIMESelection(
-      mIMELastReceivedSeqno,
-      queryEvent.GetSelectionStart(),
-      queryEvent.GetSelectionEnd(),
-      queryEvent.GetWritingMode(),
-      aIMENotification.mSelectionChangeData.mCausedByComposition);
-  }
+  mTabChild->SendNotifyIMESelection(
+    mIMELastReceivedSeqno,
+    aIMENotification.mSelectionChangeData.StartOffset(),
+    aIMENotification.mSelectionChangeData.EndOffset(),
+    aIMENotification.mSelectionChangeData.GetWritingMode(),
+    aIMENotification.mSelectionChangeData.mCausedByComposition);
   return NS_OK;
 }
 
@@ -1133,6 +1126,20 @@ PuppetWidget::GetScreenBounds(nsIntRect &aRect) {
   aRect.MoveTo(LayoutDeviceIntPoint::ToUntyped(WidgetToScreenOffset()));
   aRect.SizeTo(mBounds.Size());
   return NS_OK;
+}
+
+uint32_t PuppetWidget::GetMaxTouchPoints() const
+{
+  static uint32_t sTouchPoints = 0;
+  static bool sIsInitialized = false;
+  if (sIsInitialized) {
+    return sTouchPoints;
+  }
+  if (mTabChild) {
+    mTabChild->GetMaxTouchPoints(&sTouchPoints);
+    sIsInitialized = true;
+  }
+  return sTouchPoints;
 }
 
 PuppetScreen::PuppetScreen(void *nativeScreen)

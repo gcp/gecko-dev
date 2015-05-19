@@ -53,7 +53,7 @@ static bool test_pldhash_Init_capacity_ok()
 
 static bool test_pldhash_lazy_storage()
 {
-  PLDHashTable t(PL_DHashGetStubOps(), sizeof(PLDHashEntryStub));
+  PLDHashTable2 t(PL_DHashGetStubOps(), sizeof(PLDHashEntryStub));
 
   // PLDHashTable allocates entry storage lazily. Check that all the non-add
   // operations work appropriately when the table is empty and the storage
@@ -128,9 +128,9 @@ static bool test_pldhash_move_semantics()
     nullptr
   };
 
-  PLDHashTable t1(&ops, sizeof(PLDHashEntryStub));
+  PLDHashTable2 t1(&ops, sizeof(PLDHashEntryStub));
   PL_DHashTableAdd(&t1, (const void*)88);
-  PLDHashTable t2(&ops, sizeof(PLDHashEntryStub));
+  PLDHashTable2 t2(&ops, sizeof(PLDHashEntryStub));
   PL_DHashTableAdd(&t2, (const void*)99);
 
   t1 = mozilla::Move(t1);   // self-move
@@ -158,7 +158,7 @@ static bool test_pldhash_move_semantics()
   PLDHashTable t7;
   PLDHashTable t8(mozilla::Move(t7));   // new table constructed with uninited
 
-  PLDHashTable t9(&ops, sizeof(PLDHashEntryStub));
+  PLDHashTable2 t9(&ops, sizeof(PLDHashEntryStub));
   PL_DHashTableAdd(&t9, (const void*)88);
   PLDHashTable t10(mozilla::Move(t9));  // new table constructed with inited
 
@@ -178,7 +178,7 @@ static bool test_pldhash_grow_to_max_capacity()
   };
 
   // This is infallible.
-  PLDHashTable* t = new PLDHashTable(&ops, sizeof(PLDHashEntryStub), 128);
+  PLDHashTable2* t = new PLDHashTable2(&ops, sizeof(PLDHashEntryStub), 128);
 
   // Check that New() sets |t->ops|.
   if (!t->IsInitialized()) {
@@ -198,11 +198,11 @@ static bool test_pldhash_grow_to_max_capacity()
   // We stop when the element count is 96.875% of PL_DHASH_MAX_SIZE (see
   // MaxLoadOnGrowthFailure()).
   if (numInserted != PL_DHASH_MAX_CAPACITY - (PL_DHASH_MAX_CAPACITY >> 5)) {
+    delete t;
     return false;
   }
 
   delete t;
-
   return true;
 }
 #endif

@@ -363,10 +363,12 @@ public:
                                      const uint64_t& aInputBlockId) override;
     virtual bool RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
                                     const ScrollableLayerGuid& aGuid,
-                                    const uint64_t& aInputBlockId) override;
+                                    const uint64_t& aInputBlockId,
+                                    const nsEventStatus& aApzResponse) override;
     virtual bool RecvRealTouchMoveEvent(const WidgetTouchEvent& aEvent,
                                         const ScrollableLayerGuid& aGuid,
-                                        const uint64_t& aInputBlockId) override;
+                                        const uint64_t& aInputBlockId,
+                                        const nsEventStatus& aApzResponse) override;
     virtual bool RecvKeyEvent(const nsString& aType,
                               const int32_t&  aKeyCode,
                               const int32_t&  aCharCode,
@@ -428,6 +430,8 @@ public:
     /** Return the DPI of the widget this TabChild draws to. */
     void GetDPI(float* aDPI);
     void GetDefaultScale(double *aScale);
+
+    void GetMaxTouchPoints(uint32_t* aTouchPoints);
 
     ScreenOrientation GetOrientation() { return mOrientation; }
 

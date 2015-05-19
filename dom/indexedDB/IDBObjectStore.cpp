@@ -334,14 +334,14 @@ StructuredCloneWriteCallback(JSContext* aCx,
 
       nsRefPtr<File> file = blob->ToFile();
       if (file) {
-        int64_t lastModifiedDate;
-        MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-          file->GetMozLastModifiedDate(&lastModifiedDate)));
+        ErrorResult rv;
+        int64_t lastModifiedDate = file->GetLastModified(rv);
+        MOZ_ALWAYS_TRUE(!rv.Failed());
 
         lastModifiedDate = NativeEndian::swapToLittleEndian(lastModifiedDate);
 
         nsString name;
-        MOZ_ALWAYS_TRUE(NS_SUCCEEDED(file->GetName(name)));
+        file->GetName(name);
 
         NS_ConvertUTF16toUTF8 convName(name);
         uint32_t convNameLength =
@@ -1178,7 +1178,8 @@ IDBObjectStore::AddOrPut(JSContext* aCx,
   }
 
   FallibleTArray<uint8_t> cloneData;
-  if (NS_WARN_IF(!cloneData.SetLength(cloneWriteInfo.mCloneBuffer.nbytes()))) {
+  if (NS_WARN_IF(!cloneData.SetLength(cloneWriteInfo.mCloneBuffer.nbytes(),
+                                      fallible))) {
     aRv = NS_ERROR_OUT_OF_MEMORY;
     return nullptr;
   }
@@ -1206,7 +1207,7 @@ IDBObjectStore::AddOrPut(JSContext* aCx,
     const uint32_t count = blobOrFileInfos.Length();
 
     FallibleTArray<DatabaseFileOrMutableFileId> fileActorOrMutableFileIds;
-    if (NS_WARN_IF(!fileActorOrMutableFileIds.SetCapacity(count))) {
+    if (NS_WARN_IF(!fileActorOrMutableFileIds.SetCapacity(count, fallible))) {
       aRv = NS_ERROR_OUT_OF_MEMORY;
       return nullptr;
     }

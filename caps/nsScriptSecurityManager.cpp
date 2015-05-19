@@ -281,7 +281,7 @@ nsScriptSecurityManager::AppStatusForPrincipal(nsIPrincipal *aPrin)
                       nsIPrincipal::APP_STATUS_NOT_INSTALLED);
 
     nsAutoCString origin;
-    NS_ENSURE_SUCCESS(aPrin->GetOrigin(getter_Copies(origin)),
+    NS_ENSURE_SUCCESS(aPrin->GetOrigin(origin),
                       nsIPrincipal::APP_STATUS_NOT_INSTALLED);
     nsString appOrigin;
     NS_ENSURE_SUCCESS(app->GetOrigin(appOrigin),
@@ -294,7 +294,7 @@ nsScriptSecurityManager::AppStatusForPrincipal(nsIPrincipal *aPrin)
                       nsIPrincipal::APP_STATUS_NOT_INSTALLED);
 
     nsAutoCString appOriginPunned;
-    NS_ENSURE_SUCCESS(nsPrincipal::GetOriginForURI(appURI, getter_Copies(appOriginPunned)),
+    NS_ENSURE_SUCCESS(nsPrincipal::GetOriginForURI(appURI, appOriginPunned),
                       nsIPrincipal::APP_STATUS_NOT_INSTALLED);
 
     if (!appOriginPunned.Equals(origin)) {
@@ -485,26 +485,6 @@ nsScriptSecurityManager::HashPrincipalByOrigin(nsIPrincipal* aPrincipal)
     if (!uri)
         aPrincipal->GetURI(getter_AddRefs(uri));
     return SecurityHashURI(uri);
-}
-
-/* static */ bool
-nsScriptSecurityManager::AppAttributesEqual(nsIPrincipal* aFirst,
-                                            nsIPrincipal* aSecond)
-{
-    MOZ_ASSERT(aFirst && aSecond, "Don't pass null pointers!");
-
-    uint32_t firstAppId = nsIScriptSecurityManager::UNKNOWN_APP_ID;
-    if (!aFirst->GetUnknownAppId()) {
-        firstAppId = aFirst->GetAppId();
-    }
-
-    uint32_t secondAppId = nsIScriptSecurityManager::UNKNOWN_APP_ID;
-    if (!aSecond->GetUnknownAppId()) {
-        secondAppId = aSecond->GetAppId();
-    }
-
-    return ((firstAppId == secondAppId) &&
-            (aFirst->GetIsInBrowserElement() == aSecond->GetIsInBrowserElement()));
 }
 
 NS_IMETHODIMP
@@ -724,10 +704,10 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
             auto themeOrigin = Preferences::GetCString("b2g.theme.origin");
             if (themeOrigin) {
                 nsAutoCString targetOrigin;
-                nsPrincipal::GetOriginForURI(targetBaseURI, getter_Copies(targetOrigin));
+                nsPrincipal::GetOriginForURI(targetBaseURI, targetOrigin);
                 if (targetOrigin.Equals(themeOrigin)) {
                     nsAutoCString pOrigin;
-                    aPrincipal->GetOrigin(getter_Copies(pOrigin));
+                    aPrincipal->GetOrigin(pOrigin);
                     return nsContentUtils::IsExactSitePermAllow(aPrincipal, "themeable") ||
                            pOrigin.Equals(themeOrigin)
                         ? NS_OK : NS_ERROR_DOM_BAD_URI;
@@ -1022,9 +1002,9 @@ nsScriptSecurityManager::CreateCodebasePrincipal(nsIURI* aURI, uint32_t aAppId,
         return NS_OK;
     }
 
+    BasePrincipal::OriginAttributes attrs(aAppId, aInMozBrowser);
     nsRefPtr<nsPrincipal> codebase = new nsPrincipal();
-
-    nsresult rv = codebase->Init(aURI, aAppId, aInMozBrowser);
+    nsresult rv = codebase->Init(aURI, attrs);
     if (NS_FAILED(rv))
         return rv;
 
