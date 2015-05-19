@@ -274,16 +274,16 @@ CamerasChild::RecvDeliverFrame(const int& capEngine,
   //LOG((__PRETTY_FUNCTION__));
   MutexAutoLock lock(mMutex);
   CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
-  if (Cameras(false)->Callback(capEng, capId)) {
+  if (Callback(capEng, capId)) {
     unsigned char* image = shmem.get<unsigned char>();
-    Cameras(false)->Callback(capEng, capId)->DeliverFrame(image, size,
-                                                     time_stamp,
-                                                     ntp_time, render_time,
-                                                     nullptr);
+    Callback(capEng, capId)->DeliverFrame(image, size,
+                                          time_stamp,
+                                          ntp_time, render_time,
+                                          nullptr);
   } else {
     LOG(("DeliverFrame called with dead callback"));
   }
-  Cameras(false)->SendReleaseFrame(shmem);
+  SendReleaseFrame(shmem);
   return true;
 }
 
@@ -295,8 +295,8 @@ CamerasChild::RecvFrameSizeChange(const int& capEngine,
   LOG((__PRETTY_FUNCTION__));
   MutexAutoLock lock(mMutex);
   CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
-  if (Cameras(true)->Callback(capEng, capId)) {
-    Cameras(true)->Callback(capEng, capId)->FrameSizeChange(w, h, 0);
+  if (Callback(capEng, capId)) {
+    Callback(capEng, capId)->FrameSizeChange(w, h, 0);
   } else {
     LOG(("Frame size change with dead callback"));
   }

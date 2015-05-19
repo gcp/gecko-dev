@@ -65,6 +65,7 @@ public:
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
   nsIThread* GetBackgroundThread() { return mPBackgroundThread; };
+  bool ChildIsAlive() { return mChildIsAlive; };
 
   // forwarded to PBackground thread
   int DeliverFrameOverIPC(CaptureEngine capEng,
@@ -106,6 +107,9 @@ protected:
 
   // PBackground parent thread
   nsIThread* mPBackgroundThread;
+
+  // Shutdown handling
+  bool mChildIsAlive;
 };
 
 PCamerasParent* CreateCamerasParent();

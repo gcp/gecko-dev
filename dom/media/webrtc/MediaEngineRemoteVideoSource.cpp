@@ -79,6 +79,7 @@ MediaEngineRemoteVideoSource::Shutdown() {
     Deallocate();
   }
 
+  mState = kReleased;
   mInitDone = false;
   return;
 }
