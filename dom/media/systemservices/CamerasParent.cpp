@@ -14,14 +14,10 @@
 
 #undef LOG
 #undef LOG_ENABLED
-#if defined(PR_LOGGING)
+
 PRLogModuleInfo *gCamerasParentLog;
 #define LOG(args) PR_LOG(gCamerasParentLog, PR_LOG_DEBUG, args)
 #define LOG_ENABLED() PR_LOG_TEST(gCamerasParentLog, 5)
-#else
-#define LOG(args)
-#define LOG_ENABLED() (false)
-#endif
 
 namespace mozilla {
 namespace camera {

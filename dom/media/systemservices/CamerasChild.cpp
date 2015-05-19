@@ -18,14 +18,9 @@
 
 #undef LOG
 #undef LOG_ENABLED
-#if defined(PR_LOGGING)
 PRLogModuleInfo *gCamerasChildLog;
 #define LOG(args) PR_LOG(gCamerasChildLog, PR_LOG_DEBUG, args)
 #define LOG_ENABLED() PR_LOG_TEST(gCamerasChildLog, 5)
-#else
-#define LOG(args)
-#define LOG_ENABLED() (false)
-#endif
 
 namespace mozilla {
 namespace camera {
@@ -61,10 +56,8 @@ public:
 
 static CamerasChild* Cameras(bool trace) {
   MutexAutoLock lock(CamerasSingleton::getInstance().sCamerasMutex);
-#if defined(PR_LOGGING)
   if (!gCamerasChildLog)
     gCamerasChildLog = PR_NewLogModule("CamerasChild");
-#endif
   if (!CamerasSingleton::getInstance().sCameras) {
     LOG(("No sCameras, setting up"));
     // Try to get the PBackground handle
@@ -313,10 +306,8 @@ CamerasChild::RecvFrameSizeChange(const int& capEngine,
 CamerasChild::CamerasChild()
   : mMutex("mozilla::cameras::CamerasChild")
 {
-#if defined(PR_LOGGING)
   if (!gCamerasChildLog)
     gCamerasChildLog = PR_NewLogModule("CamerasChild");
-#endif
 
   LOG(("CamerasChild: %p", this));
 
