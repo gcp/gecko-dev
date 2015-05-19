@@ -317,6 +317,28 @@ MediaEngineWebRTC::EnumerateAudioDevices(dom::MediaSourceEnum aMediaSource,
   }
 }
 
+static PLDHashOperator
+ClearVideoSource (const nsAString&, // unused
+                  MediaEngineVideoSource* aData,
+                 void *userArg)
+{
+  if (aData) {
+    aData->Shutdown();
+  }
+  return PL_DHASH_NEXT;
+}
+
+static PLDHashOperator
+ClearAudioSource (const nsAString&, // unused
+                  MediaEngineWebRTCAudioSource* aData,
+                 void *userArg)
+{
+  if (aData) {
+    aData->Shutdown();
+  }
+  return PL_DHASH_NEXT;
+}
+
 void
 MediaEngineWebRTC::Shutdown()
 {
@@ -324,6 +346,11 @@ MediaEngineWebRTC::Shutdown()
   MutexAutoLock lock(mMutex);
 
   // Clear callbacks before we go away since the engines may outlive us
+  fprintf(stderr, "************************ MediaEngineWebRTC::Shutdown() **********************\n");
+  // Shutdown all the sources, since we may have dangling references to the
+  // sources in nsDOMUserMediaStreams waiting for GC/CC
+  mVideoSources.EnumerateRead(ClearVideoSource, nullptr);
+  mAudioSources.EnumerateRead(ClearAudioSource, nullptr);
   mVideoSources.Clear();
   mAudioSources.Clear();
 

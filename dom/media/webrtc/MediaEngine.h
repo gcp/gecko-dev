@@ -65,7 +65,7 @@ public:
                                      nsTArray<nsRefPtr<MediaEngineAudioSource> >*) = 0;
 
   /* Prepare for application shutdown */
-  virtual void Shutdown() {};
+  virtual void Shutdown() = 0;
 
 protected:
   virtual ~MediaEngine() {}
@@ -83,6 +83,8 @@ public:
   static const unsigned int kMaxUniqueIdLength = 256;
 
   virtual ~MediaEngineSource() {}
+
+  virtual void Shutdown() = 0;
 
   /* Populate the human readable name of this device in the nsAString */
   virtual void GetName(nsAString&) = 0;

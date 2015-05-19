@@ -109,19 +109,21 @@ public:
 
   void Refresh(int aIndex);
 
+  virtual void Shutdown() override;
+
 protected:
   ~MediaEngineWebRTCVideoSource() { Shutdown(); }
 
 private:
   // Initialize the needed Video engine interfaces.
   void Init();
-  void Shutdown();
 
   // Engine variables.
   webrtc::VideoEngine* mVideoEngine; // Weak reference, don't free.
-  webrtc::ViEBase* mViEBase;
-  webrtc::ViECapture* mViECapture;
-  webrtc::ViERender* mViERender;
+  ScopedCustomReleasePtr<webrtc::VoEBase> mVoEBase;
+  ScopedCustomReleasePtr<webrtc::VoEExternalMedia> mVoERender;
+  ScopedCustomReleasePtr<webrtc::VoENetwork> mVoENetwork;
+  ScopedCustomReleasePtr<webrtc::VoEAudioProcessing> mVoEProcessing;
 
   dom::MediaSourceEnum mMediaSource; // source of media (camera | application | screen)
 
@@ -192,6 +194,8 @@ public:
                int16_t audio10ms[], int length,
                int samplingFreq, bool isStereo) override;
 
+  virtual void Shutdown() override;
+
   NS_DECL_THREADSAFE_ISUPPORTS
 
 protected:
@@ -199,7 +203,6 @@ protected:
 
 private:
   void Init();
-  void Shutdown();
 
   webrtc::VoiceEngine* mVoiceEngine;
   ScopedCustomReleasePtr<webrtc::VoEBase> mVoEBase;
@@ -238,12 +241,12 @@ public:
 
   // Clients should ensure to clean-up sources video/audio sources
   // before invoking Shutdown on this class.
-  void Shutdown();
+  void Shutdown() override;
 
   virtual void EnumerateVideoDevices(dom::MediaSourceEnum,
-                                    nsTArray<nsRefPtr<MediaEngineVideoSource> >*);
+                                    nsTArray<nsRefPtr<MediaEngineVideoSource> >*) override;
   virtual void EnumerateAudioDevices(dom::MediaSourceEnum,
-                                    nsTArray<nsRefPtr<MediaEngineAudioSource> >*);
+                                    nsTArray<nsRefPtr<MediaEngineAudioSource> >*) override;
 private:
   ~MediaEngineWebRTC() {
     Shutdown();

@@ -1658,7 +1658,7 @@ MediaManager::Get() {
 
     nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
     if (obs) {
-      obs->AddObserver(sSingleton, "xpcom-shutdown", false);
+      obs->AddObserver(sSingleton, "xpcom-will-shutdown", false);
       obs->AddObserver(sSingleton, "getUserMedia:response:allow", false);
       obs->AddObserver(sSingleton, "getUserMedia:response:deny", false);
       obs->AddObserver(sSingleton, "getUserMedia:revoke", false);
@@ -2249,8 +2249,8 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
       LOG(("%s: %dx%d @%dfps (min %d)", __FUNCTION__,
            mPrefs.mWidth, mPrefs.mHeight, mPrefs.mFPS, mPrefs.mMinFPS));
     }
-  } else if (!strcmp(aTopic, "xpcom-shutdown")) {
-    obs->RemoveObserver(this, "xpcom-shutdown");
+  } else if (!strcmp(aTopic, "xpcom-will-shutdown")) {
+    obs->RemoveObserver(this, "xpcom-will-shutdown");
     obs->RemoveObserver(this, "getUserMedia:response:allow");
     obs->RemoveObserver(this, "getUserMedia:response:deny");
     obs->RemoveObserver(this, "getUserMedia:revoke");
@@ -2269,15 +2269,21 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
     class ShutdownTask : public Task
     {
     public:
-      explicit ShutdownTask(nsRunnable* aReply) : mReply(aReply) {}
+      ShutdownTask(MediaEngine* aMediaEngine, nsRunnable* aReply)
+        : mEngine(aMediaEngine)
+        , mReply(aReply) {}
     private:
       virtual void
       Run()
       {
         MOZ_ASSERT(MediaManager::IsInMediaThread());
         mozilla::ipc::BackgroundChild::CloseForCurrentThread();
+        if (mEngine) {
+          mEngine->Shutdown();
+        }
         NS_DispatchToMainThread(mReply);
       }
+      RefPtr<MediaEngine> mEngine;
       nsRefPtr<nsRunnable> mReply;
     };
 
@@ -2289,8 +2295,9 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
     // cleared until the lambda function clears it.
 
     MediaManager::GetMessageLoop()->PostTask(FROM_HERE, new ShutdownTask(
-        media::CallbackRunnable::New([this]() mutable {
+        mBackend, media::CallbackRunnable::New([this]() mutable {
       // Close off any remaining active windows.
+      fprintf(stderr, "**** running ShutdownTask lambda ****\n");
       MutexAutoLock lock(mMutex);
       GetActiveWindows()->Clear();
       mActiveCallbacks.Clear();
@@ -2300,6 +2307,7 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
       sSingleton = nullptr;
       if (mMediaThread) {
         mMediaThread->Stop();
+        fprintf(stderr, "**** Stopped mediamanager thread ****\n");
       }
       LOG(("Releasing MediaManager backend"));
       if (mBackend) {
@@ -2308,6 +2316,7 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
       }
       return NS_OK;
     })));
+    // XXX Is there a need to wait on this completing?
     return NS_OK;
 
   } else if (!strcmp(aTopic, "getUserMedia:response:allow")) {
