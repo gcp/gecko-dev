@@ -22,22 +22,27 @@ PRLogModuleInfo *gCamerasParentLog;
 namespace mozilla {
 namespace camera {
 
+mozilla::Atomic<int> sNumAlive;
+
 class CamerasParentSingleton {
 public:
   CamerasParentSingleton()
     : mCamerasParentMutex("CamerasParent::sCamerasMutex"),
       mCamerasParent(nullptr) {
     if (!gCamerasParentLog)
-      gCamerasChildLog = PR_NewLogModule("CamerasParent");
-    LOG(("CamerasParentSingleton: %p", this));
-  }
+      gCamerasParentLog = PR_NewLogModule("CamerasParent");
+    sNumAlive++;
+    MOZ_ASSERT(sNumAlive == 1);
+ }
 
   ~CamerasParentSingleton() {
     mCamerasParent = nullptr;
-    LOG(("~CamerasParentSingleton: %p", this));
+    sNumAlive--;
+    MOZ_ASSERT(sNumAlive == 0);
   }
 
   CamerasParent*& parent() {
+    MOZ_ASSERT(sNumAlive == 1);
     mCamerasParentMutex.AssertCurrentThreadOwns();
     return mCamerasParent;
   }
@@ -48,6 +53,7 @@ public:
 
   static CamerasParentSingleton& getInstance() {
     static CamerasParentSingleton instance;
+    MOZ_ASSERT(sNumAlive == 1);
     return instance;
   }
 
@@ -629,7 +635,7 @@ void CamerasParent::DoShutdown()
 
   if (mShmemInitialized) {
     DeallocShmem(mShmem);
-    mShmemInitialized = true;
+    mShmemInitialized = false;
   }
 
   MutexAutoLock lock(CamerasParentSingleton::getMutex());
