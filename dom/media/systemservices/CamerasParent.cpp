@@ -41,16 +41,6 @@ public:
     MOZ_ASSERT(sNumAlive == 0);
   }
 
-  CamerasParent*& parent() {
-    MOZ_ASSERT(sNumAlive == 1);
-    mCamerasParentMutex.AssertCurrentThreadOwns();
-    return mCamerasParent;
-  }
-
-  mozilla::Mutex& mutex() {
-    return mCamerasParentMutex;
-  }
-
   static CamerasParentSingleton& getInstance() {
     static CamerasParentSingleton instance;
     MOZ_ASSERT(sNumAlive == 1);
@@ -66,6 +56,16 @@ public:
   }
 
 private:
+  CamerasParent*& parent() {
+    MOZ_ASSERT(sNumAlive == 1);
+    mCamerasParentMutex.AssertCurrentThreadOwns();
+    return mCamerasParent;
+  }
+
+  mozilla::Mutex& mutex() {
+    return mCamerasParentMutex;
+  }
+
   mozilla::Mutex mCamerasParentMutex;
   CamerasParent* mCamerasParent;
 };
@@ -81,11 +81,13 @@ public:
     MutexAutoLock lock(CamerasParentSingleton::getMutex());
     if (!CamerasParentSingleton::getParent()) {
       // Communication channel has been torn down
+      LOG(("FrameSizeChangeRunnable is active without CamerasParent"));
       mResult = 0;
       return NS_OK;
     }
     if (!CamerasParentSingleton::getParent()->ChildIsAlive()) {
       // Communication channel is being torn down
+      LOG(("FrameSizeChangeRunnable is active without active Child"));
       mResult = 0;
       return NS_OK;
     }
@@ -191,6 +193,7 @@ CamerasParent::DeliverFrameOverIPC(CaptureEngine cap_engine,
                                    int64_t render_time)
 {
   if (!mShmemInitialized) {
+    LOG(("Initializing Shmem"));
     AllocShmem(size, SharedMemory::TYPE_BASIC, &mShmem);
     mShmemInitialized = true;
   }
@@ -204,6 +207,7 @@ CamerasParent::DeliverFrameOverIPC(CaptureEngine cap_engine,
 
   // Prepare video buffer
   if (mShmem.Size<char>() != static_cast<size_t>(size)) {
+    LOG(("Frame size change in Shmem"));
     DeallocShmem(mShmem);
     // this may fail; always check return value
     if (!AllocShmem(size, SharedMemory::TYPE_BASIC, &mShmem)) {
@@ -372,6 +376,9 @@ CamerasParent::SetupEngine(CaptureEngine aCapEngine)
 void
 CamerasParent::CloseEngines()
 {
+  if (mEngineIsRunning) {
+    LOG(("Being closed down while engine is running!"));
+  }
   // Stop the callers
   while (mCallbacks.Length()) {
     auto capEngine = mCallbacks[0]->mCapEngine;
@@ -401,7 +408,10 @@ CamerasParent::EnsureInitialized(int aEngine)
   LOG((__PRETTY_FUNCTION__));
   CaptureEngine capEngine = static_cast<CaptureEngine>(aEngine);
   if (capEngine != mActiveEngine) {
-    LOG(("Engine type new: %d old: %d", aEngine, mActiveEngine));
+    LOG(("Switching Engine type new: %d old: %d", aEngine, mActiveEngine));
+    if (mEngineIsRunning) {
+      LOG(("!!!! Switch requested while engine was active"));
+    }
     CloseEngines();
     if (!SetupEngine(capEngine)) {
       return false;
@@ -572,6 +582,7 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
     return false;
   }
 
+  mEngineIsRunning = true;
   return true;
 }
 
@@ -598,6 +609,7 @@ CamerasParent::RecvStopCapture(const int& aCapEngine,
     }
   }
 
+  mEngineIsRunning = false;
   return true;
 }
 
@@ -639,7 +651,8 @@ void CamerasParent::DoShutdown()
   }
 
   MutexAutoLock lock(CamerasParentSingleton::getMutex());
-  LOG(("sCamerasParent being zeroed is: %p", CamerasParentSingleton::getParent()));
+  LOG(("sCamerasParent being zeroed is: %p, I am %p",
+       CamerasParentSingleton::getParent(), this));
   MOZ_ASSERT(CamerasParentSingleton::getParent() == this);
   CamerasParentSingleton::getParent() = nullptr;
   mPBackgroundThread = nullptr;
@@ -667,7 +680,8 @@ CamerasParent::CamerasParent()
     mWinEngine(nullptr),
     mAppEngine(nullptr),
     mShmemInitialized(false),
-    mChildIsAlive(true)
+    mChildIsAlive(true),
+    mEngineIsRunning(false)
 {
   if (!gCamerasParentLog)
     gCamerasParentLog = PR_NewLogModule("CamerasParent");
@@ -676,6 +690,7 @@ CamerasParent::CamerasParent()
   MutexAutoLock lock(CamerasParentSingleton::getMutex());
   mPBackgroundThread = NS_GetCurrentThread();
   MOZ_ASSERT(mPBackgroundThread != nullptr, "GetCurrentThread failed");
+  MOZ_ASSERT(CamerasParentSingleton::getParent() == nullptr);
   CamerasParentSingleton::getParent() = this;
 
   MOZ_COUNT_CTOR(CamerasParent);

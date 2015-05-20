@@ -110,6 +110,9 @@ protected:
 
   // Shutdown handling
   bool mChildIsAlive;
+
+  // Engine alive
+  bool mEngineIsRunning;
 };
 
 PCamerasParent* CreateCamerasParent();
