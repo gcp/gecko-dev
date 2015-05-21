@@ -280,6 +280,16 @@ TryParseLocationURICandidate(const nsACString& uristr,
             StringBeginsWith(uristr, kToolkit) ||
             StringBeginsWith(uristr, kBrowser))
             return false;
+
+        // -- GROSS HACK ALERT --
+        // The Yandex Elements 8.10.2 extension implements its own "xb://" URL
+        // scheme. If we call NS_NewURI() on an "xb://..." URL, we'll end up
+        // calling into the extension's own JS-implemented nsIProtocolHandler
+        // object, which we can't allow while we're iterating over the JS heap.
+        // So just skip any such URL.
+        // -- GROSS HACK ALERT --
+        if (StringBeginsWith(uristr, NS_LITERAL_CSTRING("xb")))
+            return false;
     }
 
     nsCOMPtr<nsIURI> uri;
@@ -3147,6 +3157,15 @@ AccumulateTelemetryCallback(int id, uint32_t sample, const char* key)
         break;
       case JS_TELEMETRY_GC_SCC_SWEEP_MAX_PAUSE_MS:
         Telemetry::Accumulate(Telemetry::GC_SCC_SWEEP_MAX_PAUSE_MS, sample);
+        break;
+      case JS_TELEMETRY_GC_MINOR_REASON:
+        Telemetry::Accumulate(Telemetry::GC_MINOR_REASON, sample);
+        break;
+      case JS_TELEMETRY_GC_MINOR_REASON_LONG:
+        Telemetry::Accumulate(Telemetry::GC_MINOR_REASON_LONG, sample);
+        break;
+      case JS_TELEMETRY_GC_MINOR_US:
+        Telemetry::Accumulate(Telemetry::GC_MINOR_US, sample);
         break;
       case JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT:
         Telemetry::Accumulate(Telemetry::JS_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT, sample);
