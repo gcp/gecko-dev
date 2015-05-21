@@ -28,8 +28,8 @@ class CamerasParent;
 class CallbackHelper : public webrtc::ExternalRenderer
 {
 public:
-  CallbackHelper(CaptureEngine aCapEng, int aCapId)
-    : mCapEngine(aCapEng), mCapturerId(aCapId) {};
+  CallbackHelper(CaptureEngine aCapEng, int aCapId, CamerasParent *aParent)
+    : mCapEngine(aCapEng), mCapturerId(aCapId), mParent(aParent) {};
 
   // ViEExternalRenderer implementation
   virtual int FrameSizeChange(unsigned int w, unsigned int h,
@@ -47,6 +47,7 @@ public:
 private:
   CaptureEngine mCapEngine;
   int mCapturerId;
+  CamerasParent *mParent;
 };
 
 class CamerasParent :  public PCamerasParent

@@ -22,77 +22,21 @@ PRLogModuleInfo *gCamerasParentLog;
 namespace mozilla {
 namespace camera {
 
-mozilla::Atomic<int> sNumAlive;
-
-class CamerasParentSingleton {
-public:
-  CamerasParentSingleton()
-    : mCamerasParentMutex("CamerasParent::sCamerasMutex"),
-      mCamerasParent(nullptr) {
-    if (!gCamerasParentLog)
-      gCamerasParentLog = PR_NewLogModule("CamerasParent");
-    sNumAlive++;
-    MOZ_ASSERT(sNumAlive == 1);
- }
-
-  ~CamerasParentSingleton() {
-    mCamerasParent = nullptr;
-    sNumAlive--;
-    MOZ_ASSERT(sNumAlive == 0);
-  }
-
-  static CamerasParentSingleton& getInstance() {
-    static CamerasParentSingleton instance;
-    MOZ_ASSERT(sNumAlive == 1);
-    return instance;
-  }
-
-  static CamerasParent*& getParent() {
-    return getInstance().parent();
-  }
-
-  static mozilla::Mutex& getMutex() {
-    return getInstance().mutex();
-  }
-
-private:
-  CamerasParent*& parent() {
-    MOZ_ASSERT(sNumAlive == 1);
-    mCamerasParentMutex.AssertCurrentThreadOwns();
-    return mCamerasParent;
-  }
-
-  mozilla::Mutex& mutex() {
-    return mCamerasParentMutex;
-  }
-
-  mozilla::Mutex mCamerasParentMutex;
-  CamerasParent* mCamerasParent;
-};
-
 class FrameSizeChangeRunnable : public nsRunnable {
 public:
-  FrameSizeChangeRunnable(CaptureEngine capEngine, int cap_id,
-                          unsigned int aWidth, unsigned int aHeight)
-    : mCapEngine(capEngine), mCapId(cap_id),
+  FrameSizeChangeRunnable(CamerasParent *aParent, CaptureEngine capEngine,
+                          int cap_id, unsigned int aWidth, unsigned int aHeight)
+    : mParent(aParent), mCapEngine(capEngine), mCapId(cap_id),
       mWidth(aWidth), mHeight(aHeight) {};
 
   NS_IMETHOD Run() {
-    MutexAutoLock lock(CamerasParentSingleton::getMutex());
-    if (!CamerasParentSingleton::getParent()) {
-      // Communication channel has been torn down
-      LOG(("FrameSizeChangeRunnable is active without CamerasParent"));
-      mResult = 0;
-      return NS_OK;
-    }
-    if (!CamerasParentSingleton::getParent()->ChildIsAlive()) {
+    if (!mParent->ChildIsAlive()) {
       // Communication channel is being torn down
       LOG(("FrameSizeChangeRunnable is active without active Child"));
       mResult = 0;
       return NS_OK;
     }
-    if (!CamerasParentSingleton::getParent()->SendFrameSizeChange(mCapEngine, mCapId,
-                                                                  mWidth, mHeight)) {
+    if (!mParent->SendFrameSizeChange(mCapEngine, mCapId, mWidth, mHeight)) {
       mResult = -1;
     } else {
       mResult = 0;
@@ -105,6 +49,7 @@ public:
   }
 
 private:
+  CamerasParent *mParent;
   CaptureEngine mCapEngine;
   int mCapId;
   unsigned int mWidth;
@@ -116,12 +61,11 @@ int
 CallbackHelper::FrameSizeChange(unsigned int w, unsigned int h,
                                 unsigned int streams)
 {
-  MutexAutoLock lock(CamerasParentSingleton::getMutex());
   LOG(("CallbackHelper Video FrameSizeChange: %ux%u", w, h));
   nsRefPtr<FrameSizeChangeRunnable> runnable =
-    new FrameSizeChangeRunnable(mCapEngine, mCapturerId, w, h);
-  MOZ_ASSERT(CamerasParentSingleton::getParent());
-  nsIThread * thread = CamerasParentSingleton::getParent()->GetBackgroundThread();
+    new FrameSizeChangeRunnable(mParent, mCapEngine, mCapturerId, w, h);
+  MOZ_ASSERT(mParent);
+  nsIThread * thread = mParent->GetBackgroundThread();
   MOZ_ASSERT(thread != nullptr);
   thread->Dispatch(runnable, NS_DISPATCH_NORMAL);
   return 0;
@@ -129,14 +73,15 @@ CallbackHelper::FrameSizeChange(unsigned int w, unsigned int h,
 
 class DeliverFrameRunnable : public nsRunnable {
 public:
-  DeliverFrameRunnable(CaptureEngine engine,
+  DeliverFrameRunnable(CamerasParent *aParent,
+                       CaptureEngine engine,
                        int cap_id,
                        unsigned char* buffer,
                        int size,
                        uint32_t time_stamp,
                        int64_t ntp_time,
                        int64_t render_time)
-    : mCapEngine(engine), mCapId(cap_id), mSize(size),
+    : mParent(aParent), mCapEngine(engine), mCapId(cap_id), mSize(size),
       mTimeStamp(time_stamp), mNtpTime(ntp_time), mRenderTime(render_time) {
     mBuffer = (unsigned char*)malloc(size);
     memcpy(mBuffer, buffer, size);
@@ -147,20 +92,14 @@ public:
   }
 
   NS_IMETHOD Run() {
-    MutexAutoLock lock(CamerasParentSingleton::getMutex());
-    if (!CamerasParentSingleton::getParent()) {
-      // Communication channel has been torn down
-      mResult = 0;
-      return NS_OK;
-    }
-    if (!CamerasParentSingleton::getParent()->ChildIsAlive()) {
+    if (!mParent->ChildIsAlive()) {
       // Communication channel is being torn down
       mResult = 0;
       return NS_OK;
     }
-    if (!CamerasParentSingleton::getParent()->DeliverFrameOverIPC(mCapEngine, mCapId,
-                                                                  mBuffer, mSize, mTimeStamp,
-                                                                  mNtpTime, mRenderTime)) {
+    if (!mParent->DeliverFrameOverIPC(mCapEngine, mCapId,
+                                      mBuffer, mSize, mTimeStamp,
+                                      mNtpTime, mRenderTime)) {
       mResult = -1;
     } else {
       mResult = 0;
@@ -173,6 +112,7 @@ public:
   }
 
 private:
+  CamerasParent *mParent;
   CaptureEngine mCapEngine;
   int mCapId;
   unsigned char* mBuffer;
@@ -236,12 +176,11 @@ CallbackHelper::DeliverFrame(unsigned char* buffer,
                              void *handle)
 {
   //LOG((__PRETTY_FUNCTION__));
-  MutexAutoLock lock(CamerasParentSingleton::getMutex());
   nsRefPtr<DeliverFrameRunnable> runnable =
-    new DeliverFrameRunnable(mCapEngine, mCapturerId,
+    new DeliverFrameRunnable(mParent, mCapEngine, mCapturerId,
                              buffer, size, time_stamp, ntp_time, render_time);
-  MOZ_ASSERT(CamerasParentSingleton::getParent());
-  nsIThread * thread = CamerasParentSingleton::getParent()->GetBackgroundThread();
+  MOZ_ASSERT(mParent);
+  nsIThread * thread = mParent->GetBackgroundThread();
   MOZ_ASSERT(thread != nullptr);
   thread->Dispatch(runnable, NS_DISPATCH_NORMAL);
   return 0;
@@ -556,7 +495,7 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
   }
 
   auto cbh = mCallbacks.AppendElement(
-    new CallbackHelper(static_cast<CaptureEngine>(aCapEngine), capnum));
+    new CallbackHelper(static_cast<CaptureEngine>(aCapEngine), capnum, this));
   auto render = static_cast<webrtc::ExternalRenderer*>(*cbh);
 
   int error = mPtrViERender->AddRenderer(capnum, webrtc::kVideoI420, render);
@@ -650,11 +589,6 @@ void CamerasParent::DoShutdown()
     mShmemInitialized = false;
   }
 
-  MutexAutoLock lock(CamerasParentSingleton::getMutex());
-  LOG(("sCamerasParent being zeroed is: %p, I am %p",
-       CamerasParentSingleton::getParent(), this));
-  MOZ_ASSERT(CamerasParentSingleton::getParent() == this);
-  CamerasParentSingleton::getParent() = nullptr;
   mPBackgroundThread = nullptr;
 }
 
@@ -687,11 +621,8 @@ CamerasParent::CamerasParent()
     gCamerasParentLog = PR_NewLogModule("CamerasParent");
   LOG(("CamerasParent: %p", this));
 
-  MutexAutoLock lock(CamerasParentSingleton::getMutex());
   mPBackgroundThread = NS_GetCurrentThread();
   MOZ_ASSERT(mPBackgroundThread != nullptr, "GetCurrentThread failed");
-  MOZ_ASSERT(CamerasParentSingleton::getParent() == nullptr);
-  CamerasParentSingleton::getParent() = this;
 
   MOZ_COUNT_CTOR(CamerasParent);
 }
