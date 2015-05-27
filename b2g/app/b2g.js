@@ -88,7 +88,6 @@ pref("network.http.max-persistent-connections-per-proxy", 20);
 pref("network.cookie.cookieBehavior", 0);
 
 // spdy
-pref("network.http.spdy.enabled.http2draft", true);
 pref("network.http.spdy.push-allowance", 32768);
 
 // See bug 545869 for details on why these are set the way they are
@@ -1134,3 +1133,6 @@ pref("dom.activities.developer_mode_only", "import-app");
 // mulet apparently loads firefox.js as well as b2g.js, so we have to explicitly
 // disable serviceworkers here to get them disabled in mulet.
 pref("dom.serviceWorkers.enabled", false);
+
+// Retain at most 10 processes' layers buffers
+pref("layers.compositor-lru-size", 10);

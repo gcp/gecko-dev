@@ -149,8 +149,8 @@ nsPrincipal::GetOriginForURI(nsIURI* aURI, nsACString& aOrigin)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsPrincipal::GetOrigin(nsACString& aOrigin)
+nsresult
+nsPrincipal::GetOriginInternal(nsACString& aOrigin)
 {
   return GetOriginForURI(mCodebase, aOrigin);
 }
@@ -490,6 +490,11 @@ IsOnFullDomainWhitelist(nsIURI* aURI)
     NS_LITERAL_CSTRING("www.kuronekoyamato.co.jp"),
     NS_LITERAL_CSTRING("s.tsite.jp"),
     NS_LITERAL_CSTRING("formassist.jp"), // for orico.jp
+    NS_LITERAL_CSTRING("sp.m.reuters.co.jp"),
+    NS_LITERAL_CSTRING("www.atre.co.jp"),
+    NS_LITERAL_CSTRING("www.jtb.co.jp"),
+    NS_LITERAL_CSTRING("www.sharp.co.jp"),
+    NS_LITERAL_CSTRING("www.biccamera.com"),
   };
   static const size_t sNumFullDomainsOnWhitelist =
     MOZ_ARRAY_LENGTH(sFullDomainsOnWhitelist);
@@ -518,6 +523,7 @@ IsOnBaseDomainWhitelist(nsIURI* aURI)
     NS_LITERAL_CSTRING("alicdn.com"), // for m.taobao.com
     NS_LITERAL_CSTRING("dpfile.com"), // for m.dianping.com
     NS_LITERAL_CSTRING("hao123img.com"), // for hao123.com
+    NS_LITERAL_CSTRING("tabelog.k-img.com"), // for s.tabelog.com
   };
   static const size_t sNumBaseDomainsOnWhitelist =
     MOZ_ARRAY_LENGTH(sBaseDomainsOnWhitelist);
@@ -660,8 +666,8 @@ nsExpandedPrincipal::SetDomain(nsIURI* aDomain)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsExpandedPrincipal::GetOrigin(nsACString& aOrigin)
+nsresult
+nsExpandedPrincipal::GetOriginInternal(nsACString& aOrigin)
 {
   aOrigin.AssignLiteral("[Expanded Principal [");
   for (size_t i = 0; i < mPrincipals.Length(); ++i) {

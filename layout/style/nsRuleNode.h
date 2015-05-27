@@ -11,6 +11,7 @@
 #ifndef nsRuleNode_h___
 #define nsRuleNode_h___
 
+#include "mozilla/RangedArray.h"
 #include "nsPresContext.h"
 #include "nsStyleStruct.h"
 
@@ -24,29 +25,11 @@ class nsCSSValue;
 class nsStyleCoord;
 struct nsCSSValuePairList;
 
-template <nsStyleStructID MinIndex, nsStyleStructID Count>
-class FixedStyleStructArray
-{
-private:
-  void* mArray[Count];
-public:
-  void*& operator[](nsStyleStructID aIndex) {
-    MOZ_ASSERT(MinIndex <= aIndex && aIndex < (MinIndex + Count),
-               "out of range");
-    return mArray[aIndex - MinIndex];
-  }
-
-  const void* operator[](nsStyleStructID aIndex) const {
-    MOZ_ASSERT(MinIndex <= aIndex && aIndex < (MinIndex + Count),
-               "out of range");
-    return mArray[aIndex - MinIndex];
-  }
-};
-
 struct nsInheritedStyleData
 {
-  FixedStyleStructArray<nsStyleStructID_Inherited_Start,
-                        nsStyleStructID_Inherited_Count> mStyleStructs;
+  mozilla::RangedArray<void*,
+                       nsStyleStructID_Inherited_Start,
+                       nsStyleStructID_Inherited_Count> mStyleStructs;
 
   void* operator new(size_t sz, nsPresContext* aContext) CPP_THROW_NEW {
     return aContext->PresShell()->
@@ -83,8 +66,9 @@ struct nsInheritedStyleData
 
 struct nsResetStyleData
 {
-  FixedStyleStructArray<nsStyleStructID_Reset_Start,
-                        nsStyleStructID_Reset_Count> mStyleStructs;
+  mozilla::RangedArray<void*,
+                       nsStyleStructID_Reset_Start,
+                       nsStyleStructID_Reset_Count> mStyleStructs;
 
   nsResetStyleData()
   {
@@ -333,7 +317,7 @@ private:
   union {
     void* asVoid;
     nsRuleNode* asList;
-    PLDHashTable* asHash;
+    PLDHashTable2* asHash;
   } mChildren; // Accessed only through the methods below.
 
   enum {
@@ -359,18 +343,18 @@ private:
   nsRuleNode** ChildrenListPtr() {
     return &mChildren.asList;
   }
-  PLDHashTable* ChildrenHash() {
-    return (PLDHashTable*) (intptr_t(mChildren.asHash) & ~intptr_t(kTypeMask));
+  PLDHashTable2* ChildrenHash() {
+    return (PLDHashTable2*) (intptr_t(mChildren.asHash) & ~intptr_t(kTypeMask));
   }
   void SetChildrenList(nsRuleNode *aList) {
     NS_ASSERTION(!(intptr_t(aList) & kTypeMask),
                  "pointer not 2-byte aligned");
     mChildren.asList = aList;
   }
-  void SetChildrenHash(PLDHashTable *aHashtable) {
+  void SetChildrenHash(PLDHashTable2 *aHashtable) {
     NS_ASSERTION(!(intptr_t(aHashtable) & kTypeMask),
                  "pointer not 2-byte aligned");
-    mChildren.asHash = (PLDHashTable*)(intptr_t(aHashtable) | kHashType);
+    mChildren.asHash = (PLDHashTable2*)(intptr_t(aHashtable) | kHashType);
   }
   void ConvertChildrenToHash(int32_t aNumKids);
 

@@ -20,7 +20,7 @@ XPCOMUtils.defineLazyGetter(this, "eventEmitter", function() {
   return new EventEmitter();
 });
 XPCOMUtils.defineLazyGetter(this, "gLoopBundle", function() {
-  return Services.strings.createBundle('chrome://browser/locale/loop/loop.properties');
+  return Services.strings.createBundle("chrome://browser/locale/loop/loop.properties");
 });
 
 XPCOMUtils.defineLazyModuleGetter(this, "LoopRoomsCache",
@@ -241,7 +241,7 @@ let LoopRoomsInternal = {
    * @param {String} roomToken The token for the room that needs encrypting.
    */
   queueForEncryption: function(roomToken) {
-    if (!this.encryptionQueue.queue.includes(roomToken)) {
+    if (this.encryptionQueue.queue.indexOf(roomToken) == -1) {
       this.encryptionQueue.queue.push(roomToken);
     }
 

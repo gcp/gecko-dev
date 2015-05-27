@@ -91,12 +91,22 @@ class nsDefaultComparator <nsDocLoader::nsListenerInfo, nsIWebProgressListener*>
     }
 };
 
+/* static */ const PLDHashTableOps nsDocLoader::sRequestInfoHashOps =
+{
+  PL_DHashVoidPtrKeyStub,
+  PL_DHashMatchEntryStub,
+  PL_DHashMoveEntryStub,
+  nsDocLoader::RequestInfoHashClearEntry,
+  nsDocLoader::RequestInfoHashInitEntry
+};
+
 nsDocLoader::nsDocLoader()
   : mParent(nullptr),
     mCurrentSelfProgress(0),
     mMaxSelfProgress(0),
     mCurrentTotalProgress(0),
     mMaxTotalProgress(0),
+    mRequestInfoHash(&sRequestInfoHashOps, sizeof(nsRequestInfo)),
     mCompletedTotalProgress(0),
     mIsLoadingDocument(false),
     mIsRestoringDocument(false),
@@ -107,20 +117,9 @@ nsDocLoader::nsDocLoader()
       gDocLoaderLog = PR_NewLogModule("DocLoader");
   }
 
-  static const PLDHashTableOps hash_table_ops =
-  {
-    PL_DHashVoidPtrKeyStub,
-    PL_DHashMatchEntryStub,
-    PL_DHashMoveEntryStub,
-    RequestInfoHashClearEntry,
-    RequestInfoHashInitEntry
-  };
-
-  PL_DHashTableInit(&mRequestInfoHash, &hash_table_ops, sizeof(nsRequestInfo));
-
   ClearInternalProgress();
 
-  PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+  MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
          ("DocLoader:%p: created.\n", this));
 }
 
@@ -134,14 +133,10 @@ nsDocLoader::SetDocLoaderParent(nsDocLoader *aParent)
 nsresult
 nsDocLoader::Init()
 {
-  if (!mRequestInfoHash.IsInitialized()) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
   nsresult rv = NS_NewLoadGroup(getter_AddRefs(mLoadGroup), this);
   if (NS_FAILED(rv)) return rv;
 
-  PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+  MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
          ("DocLoader:%p: load group %x.\n", this, mLoadGroup.get()));
 
   return NS_OK;
@@ -164,12 +159,8 @@ nsDocLoader::~nsDocLoader()
 
   Destroy();
 
-  PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+  MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
          ("DocLoader:%p: deleted.\n", this));
-
-  if (mRequestInfoHash.IsInitialized()) {
-    PL_DHashTableFinish(&mRequestInfoHash);
-  }
 }
 
 
@@ -244,7 +235,7 @@ nsDocLoader::Stop(void)
 {
   nsresult rv = NS_OK;
 
-  PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+  MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
          ("DocLoader:%p: Stop() called\n", this));
 
   NS_OBSERVER_ARRAY_NOTIFY_XPCOM_OBSERVERS(mChildList, nsDocLoader, Stop, ());
@@ -406,7 +397,7 @@ nsDocLoader::OnStartRequest(nsIRequest *request, nsISupports *aCtxt)
     if (mLoadGroup)
       mLoadGroup->GetActiveCount(&count);
 
-    PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
            ("DocLoader:%p: OnStartRequest[%p](%s) mIsLoadingDocument=%s, %u active URLs",
             this, request, name.get(),
             (mIsLoadingDocument ? "true" : "false"),
@@ -486,7 +477,7 @@ nsDocLoader::OnStopRequest(nsIRequest *aRequest,
     if (mLoadGroup)
       mLoadGroup->GetActiveCount(&count);
 
-    PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
            ("DocLoader:%p: OnStopRequest[%p](%s) status=%x mIsLoadingDocument=%s, %u active URLs",
            this, aRequest, name.get(),
            aStatus, (mIsLoadingDocument ? "true" : "false"),
@@ -691,7 +682,7 @@ void nsDocLoader::DocLoaderIsEmpty(bool aFlushLayout)
       // we don't need it anymore to CalculateMaxProgress().
       ClearInternalProgress();
 
-      PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+      MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
              ("DocLoader:%p: Is now idle...\n", this));
 
       nsCOMPtr<nsIRequest> docRequest = mDocumentRequest;
@@ -742,7 +733,7 @@ void nsDocLoader::doStartDocumentLoad(void)
   nsAutoCString buffer;
 
   GetURIStringFromRequest(mDocumentRequest, buffer);
-  PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+  MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
          ("DocLoader:%p: ++ Firing OnStateChange for start document load (...)."
           "\tURI: %s \n",
           this, buffer.get()));
@@ -767,7 +758,7 @@ void nsDocLoader::doStartURLLoad(nsIRequest *request)
   nsAutoCString buffer;
 
   GetURIStringFromRequest(request, buffer);
-    PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
           ("DocLoader:%p: ++ Firing OnStateChange start url load (...)."
            "\tURI: %s\n",
             this, buffer.get()));
@@ -786,7 +777,7 @@ void nsDocLoader::doStopURLLoad(nsIRequest *request, nsresult aStatus)
   nsAutoCString buffer;
 
   GetURIStringFromRequest(request, buffer);
-    PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
           ("DocLoader:%p: ++ Firing OnStateChange for end url load (...)."
            "\tURI: %s status=%x\n",
             this, buffer.get(), aStatus));
@@ -815,7 +806,7 @@ void nsDocLoader::doStopDocumentLoad(nsIRequest *request,
   nsAutoCString buffer;
 
   GetURIStringFromRequest(request, buffer);
-  PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+  MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
          ("DocLoader:%p: ++ Firing OnStateChange for end document load (...)."
          "\tURI: %s Status=%x\n",
           this, buffer.get(), aStatus));
@@ -1002,7 +993,7 @@ NS_IMETHODIMP nsDocLoader::OnProgress(nsIRequest *aRequest, nsISupports* ctxt,
       nsLoadFlags lf = 0;
       aRequest->GetLoadFlags(&lf);
       if ((lf & nsIChannel::LOAD_DOCUMENT_URI) && !(lf & nsIChannel::LOAD_TARGETED)) {
-        PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+        MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
             ("DocLoader:%p Ignoring OnProgress while load is not targeted\n", this));
         return NS_OK;
       }
@@ -1051,7 +1042,7 @@ NS_IMETHODIMP nsDocLoader::OnProgress(nsIRequest *aRequest, nsISupports* ctxt,
     nsAutoCString buffer;
 
     GetURIStringFromRequest(aRequest, buffer);
-    PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
            ("DocLoader:%p OOPS - No Request Info for: %s\n",
             this, buffer.get()));
 #endif /* DEBUG */
@@ -1181,7 +1172,7 @@ void nsDocLoader::FireOnProgressChange(nsDocLoader *aLoadInitiator,
   nsAutoCString buffer;
 
   GetURIStringFromRequest(request, buffer);
-  PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+  MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
          ("DocLoader:%p: Progress (%s): curSelf: %d maxSelf: %d curTotal: %d maxTotal %d\n",
           this, buffer.get(), aProgress, aProgressMax, aTotalProgress, aMaxTotalProgress));
 #endif /* DEBUG */
@@ -1247,7 +1238,7 @@ void nsDocLoader::DoFireOnStateChange(nsIWebProgress * const aProgress,
   nsAutoCString buffer;
 
   GetURIStringFromRequest(aRequest, buffer);
-  PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+  MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
          ("DocLoader:%p: Status (%s): code: %x\n",
          this, buffer.get(), aStateFlags));
 #endif /* DEBUG */
@@ -1268,7 +1259,7 @@ nsDocLoader::FireOnLocationChange(nsIWebProgress* aWebProgress,
                                   uint32_t aFlags)
 {
   NOTIFY_LISTENERS(nsIWebProgress::NOTIFY_LOCATION,
-    PR_LOG(gDocLoaderLog, PR_LOG_DEBUG, ("DocLoader [%p] calling %p->OnLocationChange", this, listener.get()));
+    MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG, ("DocLoader [%p] calling %p->OnLocationChange", this, listener.get()));
     listener->OnLocationChange(aWebProgress, aRequest, aUri, aFlags);
   );
 
@@ -1361,12 +1352,6 @@ RemoveInfoCallback(PLDHashTable *table, PLDHashEntryHdr *hdr, uint32_t number,
 
 void nsDocLoader::ClearRequestInfoHash(void)
 {
-  if (!mRequestInfoHash.IsInitialized() || !mRequestInfoHash.EntryCount()) {
-    // No hash, or the hash is empty, nothing to do here then...
-
-    return;
-  }
-
   PL_DHashTableEnumerate(&mRequestInfoHash, RemoveInfoCallback, nullptr);
 }
 
@@ -1474,7 +1459,7 @@ NS_IMETHODIMP nsDocLoader::GetPriority(int32_t *aPriority)
 
 NS_IMETHODIMP nsDocLoader::SetPriority(int32_t aPriority)
 {
-  PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+  MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
          ("DocLoader:%p: SetPriority(%d) called\n", this, aPriority));
 
   nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(mLoadGroup);
@@ -1489,7 +1474,7 @@ NS_IMETHODIMP nsDocLoader::SetPriority(int32_t aPriority)
 
 NS_IMETHODIMP nsDocLoader::AdjustPriority(int32_t aDelta)
 {
-  PR_LOG(gDocLoaderLog, PR_LOG_DEBUG,
+  MOZ_LOG(gDocLoaderLog, PR_LOG_DEBUG,
          ("DocLoader:%p: AdjustPriority(%d) called\n", this, aDelta));
 
   nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(mLoadGroup);

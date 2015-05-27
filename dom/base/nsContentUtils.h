@@ -1279,6 +1279,9 @@ public:
    */
   MOZ_WARN_UNUSED_RESULT
   static bool GetNodeTextContent(nsINode* aNode, bool aDeep,
+                                 nsAString& aResult, const mozilla::fallible_t&);
+
+  static void GetNodeTextContent(nsINode* aNode, bool aDeep,
                                  nsAString& aResult);
 
   /**
@@ -1859,6 +1862,13 @@ public:
    * setting the pref "full-screen-api.allow-trusted-requests-only" to false.
    */
   static bool IsRequestFullScreenAllowed();
+
+  /**
+   * Returns true if calling execCommand with 'cut' or 'copy' arguments is
+   * allowed in the current context. These are only allowed if the user initiated
+   * them (like with a mouse-click or key press).
+   */
+  static bool IsCutCopyAllowed();
 
   /*
    * Returns true if the performance timing APIs are enabled.

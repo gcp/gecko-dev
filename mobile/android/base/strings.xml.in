@@ -80,6 +80,7 @@
   <string name="bookmark">&bookmark;</string>
   <string name="bookmark_remove">&bookmark_remove;</string>
   <string name="bookmark_added">&bookmark_added;</string>
+  <string name="bookmark_already_added">&bookmark_already_added;</string>
   <string name="bookmark_removed">&bookmark_removed;</string>
   <string name="bookmark_updated">&bookmark_updated;</string>
   <string name="bookmark_options">&bookmark_options;</string>
@@ -229,6 +230,7 @@
   <string name="pref_private_data_offlineApps">&pref_private_data_offlineApps;</string>
   <string name="pref_private_data_siteSettings">&pref_private_data_siteSettings2;</string>
   <string name="pref_private_data_downloadFiles2">&pref_private_data_downloadFiles2;</string>
+  <string name="pref_private_data_syncedTabs">&pref_private_data_syncedTabs;</string>
   <string name="pref_import_android">&pref_import_android;</string>
   <string name="pref_import_android_summary">&pref_import_android_summary;</string>
   <string name="pref_update_autodownload">&pref_update_autodownload2;</string>
@@ -537,4 +539,6 @@
   <string name="percent">&percent;</string>
 
   <string name="remote_tabs_last_synced">&remote_tabs_last_synced;</string>
+
+  <string name="favicon_search_large_key">DefaultFaviconSearch</string>
 </resources>

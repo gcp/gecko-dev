@@ -771,7 +771,10 @@ BookmarksStore.prototype = {
                          guid: record.id};
       PlacesUtils.livemarks.addLivemark(livemarkObj).then(
         aLivemark => { spinningCb(null, [Components.results.NS_OK, aLivemark]) },
-        () => { spinningCb(null, [Components.results.NS_ERROR_UNEXPECTED, aLivemark]) }
+        ex => {
+          this._log.error("creating livemark failed: " + ex);
+          spinningCb(null, [Components.results.NS_ERROR_UNEXPECTED, null])
+        }
       );
 
       let [status, livemark] = spinningCb.wait();
@@ -1151,6 +1154,7 @@ BookmarksStore.prototype = {
     stmt.params.guid = guid;
     stmt.params.item_id = id;
     Async.querySpinningly(stmt);
+    PlacesUtils.invalidateCachedGuidFor(id);
     return guid;
   },
 

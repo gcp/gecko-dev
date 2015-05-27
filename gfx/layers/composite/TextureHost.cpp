@@ -144,10 +144,39 @@ TextureHost::GetIPDLActor()
   return mActor;
 }
 
+bool
+TextureHost::SetReleaseFenceHandle(const FenceHandle& aReleaseFenceHandle)
+{
+  if (!aReleaseFenceHandle.IsValid()) {
+    // HWC might not provide Fence.
+    // In this case, HWC implicitly handles buffer's fence.
+    return false;
+  }
+
+  mReleaseFenceHandle.Merge(aReleaseFenceHandle);
+
+  return true;
+}
+
 FenceHandle
 TextureHost::GetAndResetReleaseFenceHandle()
 {
-  return FenceHandle();
+  FenceHandle fence;
+  mReleaseFenceHandle.TransferToAnotherFenceHandle(fence);
+  return fence;
+}
+
+void
+TextureHost::SetAcquireFenceHandle(const FenceHandle& aAcquireFenceHandle)
+{
+  mAcquireFenceHandle = aAcquireFenceHandle;
+}
+
+FenceHandle
+TextureHost::GetAndResetAcquireFenceHandle()
+{
+  nsRefPtr<FenceHandle::FdObj> fdObj = mAcquireFenceHandle.GetAndResetFdObj();
+  return FenceHandle(fdObj);
 }
 
 // implemented in TextureHostOGL.cpp
@@ -180,6 +209,7 @@ TextureHost::Create(const SurfaceDescriptor& aDesc,
     case SurfaceDescriptor::TSurfaceDescriptorShmem:
     case SurfaceDescriptor::TSurfaceDescriptorMemory:
     case SurfaceDescriptor::TSurfaceDescriptorDIB:
+    case SurfaceDescriptor::TSurfaceDescriptorFileMapping:
       return CreateBackendIndependentTextureHost(aDesc, aDeallocator, aFlags);
 
     case SurfaceDescriptor::TEGLImageDescriptor:
@@ -188,7 +218,7 @@ TextureHost::Create(const SurfaceDescriptor& aDesc,
       return CreateTextureHostOGL(aDesc, aDeallocator, aFlags);
 
     case SurfaceDescriptor::TSharedSurfaceDescriptor:
-      return new SharedSurfaceTextureHost(aFlags, aDesc.get_SharedSurfaceDescriptor());
+      return MakeAndAddRef<SharedSurfaceTextureHost>(aFlags, aDesc.get_SharedSurfaceDescriptor());
 
     case SurfaceDescriptor::TSurfaceDescriptorMacIOSurface:
       if (Compositor::GetBackend() == LayersBackend::LAYERS_OPENGL) {
@@ -200,8 +230,7 @@ TextureHost::Create(const SurfaceDescriptor& aDesc,
 #ifdef MOZ_X11
     case SurfaceDescriptor::TSurfaceDescriptorX11: {
       const SurfaceDescriptorX11& desc = aDesc.get_SurfaceDescriptorX11();
-      RefPtr<TextureHost> result = new X11TextureHost(aFlags, desc);
-      return result;
+      return MakeAndAddRef<X11TextureHost>(aFlags, desc);
     }
 #endif
 
@@ -249,12 +278,16 @@ CreateBackendIndependentTextureHost(const SurfaceDescriptor& aDesc,
       result = new DIBTextureHost(aFlags, aDesc);
       break;
     }
+    case SurfaceDescriptor::TSurfaceDescriptorFileMapping: {
+      result = new TextureHostFileMapping(aFlags, aDesc);
+      break;
+    }
 #endif
     default: {
       NS_WARNING("No backend independent TextureHost for this descriptor type");
     }
   }
-  return result;
+  return result.forget();
 }
 
 void

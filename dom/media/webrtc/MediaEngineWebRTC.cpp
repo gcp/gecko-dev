@@ -40,7 +40,7 @@ GetUserMediaLog()
 #endif
 
 #undef LOG
-#define LOG(args) PR_LOG(GetUserMediaLog(), PR_LOG_DEBUG, args)
+#define LOG(args) MOZ_LOG(GetUserMediaLog(), PR_LOG_DEBUG, args)
 
 namespace mozilla {
 

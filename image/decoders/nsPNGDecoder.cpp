@@ -111,6 +111,7 @@ nsPNGDecoder::nsPNGDecoder(RasterImage* aImage)
    mPNG(nullptr), mInfo(nullptr),
    mCMSLine(nullptr), interlacebuf(nullptr),
    mInProfile(nullptr), mTransform(nullptr),
+   format(gfx::SurfaceFormat::UNKNOWN),
    mHeaderBytesRead(0), mCMSMode(0),
    mChannels(0), mFrameIsHidden(false),
    mDisablePremultipliedAlpha(false),
@@ -168,7 +169,7 @@ void nsPNGDecoder::CreateFrame(png_uint_32 x_offset, png_uint_32 y_offset,
 
   mFrameRect = neededRect;
 
-  PR_LOG(GetPNGDecoderAccountingLog(), PR_LOG_DEBUG,
+  MOZ_LOG(GetPNGDecoderAccountingLog(), PR_LOG_DEBUG,
          ("PNGDecoderAccounting: nsPNGDecoder::CreateFrame -- created "
           "image frame with %dx%d pixels in container %p",
           width, height,
@@ -636,6 +637,8 @@ nsPNGDecoder::info_callback(png_structp png_ptr, png_infop info_ptr)
     decoder->format = gfx::SurfaceFormat::B8G8R8X8;
   } else if (channels == 2 || channels == 4) {
     decoder->format = gfx::SurfaceFormat::B8G8R8A8;
+  } else {
+    png_longjmp(decoder->mPNG, 1); // invalid number of channels
   }
 
 #ifdef PNG_APNG_SUPPORTED
@@ -876,7 +879,7 @@ nsPNGDecoder::end_callback(png_structp png_ptr, png_infop info_ptr)
 void
 nsPNGDecoder::error_callback(png_structp png_ptr, png_const_charp error_msg)
 {
-  PR_LOG(GetPNGLog(), PR_LOG_ERROR, ("libpng error: %s\n", error_msg));
+  MOZ_LOG(GetPNGLog(), PR_LOG_ERROR, ("libpng error: %s\n", error_msg));
   png_longjmp(png_ptr, 1);
 }
 
@@ -884,7 +887,7 @@ nsPNGDecoder::error_callback(png_structp png_ptr, png_const_charp error_msg)
 void
 nsPNGDecoder::warning_callback(png_structp png_ptr, png_const_charp warning_msg)
 {
-  PR_LOG(GetPNGLog(), PR_LOG_WARNING, ("libpng warning: %s\n", warning_msg));
+  MOZ_LOG(GetPNGLog(), PR_LOG_WARNING, ("libpng warning: %s\n", warning_msg));
 }
 
 Telemetry::ID

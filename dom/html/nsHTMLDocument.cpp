@@ -3353,6 +3353,19 @@ nsHTMLDocument::QueryCommandEnabled(const nsAString& commandID, ErrorResult& rv)
     return false;
   }
 
+  // cut & copy are always allowed
+  bool isCutCopy = commandID.LowerCaseEqualsLiteral("cut") ||
+                   commandID.LowerCaseEqualsLiteral("copy");
+  if (isCutCopy) {
+    return nsContentUtils::IsCutCopyAllowed();
+  }
+
+  // Report false for restricted commands
+  bool restricted = commandID.LowerCaseEqualsLiteral("paste");
+  if (restricted && !nsContentUtils::IsCallerChrome()) {
+    return false;
+  }
+
   // if editing is not on, bail
   if (!IsEditingOnAfterFlush()) {
     rv.Throw(NS_ERROR_FAILURE);
@@ -3534,6 +3547,14 @@ nsHTMLDocument::QueryCommandSupported(const nsAString & commandID,
 bool
 nsHTMLDocument::QueryCommandSupported(const nsAString& commandID)
 {
+  // Gecko technically supports the paste command, but non-privileged content
+  // will be unable to call it. For that reason, we report that paste is
+  // not supported to this non-privileged content (as it effectively is).
+  bool restricted = commandID.LowerCaseEqualsLiteral("paste");
+  if (restricted && !nsContentUtils::IsCallerChrome()) {
+    return false;
+  }
+
   // commandID is supported if it can be converted to a Midas command
   nsAutoCString cmdToDispatch;
   return ConvertToMidasInternalCommand(commandID, cmdToDispatch);

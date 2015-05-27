@@ -10,7 +10,9 @@
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include "mozilla/ipc/BluetoothDaemonConnectionConsumer.h"
 #include "mozilla/ipc/DataSocket.h"
+#include "mozilla/ipc/UnixSocketConnector.h"
 #include "mozilla/ipc/UnixSocketWatcher.h"
 #include "nsTArray.h"
 #include "nsXULAppAPI.h"
@@ -431,38 +433,43 @@ BluetoothDaemonConnectionIO::ShutdownOnIOThread()
 // BluetoothDaemonConnection
 //
 
-BluetoothDaemonConnection::BluetoothDaemonConnection()
-  : mIO(nullptr)
-{ }
+BluetoothDaemonConnection::BluetoothDaemonConnection(
+  BluetoothDaemonPDUConsumer* aPDUConsumer,
+  BluetoothDaemonConnectionConsumer* aConsumer,
+  int aIndex)
+  : mPDUConsumer(aPDUConsumer)
+  , mConsumer(aConsumer)
+  , mIndex(aIndex)
+  , mIO(nullptr)
+{
+  MOZ_ASSERT(mConsumer);
+}
 
 BluetoothDaemonConnection::~BluetoothDaemonConnection()
 { }
 
-ConnectionOrientedSocketIO*
-BluetoothDaemonConnection::PrepareAccept(BluetoothDaemonPDUConsumer* aConsumer)
+// |ConnectionOrientedSocket|
+
+nsresult
+BluetoothDaemonConnection::PrepareAccept(UnixSocketConnector* aConnector,
+                                         ConnectionOrientedSocketIO*& aIO)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!mIO);
-  MOZ_ASSERT(aConsumer);
+
+  // |BluetoothDaemonConnection| now owns the connector, but doesn't
+  // actually use it. So the connector is stored in an auto pointer
+  // to be deleted at the end of the method.
+  nsAutoPtr<UnixSocketConnector> connector(aConnector);
 
   SetConnectionStatus(SOCKET_CONNECTING);
 
   mIO = new BluetoothDaemonConnectionIO(
     XRE_GetIOMessageLoop(), -1, UnixSocketWatcher::SOCKET_IS_CONNECTING,
-    this, aConsumer);
+    this, mPDUConsumer);
+  aIO = mIO;
 
-  return mIO;
-}
-
-// |ConnectionOrientedSocket|
-
-ConnectionOrientedSocketIO*
-BluetoothDaemonConnection::GetIO()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mIO); // Call |PrepareAccept| before listening for connections
-
-  return mIO;
+  return NS_OK;
 }
 
 // |DataSocket|
@@ -496,6 +503,30 @@ BluetoothDaemonConnection::Close()
   mIO = nullptr;
 
   NotifyDisconnect();
+}
+
+void
+BluetoothDaemonConnection::OnConnectSuccess()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  mConsumer->OnConnectSuccess(mIndex);
+}
+
+void
+BluetoothDaemonConnection::OnConnectError()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  mConsumer->OnConnectError(mIndex);
+}
+
+void
+BluetoothDaemonConnection::OnDisconnect()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  mConsumer->OnDisconnect(mIndex);
 }
 
 }

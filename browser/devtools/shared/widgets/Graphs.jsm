@@ -684,6 +684,13 @@ AbstractCanvasGraph.prototype = {
       return;
     }
 
+    // Handle a changed size by mapping the old selection to the new width
+    if (this._width && newWidth && this.hasSelection()) {
+      let ratio = this._width / (newWidth * this._pixelRatio);
+      this._selection.start = Math.round(this._selection.start / ratio);
+      this._selection.end = Math.round(this._selection.end / ratio);
+    }
+
     bounds.width = newWidth;
     bounds.height = newHeight;
     this._iframe.setAttribute("width", bounds.width);
@@ -2027,9 +2034,14 @@ AbstractCanvasGraph.createIframe = function(url, parent, callback) {
     callback(iframe);
   });
 
+  // Setting 100% width on the frame and flex on the parent allows the graph
+  // to properly shrink when the window is resized to be smaller.
   iframe.setAttribute("frameborder", "0");
+  iframe.style.width = "100%";
+  iframe.style.minWidth = "50px";
   iframe.src = url;
 
+  parent.style.display = "flex";
   parent.appendChild(iframe);
 };
 

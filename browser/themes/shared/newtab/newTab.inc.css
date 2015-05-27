@@ -155,7 +155,6 @@
 }
 
 /* TITLES */
-#newtab-intro-what,
 .newtab-sponsored,
 .newtab-title,
 .newtab-suggested  {
@@ -173,7 +172,7 @@
 }
 
 .newtab-site[pinned] .newtab-title {
-  padding: 0 15px;
+  -moz-padding-start: 24px;
 }
 
 .newtab-site[pinned] .newtab-title::before {

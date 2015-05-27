@@ -386,38 +386,47 @@ static const char *gPrefLangNames[] = {
     "x-unicode",
 };
 
-// this needs to match the list of pref font.default.xx entries listed in all.js!
-// the order *must* match the order in eFontPrefLang
-static nsIAtom* gPrefLangToLangGroups[] = {
-    nsGkAtoms::x_western,
-    nsGkAtoms::Japanese,
-    nsGkAtoms::Taiwanese,
-    nsGkAtoms::Chinese,
-    nsGkAtoms::HongKongChinese,
-    nsGkAtoms::ko,
-    nsGkAtoms::x_cyrillic,
-    nsGkAtoms::el,
-    nsGkAtoms::th,
-    nsGkAtoms::he,
-    nsGkAtoms::ar,
-    nsGkAtoms::x_devanagari,
-    nsGkAtoms::x_tamil,
-    nsGkAtoms::x_armn,
-    nsGkAtoms::x_beng,
-    nsGkAtoms::x_cans,
-    nsGkAtoms::x_ethi,
-    nsGkAtoms::x_geor,
-    nsGkAtoms::x_gujr,
-    nsGkAtoms::x_guru,
-    nsGkAtoms::x_khmr,
-    nsGkAtoms::x_mlym,
-    nsGkAtoms::x_orya,
-    nsGkAtoms::x_telu,
-    nsGkAtoms::x_knda,
-    nsGkAtoms::x_sinh,
-    nsGkAtoms::x_tibt,
-    nsGkAtoms::Unicode
-};
+static nsIAtom* PrefLangToLangGroups(uint32_t aIndex)
+{
+    // This needs to match the list of pref font.default.xx entries listed in
+    // all.js! The order *must* match the order in eFontPrefLang.
+    //
+    // Having this array within a static function rather than at the top-level
+    // avoids a static constructor.
+    static nsIAtom* gPrefLangToLangGroups[] = {
+        nsGkAtoms::x_western,
+        nsGkAtoms::Japanese,
+        nsGkAtoms::Taiwanese,
+        nsGkAtoms::Chinese,
+        nsGkAtoms::HongKongChinese,
+        nsGkAtoms::ko,
+        nsGkAtoms::x_cyrillic,
+        nsGkAtoms::el,
+        nsGkAtoms::th,
+        nsGkAtoms::he,
+        nsGkAtoms::ar,
+        nsGkAtoms::x_devanagari,
+        nsGkAtoms::x_tamil,
+        nsGkAtoms::x_armn,
+        nsGkAtoms::x_beng,
+        nsGkAtoms::x_cans,
+        nsGkAtoms::x_ethi,
+        nsGkAtoms::x_geor,
+        nsGkAtoms::x_gujr,
+        nsGkAtoms::x_guru,
+        nsGkAtoms::x_khmr,
+        nsGkAtoms::x_mlym,
+        nsGkAtoms::x_orya,
+        nsGkAtoms::x_telu,
+        nsGkAtoms::x_knda,
+        nsGkAtoms::x_sinh,
+        nsGkAtoms::x_tibt,
+        nsGkAtoms::Unicode
+    };
+    return aIndex < ArrayLength(gPrefLangToLangGroups)
+         ? gPrefLangToLangGroups[aIndex]
+         : nsGkAtoms::Unicode;
+}
 
 gfxPlatform::gfxPlatform()
   : mTileWidth(-1)
@@ -858,7 +867,8 @@ gfxPlatform::GetSourceSurfaceForSurface(DrawTarget *aTarget, gfxASurface *aSurfa
     SourceSurfaceUserData *surf = static_cast<SourceSurfaceUserData*>(userData);
 
     if (surf->mSrcSurface->IsValid() && surf->mBackendType == aTarget->GetBackendType()) {
-      return surf->mSrcSurface;
+      RefPtr<SourceSurface> srcSurface(surf->mSrcSurface);
+      return srcSurface.forget();
     }
     // We can just continue here as when setting new user data the destroy
     // function will be called for the old user data.
@@ -1025,10 +1035,8 @@ gfxPlatform::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
   NativeFont nativeFont;
   nativeFont.mType = NativeFontType::CAIRO_FONT_FACE;
   nativeFont.mFont = aFont->GetCairoScaledFont();
-  RefPtr<ScaledFont> scaledFont =
-    Factory::CreateScaledFontForNativeFont(nativeFont,
-                                           aFont->GetAdjustedSize());
-  return scaledFont;
+  return Factory::CreateScaledFontForNativeFont(nativeFont,
+                                                aFont->GetAdjustedSize());
 }
 
 int
@@ -1525,10 +1533,7 @@ gfxPlatform::GetLangGroupForPrefLang(eFontPrefLang aLang)
     // calls to individual CJK pref langs before getting here
     NS_ASSERTION(aLang != eFontPrefLang_CJKSet, "unresolved CJK set pref lang");
 
-    if (uint32_t(aLang) < ArrayLength(gPrefLangToLangGroups)) {
-        return gPrefLangToLangGroups[uint32_t(aLang)];
-    }
-    return nsGkAtoms::Unicode;
+    return PrefLangToLangGroups(uint32_t(aLang));
 }
 
 const char*

@@ -3240,6 +3240,7 @@ js::WatchGuts(JSContext* cx, JS::HandleObject origObj, JS::HandleId id, JS::Hand
         wpmap = cx->runtime()->new_<WatchpointMap>();
         if (!wpmap || !wpmap->init()) {
             ReportOutOfMemory(cx);
+            js_delete(wpmap);
             return false;
         }
         cx->compartment()->watchpointMap = wpmap;
@@ -4113,7 +4114,11 @@ JSObject::traceChildren(JSTracer* trc)
         {
             GetObjectSlotNameFunctor func(nobj);
             JS::AutoTracingDetails ctx(trc, func);
-            TraceObjectSlots(trc, nobj, 0, nobj->slotSpan());
+            JS::AutoTracingIndex index(trc);
+            for (uint32_t i = 0; i < nobj->slotSpan(); ++i) {
+                TraceManuallyBarrieredEdge(trc, nobj->getSlotRef(i).unsafeGet(), "object slot");
+                ++index;
+            }
         }
 
         do {

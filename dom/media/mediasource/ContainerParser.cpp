@@ -8,6 +8,7 @@
 
 #include "WebMBufferedParser.h"
 #include "mozilla/Endian.h"
+#include "mozilla/ErrorResult.h"
 #include "mp4_demuxer/MoofParser.h"
 #include "mozilla/Logging.h"
 #include "MediaData.h"
@@ -25,7 +26,7 @@ extern PRLogModuleInfo* GetMediaSourceLog();
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
-#define MSE_DEBUG(name, arg, ...) PR_LOG(GetMediaSourceLog(), PR_LOG_DEBUG, (TOSTRING(name) "(%p:%s)::%s: " arg, this, mType.get(), __func__, ##__VA_ARGS__))
+#define MSE_DEBUG(name, arg, ...) MOZ_LOG(GetMediaSourceLog(), PR_LOG_DEBUG, (TOSTRING(name) "(%p:%s)::%s: " arg, this, mType.get(), __func__, ##__VA_ARGS__))
 
 namespace mozilla {
 
@@ -273,7 +274,9 @@ public:
     return ((*aData)[4] == 'm' && (*aData)[5] == 'o' && (*aData)[6] == 'o' &&
             (*aData)[7] == 'f') ||
            ((*aData)[4] == 's' && (*aData)[5] == 't' && (*aData)[6] == 'y' &&
-            (*aData)[7] == 'p');
+            (*aData)[7] == 'p') ||
+           ((*aData)[4] == 's' && (*aData)[5] == 'i' && (*aData)[6] == 'd' &&
+            (*aData)[7] == 'x');
   }
 
   bool ParseStartAndEndTimestamps(MediaLargeByteBuffer* aData,
@@ -322,7 +325,13 @@ public:
 
     mp4_demuxer::Interval<mp4_demuxer::Microseconds> compositionRange =
       mParser->GetCompositionRange(byteRanges);
-    mResource->EvictData(mParser->mOffset, mParser->mOffset);
+
+    ErrorResult rv;
+    mResource->EvictData(mParser->mOffset, mParser->mOffset, rv);
+    if (NS_WARN_IF(rv.Failed())) {
+      rv.SuppressException();
+      return false;
+    }
 
     if (compositionRange.IsNull()) {
       return false;

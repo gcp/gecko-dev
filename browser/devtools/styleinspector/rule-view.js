@@ -257,7 +257,7 @@ ElementStyle.prototype = {
     // If we've already included this domRule (for example, when a
     // common selector is inherited), ignore it.
     if (aOptions.rule &&
-        this.rules.some(function(rule) rule.domRule === aOptions.rule)) {
+        this.rules.some(rule => rule.domRule === aOptions.rule)) {
       return false;
     }
 
@@ -396,7 +396,7 @@ ElementStyle.prototype = {
   _updatePropertyOverridden: function(aProp) {
     let overridden = true;
     let dirty = false;
-    for each (let computedProp in aProp.computed) {
+    for (let computedProp of aProp.computed) {
       if (!computedProp.overridden) {
         overridden = false;
       }
@@ -739,7 +739,7 @@ Rule.prototype = {
    *        The property to be removed
    */
   removeProperty: function(aProperty) {
-    this.textProps = this.textProps.filter(function(prop) prop != aProperty);
+    this.textProps = this.textProps.filter(prop => prop != aProperty);
     let modifications = this.style.startModifyingProperties();
     modifications.removeProperty(aProperty.name);
     // Need to re-apply properties in case removing this TextProperty
@@ -782,7 +782,7 @@ Rule.prototype = {
 
     let textProps = [];
 
-    for each (let prop in disabledProps) {
+    for (let prop of disabledProps) {
       let value = store.userProperties.getProperty(this.style, prop.name, prop.value);
       let textProp = new TextProperty(this, prop.name, value, prop.priority);
       textProp.enabled = false;
@@ -861,7 +861,7 @@ Rule.prototype = {
   _updateTextProperty: function(aNewProp) {
     let match = { rank: 0, prop: null };
 
-    for each (let prop in this.textProps) {
+    for (let prop of this.textProps) {
       if (prop.name != aNewProp.name)
         continue;
 
@@ -1123,6 +1123,7 @@ function CssRuleView(aInspector, aDoc, aStore, aPageStyle) {
   this._onSelectAll = this._onSelectAll.bind(this);
   this._onCopy = this._onCopy.bind(this);
   this._onCopyColor = this._onCopyColor.bind(this);
+  this._onCopyImageDataUrl = this._onCopyImageDataUrl.bind(this);
   this._onToggleOrigSources = this._onToggleOrigSources.bind(this);
   this._onShowMdnDocs = this._onShowMdnDocs.bind(this);
   this._onFilterStyles = this._onFilterStyles.bind(this);
@@ -1213,6 +1214,11 @@ CssRuleView.prototype = {
       label: "ruleView.contextmenu.copyColor",
       accesskey: "ruleView.contextmenu.copyColor.accessKey",
       command: this._onCopyColor
+    });
+    this.menuitemCopyImageDataUrl = createMenuItem(this._contextmenu, {
+      label: "styleinspector.contextmenu.copyImageDataUrl",
+      accesskey: "styleinspector.contextmenu.copyImageDataUrl.accessKey",
+      command: this._onCopyImageDataUrl
     });
     this.menuitemSources = createMenuItem(this._contextmenu, {
       label: "ruleView.contextmenu.showOrigSources",
@@ -1348,6 +1354,7 @@ CssRuleView.prototype = {
     }
 
     this.menuitemCopyColor.hidden = !this._isColorPopup();
+    this.menuitemCopyImageDataUrl.hidden = !this._isImageUrlPopup();
     this.menuitemCopy.disabled = !copy;
 
     var showOrig = Services.prefs.getBoolPref(PREF_ORIG_SOURCES);
@@ -1398,7 +1405,7 @@ CssRuleView.prototype = {
         pseudoElement: prop.rule.pseudoElement,
         sheetHref: prop.rule.domRule.href
       };
-    } else if (classes.contains("theme-link") && prop) {
+    } else if (classes.contains("theme-link") && !classes.contains("ruleview-rule-source") && prop) {
       type = overlays.VIEW_NODE_IMAGE_URL_TYPE;
       value = {
         property: getPropertyNameAndValue(node).name,
@@ -1430,13 +1437,10 @@ CssRuleView.prototype = {
   _isColorPopup: function () {
     this._colorToCopy = "";
 
-    let trigger = this.doc.popupNode;
-    if (!trigger) {
+    let container = this._getPopupNodeContainer();
+    if (!container) {
       return false;
     }
-
-    let container = (trigger.nodeType == trigger.TEXT_NODE) ?
-                     trigger.parentElement : trigger;
 
     let isColorNode = el => el.dataset && "color" in el.dataset;
 
@@ -1449,6 +1453,52 @@ CssRuleView.prototype = {
 
     this._colorToCopy = container.dataset["color"];
     return true;
+  },
+
+  /**
+   * Check if the context menu popup was opened with a click on an image link
+   * If true, save the image url to this._imageUrlToCopy
+   */
+  _isImageUrlPopup: function () {
+    this._imageUrlToCopy = "";
+
+    let container = this._getPopupNodeContainer();
+    let isImageUrlNode = this._isImageUrlNode(container);
+    if (isImageUrlNode) {
+      this._imageUrlToCopy = container.href;
+    }
+
+    return isImageUrlNode;
+  },
+
+  /**
+   * Check if a node is an image url
+   * @param {DOMNode} node The node which we want information about
+   * @return {Boolean} true if the node is an image url
+   */
+  _isImageUrlNode: function (node) {
+    let nodeInfo = this.getNodeInfo(node);
+    if (!nodeInfo) {
+      return false
+    }
+    return nodeInfo.type == overlays.VIEW_NODE_IMAGE_URL_TYPE;
+  },
+
+  /**
+   * Get the DOM Node container for the current popupNode.
+   * If popupNode is a textNode, return the parent node, otherwise return popupNode itself.
+   * @return {DOMNode}
+   */
+  _getPopupNodeContainer: function () {
+    let container = null;
+    let node = this.doc.popupNode;
+
+    if (node) {
+      let isTextNode = node.nodeType == node.TEXT_NODE;
+      container = isTextNode ? node.parentElement : node;
+    }
+
+    return container;
   },
 
   /**
@@ -1511,7 +1561,7 @@ CssRuleView.prototype = {
         text = text.replace(rx, "");
       }
 
-      clipboardHelper.copyString(text, this.doc);
+      clipboardHelper.copyString(text);
       event.preventDefault();
     } catch(e) {
       console.error(e);
@@ -1522,8 +1572,24 @@ CssRuleView.prototype = {
    * Copy the most recently selected color value to clipboard.
    */
   _onCopyColor: function() {
-    clipboardHelper.copyString(this._colorToCopy, this.styleDocument);
+    clipboardHelper.copyString(this._colorToCopy);
   },
+
+  /**
+   * Retrieve the image data for the selected image url and copy it to the clipboard
+   */
+  _onCopyImageDataUrl: Task.async(function*() {
+    let message;
+    try {
+      let inspectorFront = this.inspector.inspector;
+      let data = yield inspectorFront.getImageDataFromURL(this._imageUrlToCopy);
+      message = yield data.data.string();
+    } catch (e) {
+      message = _strings.GetStringFromName("styleinspector.copyImageDataUrlError");
+    }
+
+    clipboardHelper.copyString(message);
+  }),
 
   /**
    *  Toggle the original sources pref.
@@ -1728,6 +1794,10 @@ CssRuleView.prototype = {
       // Destroy Copy Color menuitem.
       this.menuitemCopyColor.removeEventListener("command", this._onCopyColor);
       this.menuitemCopyColor = null;
+
+      // Destroy Copy Data URI menuitem.
+      this.menuitemCopyImageDataUrl.removeEventListener("command", this._onCopyImageDataUrl);
+      this.menuitemCopyImageDataUrl = null;
 
       this.menuitemSources.removeEventListener("command", this._onToggleOrigSources);
       this.menuitemSources = null;
@@ -2126,8 +2196,9 @@ CssRuleView.prototype = {
       // Highlight search matches in the computed list of properties
       for (let computed of textProp.computed) {
         if (computed.element) {
-          let computedName = computed.name;
-          let computedValue = computed.value;
+          // Get the actual property value displayed in the computed list
+          let computedValue = computed.parsedValue.toLowerCase();
+          let computedName = computed.name.toLowerCase();
 
           isComputedHighlighted = this._highlightMatches(computed.element, {
             searchName: name,
@@ -2980,7 +3051,7 @@ TextPropertyEditor.prototype = {
     }
 
     let showExpander = false;
-    for each (let computed in this.prop.computed) {
+    for (let computed of this.prop.computed) {
       // Don't bother to duplicate information already
       // shown in the text property.
       if (computed.name === this.prop.name) {
@@ -3011,6 +3082,9 @@ TextPropertyEditor.prototype = {
           baseURI: this.sheetURI
         }
       );
+
+      // Store the computed property value that was parsed for output
+      computed.parsedValue = frag.textContent;
 
       createChild(li, "span", {
         class: "ruleview-propertyvalue theme-fg-color1",

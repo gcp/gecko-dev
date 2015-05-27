@@ -229,6 +229,8 @@
 #include "mozilla/dom/BoxObject.h"
 #include "gfxVR.h"
 
+#include "nsISpeculativeConnect.h"
+
 #ifdef MOZ_MEDIA_NAVIGATOR
 #include "mozilla/MediaManager.h"
 #endif // MOZ_MEDIA_NAVIGATOR
@@ -1593,7 +1595,7 @@ nsDocument::nsDocument(const char* aContentType)
     gDocumentLeakPRLog = PR_NewLogModule("DocumentLeak");
 
   if (gDocumentLeakPRLog)
-    PR_LOG(gDocumentLeakPRLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocumentLeakPRLog, PR_LOG_DEBUG,
            ("DOCUMENT %p created", this));
 
   if (!gCspPRLog)
@@ -1637,7 +1639,7 @@ nsIDocument::~nsIDocument()
 nsDocument::~nsDocument()
 {
   if (gDocumentLeakPRLog)
-    PR_LOG(gDocumentLeakPRLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocumentLeakPRLog, PR_LOG_DEBUG,
            ("DOCUMENT %p destroyed", this));
 
   NS_ASSERTION(!mIsShowing, "Destroying a currently-showing document");
@@ -1713,11 +1715,8 @@ nsDocument::~nsDocument()
 
   // Kill the subdocument map, doing this will release its strong
   // references, if any.
-  if (mSubDocuments) {
-    PL_DHashTableDestroy(mSubDocuments);
-
-    mSubDocuments = nullptr;
-  }
+  delete mSubDocuments;
+  mSubDocuments = nullptr;
 
   // Destroy link map now so we don't waste time removing
   // links one by one
@@ -2121,10 +2120,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
     tmp->mStyleSheetSetList = nullptr;
   }
 
-  if (tmp->mSubDocuments) {
-    PL_DHashTableDestroy(tmp->mSubDocuments);
-    tmp->mSubDocuments = nullptr;
-  }
+  delete tmp->mSubDocuments;
+  tmp->mSubDocuments = nullptr;
 
   tmp->mFrameRequestCallbacks.Clear();
 
@@ -2320,11 +2317,8 @@ nsDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
 
   // Delete references to sub-documents and kill the subdocument map,
   // if any. It holds strong references
-  if (mSubDocuments) {
-    PL_DHashTableDestroy(mSubDocuments);
-
-    mSubDocuments = nullptr;
-  }
+  delete mSubDocuments;
+  mSubDocuments = nullptr;
 
   // Destroy link map now so we don't waste time removing
   // links one by one
@@ -2779,7 +2773,7 @@ AppendCSPFromHeader(nsIContentSecurityPolicy* csp,
       rv = csp->AppendPolicy(policy, aReportOnly);
       NS_ENSURE_SUCCESS(rv, rv);
       {
-        PR_LOG(gCspPRLog, PR_LOG_DEBUG,
+        MOZ_LOG(gCspPRLog, PR_LOG_DEBUG,
                 ("CSP refined with policy: \"%s\"",
                 NS_ConvertUTF16toUTF8(policy).get()));
       }
@@ -2819,7 +2813,7 @@ nsDocument::InitCSP(nsIChannel* aChannel)
 {
   nsCOMPtr<nsIContentSecurityPolicy> csp;
   if (!CSPService::sCSPEnabled) {
-    PR_LOG(gCspPRLog, PR_LOG_DEBUG,
+    MOZ_LOG(gCspPRLog, PR_LOG_DEBUG,
            ("CSP is disabled, skipping CSP init for document %p", this));
     return NS_OK;
   }
@@ -2877,7 +2871,7 @@ nsDocument::InitCSP(nsIChannel* aChannel)
       aChannel->GetURI(getter_AddRefs(chanURI));
       nsAutoCString aspec;
       chanURI->GetAsciiSpec(aspec);
-      PR_LOG(gCspPRLog, PR_LOG_DEBUG,
+      MOZ_LOG(gCspPRLog, PR_LOG_DEBUG,
              ("no CSP for document, %s, %s",
               aspec.get(),
               applyAppDefaultCSP ? "is app" : "not an app"));
@@ -2886,7 +2880,7 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     return NS_OK;
   }
 
-  PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("Document is an app or CSP header specified %p", this));
+  MOZ_LOG(gCspPRLog, PR_LOG_DEBUG, ("Document is an app or CSP header specified %p", this));
 
   nsresult rv;
 
@@ -2905,7 +2899,7 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (csp) {
-      PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("%s %s %s",
+      MOZ_LOG(gCspPRLog, PR_LOG_DEBUG, ("%s %s %s",
            "This document is sharing principal with another document.",
            "Since the document is an app, CSP was already set.",
            "Skipping attempt to set CSP."));
@@ -2916,7 +2910,7 @@ nsDocument::InitCSP(nsIChannel* aChannel)
   csp = do_CreateInstance("@mozilla.org/cspcontext;1", &rv);
 
   if (NS_FAILED(rv)) {
-    PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("Failed to create CSP object: %x", rv));
+    MOZ_LOG(gCspPRLog, PR_LOG_DEBUG, ("Failed to create CSP object: %x", rv));
     return rv;
   }
 
@@ -2969,7 +2963,7 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     rv = csp->PermitsAncestry(docShell, &safeAncestry);
 
     if (NS_FAILED(rv) || !safeAncestry) {
-      PR_LOG(gCspPRLog, PR_LOG_DEBUG,
+      MOZ_LOG(gCspPRLog, PR_LOG_DEBUG,
               ("CSP doesn't like frame's ancestry, not loading."));
       // stop!  ERROR page!
       aChannel->Cancel(NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION);
@@ -2990,7 +2984,7 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     } else if (mReferrerPolicy != referrerPolicy) {
       mReferrerPolicy = mozilla::net::RP_No_Referrer;
       {
-        PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("%s %s",
+        MOZ_LOG(gCspPRLog, PR_LOG_DEBUG, ("%s %s",
                 "CSP wants to set referrer, but nsDocument"
                 "already has it set. No referrers will be sent"));
       }
@@ -3003,7 +2997,7 @@ nsDocument::InitCSP(nsIChannel* aChannel)
 
   rv = principal->SetCsp(csp);
   NS_ENSURE_SUCCESS(rv, rv);
-  PR_LOG(gCspPRLog, PR_LOG_DEBUG,
+  MOZ_LOG(gCspPRLog, PR_LOG_DEBUG,
          ("Inserted CSP into principal %p", principal));
 
   return NS_OK;
@@ -4005,7 +3999,7 @@ nsDocument::SetSubDocumentFor(Element* aElement, nsIDocument* aSubDoc)
         SubDocInitEntry
       };
 
-      mSubDocuments = PL_NewDHashTable(&hash_table_ops, sizeof(SubDocMapEntry));
+      mSubDocuments = new PLDHashTable2(&hash_table_ops, sizeof(SubDocMapEntry));
     }
 
     // Add a mapping to the hash table
@@ -4248,7 +4242,7 @@ nsDocument::AddStyleSheetToStyleSets(nsIStyleSheet* aSheet)
     event->SetTarget(this);                                                   \
     nsRefPtr<AsyncEventDispatcher> asyncDispatcher =                          \
       new AsyncEventDispatcher(this, event);                                  \
-    asyncDispatcher->mDispatchChromeOnly = true;                              \
+    asyncDispatcher->mOnlyChromeDispatch = true;                              \
     asyncDispatcher->PostDOMEvent();                                          \
   } while (0);
 
@@ -5103,6 +5097,10 @@ nsDocument::DispatchContentLoadedEvents()
 
   // Unpin references to preloaded images
   mPreloadingImages.Clear();
+
+  // DOM manipulation after content loaded should not care if the element
+  // came from the preloader.
+  mPreloadedPreconnects.Clear();
 
   if (mTiming) {
     mTiming->NotifyDOMContentLoadedStart(nsIDocument::GetDocumentURI());
@@ -7088,8 +7086,7 @@ nsDocument::GetTitleFromElement(uint32_t aNamespace, nsAString& aTitle)
   nsIContent* title = GetTitleContent(aNamespace);
   if (!title)
     return;
-  if(!nsContentUtils::GetNodeTextContent(title, false, aTitle))
-    NS_RUNTIMEABORT("OOM");
+  nsContentUtils::GetNodeTextContent(title, false, aTitle);
 }
 
 NS_IMETHODIMP
@@ -9819,6 +9816,23 @@ nsDocument::MaybePreLoadImage(nsIURI* uri, const nsAString &aCrossOriginAttr,
 }
 
 void
+nsDocument::MaybePreconnect(nsIURI* uri)
+{
+  if (mPreloadedPreconnects.Contains(uri)) {
+    return;
+  }
+  mPreloadedPreconnects.Put(uri, true);
+
+  nsCOMPtr<nsISpeculativeConnect>
+    speculator(do_QueryInterface(nsContentUtils::GetIOService()));
+  if (!speculator) {
+    return;
+  }
+
+  speculator->SpeculativeConnect(uri, nullptr);
+}
+
+void
 nsDocument::ForgetImagePreload(nsIURI* aURI)
 {
   // Checking count is faster than hashing the URI in the common
@@ -11099,35 +11113,6 @@ nsIDocument::ExitFullscreen(nsIDocument* aDoc, bool aRunAsync)
   nsDocument::ExitFullscreen(aDoc);
 }
 
-// Returns true if the document is a direct child of a cross process parent
-// mozbrowser iframe or TabParent. This is the case when the document has
-// a null parent and its DocShell reports that it is a browser frame, or
-// we can get a TabChild from it.
-static bool
-HasCrossProcessParent(nsIDocument* aDocument)
-{
-  if (XRE_GetProcessType() != GeckoProcessType_Content) {
-    return false;
-  }
-  if (aDocument->GetParentDocument() != nullptr) {
-    return false;
-  }
-  nsPIDOMWindow* win = aDocument->GetWindow();
-  if (!win) {
-    return false;
-  }
-  nsCOMPtr<nsIDocShell> docShell = win->GetDocShell();
-  if (!docShell) {
-    return false;
-  }
-  TabChild* tabChild(TabChild::GetFrom(docShell));
-  if (!tabChild) {
-    return false;
-  }
-
-  return true;
-}
-
 static bool
 CountFullscreenSubDocuments(nsIDocument* aDoc, void* aData)
 {
@@ -11167,21 +11152,6 @@ ResetFullScreen(nsIDocument* aDocument, void* aData)
     NS_ASSERTION(!aDocument->IsFullScreenDoc(), "Should reset full-screen");
     nsTArray<nsIDocument*>* changed = reinterpret_cast<nsTArray<nsIDocument*>*>(aData);
     changed->AppendElement(aDocument);
-
-    if (HasCrossProcessParent(aDocument)) {
-      // We're at the top of the content-process side doc tree. Ask the parent
-      // process to exit fullscreen.
-      nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-      os->NotifyObservers(aDocument, "ask-parent-to-exit-fullscreen", nullptr);
-    }
-
-    // Dispatch a notification so that if this document has any
-    // cross-process subdocuments, they'll be notified to exit fullscreen.
-    // The BrowserElementParent listens for this event and performs the
-    // cross process notification if it has a remote child process.
-    nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-    os->NotifyObservers(aDocument, "ask-children-to-exit-fullscreen", nullptr);
-
     aDocument->EnumerateSubDocuments(ResetFullScreen, aData);
   }
   return true;
@@ -11219,11 +11189,13 @@ ExitFullscreenInDocTree(nsIDocument* aMaybeNotARootDoc)
   NS_ASSERTION(!root->IsFullScreenDoc(),
     "Fullscreen root should no longer be a fullscreen doc...");
 
-  // Dispatch MozExitedDomFullscreen to the last document in
+  // Dispatch MozDOMFullscreen:Exited to the last document in
   // the list since we want this event to follow the same path
-  // MozEnteredDomFullscreen dispatched.
-  nsRefPtr<AsyncEventDispatcher> asyncDispatcher = new AsyncEventDispatcher(
-    changed.LastElement(), NS_LITERAL_STRING("MozExitedDomFullscreen"), true, true);
+  // MozDOMFullscreen:Entered dispatched.
+  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
+    new AsyncEventDispatcher(changed.LastElement(),
+                             NS_LITERAL_STRING("MozDOMFullscreen:Exited"),
+                             true, true);
   asyncDispatcher->PostDOMEvent();
   // Move the top-level window out of fullscreen mode.
   SetWindowFullScreen(root, false);
@@ -11303,12 +11275,6 @@ nsDocument::RestorePreviousFullScreenState()
 
   nsCOMPtr<nsIDocument> fullScreenDoc = GetFullscreenLeaf(this);
 
-  // The fullscreen document may contain a <iframe mozbrowser> element which
-  // has a cross process child. So send a notification so that its browser
-  // parent will send a message to its child process to also exit fullscreen.
-  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-  os->NotifyObservers(fullScreenDoc, "ask-children-to-exit-fullscreen", nullptr);
-
   // Clear full-screen stacks in all descendant in process documents, bottom up.
   nsIDocument* doc = fullScreenDoc;
   while (doc != this) {
@@ -11326,12 +11292,6 @@ nsDocument::RestorePreviousFullScreenState()
     UnlockPointer();
     DispatchFullScreenChange(doc);
     if (static_cast<nsDocument*>(doc)->mFullScreenStack.IsEmpty()) {
-      if (HasCrossProcessParent(doc)) {
-        // Send notification to the parent process to tell it to rollback to
-        // the previous fullscreen elements in its fullscreen element stacks.
-        nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-        os->NotifyObservers(doc, "ask-parent-to-rollback-fullscreen", nullptr);
-      }
       // Full-screen stack in document is empty. Go back up to the parent
       // document. We'll pop the containing element off its stack, and use
       // its next full-screen element as the full-screen element.
@@ -11349,25 +11309,12 @@ nsDocument::RestorePreviousFullScreenState()
             (!nsContentUtils::IsSitePermAllow(doc->NodePrincipal(), "fullscreen") &&
              !static_cast<nsDocument*>(doc)->mIsApprovedForFullscreen)) {
           nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
-            new AsyncEventDispatcher(doc,
-                  NS_LITERAL_STRING("MozEnteredDomFullscreen"),
-                  true,
-                  true);
+            new AsyncEventDispatcher(
+                doc, NS_LITERAL_STRING("MozDOMFullscreen:NewOrigin"),
+                /* Bubbles */ true, /* ChromeOnly */ true);
           asyncDispatcher->PostDOMEvent();
         }
       }
-
-      if (!nsContentUtils::HaveEqualPrincipals(doc, fullScreenDoc)) {
-        // The origin which is fullscreen changed. Send a notification to
-        // the root process so that a warning or approval UI can be shown
-        // as necessary.
-        nsAutoString origin;
-        nsContentUtils::GetUTFOrigin(doc->NodePrincipal(), origin);
-        nsIDocument* root = nsContentUtils::GetRootDocument(doc);
-        nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-        os->NotifyObservers(root, "fullscreen-origin-change", origin.get());
-      }
-
       break;
     }
   }
@@ -11378,7 +11325,7 @@ nsDocument::RestorePreviousFullScreenState()
     NS_ASSERTION(!nsContentUtils::GetRootDocument(this)->IsFullScreenDoc(),
                  "Should have cleared all docs' stacks");
     nsRefPtr<AsyncEventDispatcher> asyncDispatcher = new AsyncEventDispatcher(
-      this, NS_LITERAL_STRING("MozExitedDomFullscreen"), true, true);
+      this, NS_LITERAL_STRING("MozDOMFullscreen:Exited"), true, true);
     asyncDispatcher->PostDOMEvent();
     SetWindowFullScreen(this, false);
   }
@@ -11630,31 +11577,16 @@ IsInActiveTab(nsIDocument* aDoc)
   return activeWindow == rootWin;
 }
 
-nsresult nsDocument::RemoteFrameFullscreenChanged(nsIDOMElement* aFrameElement,
-                                                  const nsAString& aOrigin)
+nsresult nsDocument::RemoteFrameFullscreenChanged(nsIDOMElement* aFrameElement)
 {
   // Ensure the frame element is the fullscreen element in this document.
   // If the frame element is already the fullscreen element in this document,
   // this has no effect.
   nsCOMPtr<nsIContent> content(do_QueryInterface(aFrameElement));
   FullScreenOptions opts;
-  RequestFullScreen(content->AsElement(),
-                    opts,
+  RequestFullScreen(content->AsElement(), opts,
                     /* aWasCallerChrome */ false,
                     /* aNotifyOnOriginChange */ false);
-
-  // Origin changed in child process, send notifiction, so that chrome can
-  // update the UI to reflect the fullscreen origin change if necessary.
-  // The BrowserElementChild listens on this, and forwards it over its
-  // parent process, where it is redispatched. Chrome (in the root process,
-  // which could be *this* process) listens for this notification so that
-  // it can show a warning or approval UI.
-  if (!aOrigin.IsEmpty()) {
-    nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-    os->NotifyObservers(nsContentUtils::GetRootDocument(this),
-                        "fullscreen-origin-change",
-                        PromiseFlatString(aOrigin).get());
-  }
 
   return NS_OK;
 }
@@ -11818,19 +11750,32 @@ nsDocument::RequestFullScreen(Element* aElement,
       nsContentUtils::IsSitePermAllow(NodePrincipal(), "fullscreen");
   }
 
-  // If this document, or a document with the same principal has not
-  // already been approved for fullscreen this fullscreen-session, dispatch
-  // an event so that chrome knows to pop up a warning/approval UI.
-  // Note previousFullscreenDoc=nullptr upon first entry, so we always
-  // take this path on the first time we enter fullscreen in a fullscreen
-  // session.
-  if (!mIsApprovedForFullscreen ||
+  // If it is the first entry of the fullscreen, trigger an event so
+  // that the UI can response to this change, e.g. hide chrome, or
+  // notifying parent process to enter fullscreen. Note that chrome
+  // code may also want to listen to MozDOMFullscreen:NewOrigin event
+  // to pop up warning/approval UI.
+  if (!previousFullscreenDoc) {
+    nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
+      new AsyncEventDispatcher(
+        this, NS_LITERAL_STRING("MozDOMFullscreen:Entered"),
+        /* Bubbles */ true, /* ChromeOnly */ true);
+    asyncDispatcher->PostDOMEvent();
+  }
+
+  // The origin which is fullscreen gets changed. Trigger an event so
+  // that the chrome knows to pop up a warning/approval UI. Note that
+  // previousFullscreenDoc == nullptr upon first entry, so we always
+  // take this path on the first entry. Also note that, in a multi-
+  // process browser, the code in content process is responsible for
+  // sending message with the origin to its parent, and the parent
+  // shouldn't rely on this event itself.
+  if (aNotifyOnOriginChange &&
       !nsContentUtils::HaveEqualPrincipals(previousFullscreenDoc, this)) {
     nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
-      new AsyncEventDispatcher(this,
-                               NS_LITERAL_STRING("MozEnteredDomFullscreen"),
-                               true,
-                               true);
+      new AsyncEventDispatcher(
+        this, NS_LITERAL_STRING("MozDOMFullscreen:NewOrigin"),
+        /* Bubbles */ true, /* ChromeOnly */ true);
     asyncDispatcher->PostDOMEvent();
   }
 
@@ -11846,21 +11791,6 @@ nsDocument::RequestFullScreen(Element* aElement,
   NS_ASSERTION(c->AsElement() == aElement,
     "GetMozFullScreenElement should match GetFullScreenElement()");
 #endif
-
-  // The origin which is fullscreen changed, send a notifiction so that the
-  // root document knows the origin of the document which requested fullscreen.
-  // This is used for the fullscreen approval UI. If we're in a child
-  // process, the root BrowserElementChild listens for this notification,
-  // and forwards it across to its BrowserElementParent, which
-  // re-broadcasts the message for the root document in its process.
-  if (aNotifyOnOriginChange &&
-      !nsContentUtils::HaveEqualPrincipals(previousFullscreenDoc, this)) {
-    nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-    nsIDocument* root = nsContentUtils::GetRootDocument(this);
-    nsAutoString origin;
-    nsContentUtils::GetUTFOrigin(NodePrincipal(), origin);
-    os->NotifyObservers(root, "fullscreen-origin-change", origin.get());
-  }
 
   // Make the window full-screen. Note we must make the state changes above
   // before making the window full-screen, as then the document reports as

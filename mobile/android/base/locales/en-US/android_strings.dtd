@@ -44,6 +44,10 @@
 <!ENTITY bookmark "Bookmark">
 <!ENTITY bookmark_remove "Remove bookmark">
 <!ENTITY bookmark_added "Bookmark added">
+<!-- Localization note (bookmark_already_added) : This string is
+     used as a label in a toast. It is the verb "to bookmark", not
+     the noun "a bookmark". -->
+<!ENTITY bookmark_already_added "Already bookmarked">
 <!ENTITY bookmark_removed "Bookmark removed">
 <!ENTITY bookmark_updated "Bookmark updated">
 <!ENTITY bookmark_options "Options">
@@ -260,6 +264,7 @@ size. -->
 <!ENTITY pref_private_data_offlineApps "Offline website data">
 <!ENTITY pref_private_data_siteSettings2 "Site settings">
 <!ENTITY pref_private_data_downloadFiles2 "Downloads">
+<!ENTITY pref_private_data_syncedTabs "Synced tabs">
 
 
 <!ENTITY pref_about_firefox "About &brandShortName;">

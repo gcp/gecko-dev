@@ -136,8 +136,6 @@ struct BytecodeEmitter
     Parser<FullParseHandler>* const parser;
 
     HandleScript    evalCaller;     /* scripted caller info for eval and dbgapi */
-    Handle<StaticEvalObject*> evalStaticScope;
-                                   /* compile time scope for eval; does not imply stmt stack */
 
     StmtInfoBCE*    topStmt;       /* top of statement info stack */
     StmtInfoBCE*    topScopeStmt;  /* top lexical scope statement */
@@ -222,8 +220,7 @@ struct BytecodeEmitter
     BytecodeEmitter(BytecodeEmitter* parent, Parser<FullParseHandler>* parser, SharedContext* sc,
                     HandleScript script, Handle<LazyScript*> lazyScript,
                     bool insideEval, HandleScript evalCaller,
-                    Handle<StaticEvalObject*> evalStaticScope, bool insideNonGlobalEval,
-                    uint32_t lineNum, EmitterMode emitterMode = Normal);
+                    bool insideNonGlobalEval, uint32_t lineNum, EmitterMode emitterMode = Normal);
     bool init();
     bool updateLocalsToFrameSlots();
 
@@ -490,7 +487,7 @@ struct BytecodeEmitter
     bool emitWith(ParseNode* pn);
 
     MOZ_NEVER_INLINE bool emitLabeledStatement(const LabeledStatement* pn);
-    MOZ_NEVER_INLINE bool emitLet(ParseNode* pnLet);
+    MOZ_NEVER_INLINE bool emitLetBlock(ParseNode* pnLet);
     MOZ_NEVER_INLINE bool emitLexicalScope(ParseNode* pn);
     MOZ_NEVER_INLINE bool emitSwitch(ParseNode* pn);
     MOZ_NEVER_INLINE bool emitTry(ParseNode* pn);

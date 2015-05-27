@@ -39,22 +39,15 @@ static const PLDHashTableOps gSetOps = {
 nsNSSShutDownList *nsNSSShutDownList::singleton = nullptr;
 
 nsNSSShutDownList::nsNSSShutDownList()
-:mListLock("nsNSSShutDownList.mListLock")
+  : mListLock("nsNSSShutDownList.mListLock")
+  , mActiveSSLSockets(0)
+  , mObjects(&gSetOps, sizeof(ObjectHashEntry))
+  , mPK11LogoutCancelObjects(&gSetOps, sizeof(ObjectHashEntry))
 {
-  mActiveSSLSockets = 0;
-  PL_DHashTableInit(&mObjects, &gSetOps, sizeof(ObjectHashEntry));
-  PL_DHashTableInit(&mPK11LogoutCancelObjects, &gSetOps,
-                    sizeof(ObjectHashEntry));
 }
 
 nsNSSShutDownList::~nsNSSShutDownList()
 {
-  if (mObjects.IsInitialized()) {
-    PL_DHashTableFinish(&mObjects);
-  }
-  if (mPK11LogoutCancelObjects.IsInitialized()) {
-    PL_DHashTableFinish(&mPK11LogoutCancelObjects);
-  }
   PR_ASSERT(this == singleton);
   singleton = nullptr;
 }
@@ -133,7 +126,7 @@ bool nsNSSShutDownList::areSSLSocketsActive()
 
 nsresult nsNSSShutDownList::doPK11Logout()
 {
-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("canceling all open SSL sockets to disallow future IO\n"));
+    MOZ_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("canceling all open SSL sockets to disallow future IO\n"));
   // During our iteration we will set a bunch of PRBools to true.
   // Nobody else ever modifies that bool, only we do.
   // We only must ensure that our objects do not go away.
@@ -182,11 +175,11 @@ void nsNSSShutDownList::allowUI()
 nsresult nsNSSShutDownList::evaporateAllNSSResources()
 {
   if (PR_SUCCESS != mActivityState.restrictActivityToCurrentThread()) {
-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("failed to restrict activity to current thread\n"));
+    MOZ_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("failed to restrict activity to current thread\n"));
     return NS_ERROR_FAILURE;
   }
 
-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("now evaporating NSS resources\n"));
+  MOZ_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("now evaporating NSS resources\n"));
   int removedCount;
   do {
     MutexAutoLock lock(mListLock);
