@@ -28,9 +28,9 @@ namespace camera {
 class CamerasSingleton {
 public:
   CamerasSingleton()
-    : sCamerasMutex("CamerasChild::sCamerasMutex"),
-      sCameras(nullptr),
-      sCamerasChildThread(nullptr) {
+    : mCamerasMutex("CamerasSingleton::mCamerasMutex"),
+      mCameras(nullptr),
+      mCamerasChildThread(nullptr) {
 #if defined(PR_LOGGING)
     if (!gCamerasChildLog)
       gCamerasChildLog = PR_NewLogModule("CamerasChild");
@@ -39,8 +39,8 @@ public:
   }
 
   ~CamerasSingleton() {
-    sCameras = nullptr;
-    sCamerasChildThread = nullptr;
+    mCameras = nullptr;
+    mCamerasChildThread = nullptr;
     LOG(("~CamerasSingleton: %p", this));
   }
 
@@ -49,16 +49,33 @@ public:
     return instance;
   }
 
-  mozilla::Mutex sCamerasMutex;
-  Atomic<CamerasChild*> sCameras;
-  nsCOMPtr<nsIThread> sCamerasChildThread;
+  static OffTheBooksMutex& getMutex() {
+    return getInstance().mCamerasMutex;
+  }
+
+  static CamerasChild*& getChild() {
+    getInstance().getMutex().AssertCurrentThreadOwns();
+    return getInstance().mCameras;
+  }
+
+  static nsIThread*& getThread() {
+    getInstance().getMutex().AssertCurrentThreadOwns();
+    return getInstance().mCamerasChildThread;
+  }
+
+  // We will be alive on destruction.
+  mozilla::OffTheBooksMutex mCamerasMutex;
+
+private:
+  CamerasChild *mCameras;
+  nsIThread *mCamerasChildThread;
 };
 
 static CamerasChild* Cameras(bool trace) {
-  MutexAutoLock lock(CamerasSingleton::getInstance().sCamerasMutex);
+  OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
   if (!gCamerasChildLog)
     gCamerasChildLog = PR_NewLogModule("CamerasChild");
-  if (!CamerasSingleton::getInstance().sCameras) {
+  if (!CamerasSingleton::getChild()) {
     LOG(("No sCameras, setting up"));
     // Try to get the PBackground handle
     ipc::PBackgroundChild* existingBackgroundChild =
@@ -73,17 +90,16 @@ static CamerasChild* Cameras(bool trace) {
     // By now PBackground is guaranteed to be up
     MOZ_RELEASE_ASSERT(existingBackgroundChild);
     // Create PCameras by sending a message to the parent
-    CamerasSingleton::getInstance().sCameras =
+    CamerasSingleton::getChild() =
       static_cast<CamerasChild*>(existingBackgroundChild->SendPCamerasConstructor());
-    CamerasSingleton::getInstance().sCamerasChildThread =
-      NS_GetCurrentThread();
+    CamerasSingleton::getThread() = NS_GetCurrentThread();
   }
   if (trace) {
-    CamerasChild* tmp = CamerasSingleton::getInstance().sCameras;
+    CamerasChild* tmp = CamerasSingleton::getChild();
     LOG(("Returning sCameras: %p", tmp));
   }
-  MOZ_ASSERT(CamerasSingleton::getInstance().sCameras);
-  return CamerasSingleton::getInstance().sCameras;
+  MOZ_ASSERT(CamerasSingleton::getChild());
+  return CamerasSingleton::getChild();
 }
 
 int NumberOfCapabilities(CaptureEngine aCapEngine, const char* deviceUniqueIdUTF8)
@@ -236,12 +252,12 @@ public:
   ShutdownRunnable() {};
 
   NS_IMETHOD Run() {
-    MutexAutoLock lock(CamerasSingleton::getInstance().sCamerasMutex);
+    OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
     LOG(("Closing BackgroundChild"));
     ipc::BackgroundChild::CloseForCurrentThread();
     LOG(("Erasing sCameras & thread (runnable)"));
-    CamerasSingleton::getInstance().sCameras = nullptr;
-    CamerasSingleton::getInstance().sCamerasChildThread = nullptr;
+    CamerasSingleton::getChild() = nullptr;
+    CamerasSingleton::getThread() = nullptr;
     return NS_OK;
   }
 };
@@ -249,17 +265,17 @@ public:
 void
 CamerasChild::XShutdown()
 {
-  MutexAutoLock lock(CamerasSingleton::getInstance().sCamerasMutex);
-  if (CamerasSingleton::getInstance().sCamerasChildThread) {
+  OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
+  if (CamerasSingleton::getThread()) {
     LOG(("Thread exists, dispatching"));
     nsRefPtr<ShutdownRunnable> runnable = new ShutdownRunnable();
-    CamerasSingleton::getInstance().sCamerasChildThread->Dispatch(runnable, NS_DISPATCH_NORMAL);
+    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
   } else {
     LOG(("XShutdown called without camera thread"));
   }
   LOG(("Erasing sCameras & thread (original thread)"));
-  CamerasSingleton::getInstance().sCameras = nullptr;
-  CamerasSingleton::getInstance().sCamerasChildThread = nullptr;
+  CamerasSingleton::getChild() = nullptr;
+  CamerasSingleton::getThread() = nullptr;
 }
 
 bool

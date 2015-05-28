@@ -25,12 +25,13 @@ namespace mozilla {
 namespace camera {
 
 enum CaptureEngine : int {
-  InvalidEngine,
+  InvalidEngine = 0,
   ScreenEngine,
   BrowserEngine,
   WinEngine,
   AppEngine,
-  CameraEngine
+  CameraEngine,
+  MaxEngine
 };
 
 struct CapturerElement {
@@ -82,7 +83,7 @@ public:
 
 private:
   void XShutdown();
-  
+
   nsTArray<CapturerElement> mCallbacks;
   // Protects the callback arrays
   Mutex mMutex;

@@ -50,6 +50,25 @@ private:
   CamerasParent *mParent;
 };
 
+class EngineHelper
+{
+public:
+  EngineHelper() :
+    mEngine(nullptr), mPtrViEBase(nullptr), mPtrViECapture(nullptr),
+    mPtrViERender(nullptr), mEngineIsRunning(false) {};
+
+  webrtc::VideoEngine *mEngine;
+  webrtc::ViEBase *mPtrViEBase;
+  webrtc::ViECapture *mPtrViECapture;
+  webrtc::ViERender *mPtrViERender;
+
+  // The webrtc code keeps a reference to this one.
+  webrtc::Config mConfig;
+
+  // Engine alive
+  bool mEngineIsRunning;
+};
+
 class CamerasParent :  public PCamerasParent
 {
 public:
@@ -81,25 +100,13 @@ public:
   CamerasParent();
   virtual ~CamerasParent();
 
-protected:
+private:
   bool SetupEngine(CaptureEngine aCapEngine);
   void CloseEngines();
   bool EnsureInitialized(int aEngine);
   void DoShutdown();
 
-  // Kept active as long as the engine doesn't change
-  CaptureEngine mActiveEngine;
-  webrtc::Config mActiveConfig;
-  webrtc::ViEBase *mPtrViEBase;
-  webrtc::ViECapture *mPtrViECapture;
-  webrtc::ViERender *mPtrViERender;
-
-  webrtc::VideoEngine* mCameraEngine;
-  webrtc::VideoEngine* mScreenEngine;
-  webrtc::VideoEngine* mBrowserEngine;
-  webrtc::VideoEngine* mWinEngine;
-  webrtc::VideoEngine* mAppEngine;
-
+  EngineHelper mEngines[CaptureEngine::MaxEngine];
   nsTArray<CallbackHelper*> mCallbacks;
 
   // image buffer
@@ -111,9 +118,6 @@ protected:
 
   // Shutdown handling
   bool mChildIsAlive;
-
-  // Engine alive
-  bool mEngineIsRunning;
 };
 
 PCamerasParent* CreateCamerasParent();
