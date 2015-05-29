@@ -346,24 +346,26 @@ CamerasParent::EnsureInitialized(int aEngine)
 }
 
 bool
-CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine,
-                                          int* numdev)
+CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine)
 {
+  bool success = true;
+
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
-    *numdev = 0;
+    success &= SendReplyNumberOfCaptureDevices(0);
     LOG(("RecvNumberOfCaptureDevices fails to initialize"));
     return false;
   }
 
   int num = mEngines[aCapEngine].mPtrViECapture->NumberOfCaptureDevices();
-  *numdev = num;
+  success &= SendReplyNumberOfCaptureDevices(num);
+
   if (num < 0) {
     LOG(("RecvNumberOfCaptureDevices couldn't find devices"));
     return false;
   } else {
-    LOG(("RecvNumberOfCaptureDevices: %d", *numdev));
-    return true;
+    LOG(("RecvNumberOfCaptureDevices: %d %d", num, success));
+    return success;
   }
 }
 

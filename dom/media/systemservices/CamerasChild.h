@@ -40,6 +40,7 @@ struct CapturerElement {
   webrtc::ExternalRenderer* callback;
 };
 
+// statically mirror webrtc.org API
 int NumberOfCapabilities(CaptureEngine aCapEngine,
                          const char* deviceUniqueIdUTF8);
 int GetCaptureCapability(CaptureEngine aCapEngine,
@@ -72,6 +73,18 @@ public:
                                 const int64_t&) override;
   virtual bool RecvFrameSizeChange(const int&, const int&,
                                    const int& w, const int& h) override;
+  virtual bool RecvReplyNumberOfCaptureDevices(const int&) override;
+  virtual bool RecvReplyNumberOfCapabilities(const int&) override;
+
+  int NumberOfCaptureDevices(CaptureEngine aCapEngine);
+  int NumberOfCapabilities(CaptureEngine aCapEngine,
+                           const char* deviceUniqueIdUTF8);
+  int ReleaseCaptureDevice(CaptureEngine aCapEngine,
+                           const int capture_id);
+  int StartCapture(CaptureEngine aCapEngine,
+                   const int capture_id, webrtc::CaptureCapability& capability,
+                   webrtc::ExternalRenderer* func);
+  int StopCapture(CaptureEngine aCapEngine, const int capture_id);
 
   webrtc::ExternalRenderer* Callback(CaptureEngine aCapEngine, int capture_id);
   void AddCallback(const CaptureEngine aCapEngine, const int capture_id,
@@ -86,7 +99,12 @@ private:
 
   nsTArray<CapturerElement> mCallbacks;
   // Protects the callback arrays
-  Mutex mMutex;
+  Mutex mCallbackMutex;
+
+  // Hold to wait for an async response to our calls
+  Monitor mReplyMonitor;
+  // Aynsc reponses data contents
+  int mReplyInteger;
 };
 
 PCamerasChild* CreateCamerasChild();

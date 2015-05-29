@@ -74,7 +74,7 @@ class CamerasParent :  public PCamerasParent
 public:
   virtual bool RecvAllocateCaptureDevice(const int&, const nsCString&, int *) override;
   virtual bool RecvReleaseCaptureDevice(const int&, const int &) override;
-  virtual bool RecvNumberOfCaptureDevices(const int&, int* numdev) override;
+  virtual bool RecvNumberOfCaptureDevices(const int&) override;
   virtual bool RecvNumberOfCapabilities(const int&, const nsCString&, int*) override;
   virtual bool RecvGetCaptureCapability(const int&, const nsCString&, const int&,
                                         CaptureCapability*) override;
