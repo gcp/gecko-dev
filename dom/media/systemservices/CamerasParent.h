@@ -72,13 +72,12 @@ public:
 class CamerasParent :  public PCamerasParent
 {
 public:
-  virtual bool RecvAllocateCaptureDevice(const int&, const nsCString&, int *) override;
+  virtual bool RecvAllocateCaptureDevice(const int&, const nsCString&) override;
   virtual bool RecvReleaseCaptureDevice(const int&, const int &) override;
   virtual bool RecvNumberOfCaptureDevices(const int&) override;
-  virtual bool RecvNumberOfCapabilities(const int&, const nsCString&, int*) override;
-  virtual bool RecvGetCaptureCapability(const int&, const nsCString&, const int&,
-                                        CaptureCapability*) override;
-  virtual bool RecvGetCaptureDevice(const int&, const int&, nsCString*, nsCString*) override;
+  virtual bool RecvNumberOfCapabilities(const int&, const nsCString&) override;
+  virtual bool RecvGetCaptureCapability(const int&, const nsCString&, const int&) override;
+  virtual bool RecvGetCaptureDevice(const int&, const int&) override;
   virtual bool RecvStartCapture(const int&, const int&, const CaptureCapability&) override;
   virtual bool RecvStopCapture(const int&, const int&) override;
   virtual bool RecvReleaseFrame(mozilla::ipc::Shmem&&) override;

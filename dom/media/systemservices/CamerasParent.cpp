@@ -194,8 +194,7 @@ CamerasParent::RecvReleaseFrame(mozilla::ipc::Shmem&& s) {
 
 bool
 CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
-                                         const nsCString& unique_id,
-                                         int* numdev)
+                                         const nsCString& unique_id)
 {
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
@@ -203,12 +202,17 @@ CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
     return false;
   }
 
+  bool success = true;
+  int numdev;
+
   if (mEngines[aCapEngine].mPtrViECapture->AllocateCaptureDevice(
-      unique_id.get(), MediaEngineSource::kMaxUniqueIdLength, *numdev)) {
+      unique_id.get(), MediaEngineSource::kMaxUniqueIdLength, numdev)) {
     return false;
   }
-  LOG(("Allocated device nr %d", *numdev));
-  return true;
+  LOG(("Allocated device nr %d", numdev));
+
+  success &= SendReplyAllocateCaptureDevice(numdev);
+  return success;
 }
 
 bool
@@ -371,12 +375,13 @@ CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine)
 
 bool
 CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
-                                        const nsCString& unique_id,
-                                        int* numCaps)
+                                        const nsCString& unique_id)
 {
+  int numCaps = 0;
+
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
-    *numCaps = 0;
+    SendReplyNumberOfCapabilities(numCaps);
     LOG(("RecvNumberOfCapabilities fails to initialize"));
     return false;
   }
@@ -387,23 +392,26 @@ CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
       unique_id.get(),
       MediaEngineSource::kMaxUniqueIdLength);
 
-  *numCaps = num;
+  numCaps = num;
+
   if (num < 0) {
     LOG(("RecvNumberOfCapabilities couldn't find capabilities"));
+    SendReplyNumberOfCapabilities(numCaps);
     return false;
   } else {
-    LOG(("RecvNumberOfCapabilities: %d", *numCaps));
-    return true;
+    LOG(("RecvNumberOfCapabilities: %d", numCaps));
   }
 
-  return false;
+  bool success = true;
+  success &= SendReplyNumberOfCapabilities(numCaps);
+
+  return success;
 }
 
 bool
 CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
                                         const nsCString& unique_id,
-                                        const int& num,
-                                        CaptureCapability* capCapability)
+                                        const int& num)
 {
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
@@ -420,6 +428,7 @@ CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
     return false;
   }
 
+  bool success = true;
   CaptureCapability capCap(webrtcCaps.width,
                            webrtcCaps.height,
                            webrtcCaps.maxFPS,
@@ -434,15 +443,13 @@ CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
        webrtcCaps.expectedCaptureDelay,
        webrtcCaps.rawType,
        webrtcCaps.codecType));
-  *capCapability = capCap;
-  return true;
+  success &= SendReplyGetCaptureCapability(capCap);
+  return success;
 }
 
 bool
 CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
-                                    const int& i,
-                                    nsCString* aName,
-                                    nsCString* aUniqueId)
+                                    const int& i)
 {
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
@@ -451,24 +458,29 @@ CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
   }
 
   char deviceName[MediaEngineSource::kMaxDeviceNameLength];
-  char uniqueId[MediaEngineSource::kMaxUniqueIdLength];
+  char deviceUniqueId[MediaEngineSource::kMaxUniqueIdLength];
 
   LOG(("RecvGetCaptureDevice"));
   int error =
     mEngines[aCapEngine].mPtrViECapture->GetCaptureDevice(i,
                                                           deviceName,
                                                           sizeof(deviceName),
-                                                          uniqueId,
-                                                          sizeof(uniqueId));
+                                                          deviceUniqueId,
+                                                          sizeof(deviceUniqueId));
   if (error) {
     LOG(("GetCaptureDevice failed: %d", error));
     return false;
   }
 
-  LOG(("Returning %s name %s id", deviceName, uniqueId));
+  LOG(("Returning %s name %s id", deviceName, deviceUniqueId));
 
-  aName->Assign(deviceName);
-  aUniqueId->Assign(uniqueId);
+  nsCString name;
+  nsCString uniqueId;
+  name.Assign(deviceName);
+  uniqueId.Assign(deviceUniqueId);
+
+  bool success = true;
+  success &= SendReplyGetCaptureDevice(name, uniqueId);
 
   return true;
 }

@@ -242,14 +242,17 @@ BackgroundChildImpl::DeallocPBroadcastChannelChild(
 camera::PCamerasChild*
 BackgroundChildImpl::AllocPCamerasChild()
 {
-  return camera::CreateCamerasChild();
+  nsRefPtr<camera::CamerasChild> agent =
+      camera::CreateCamerasChild();
+  return agent.forget().take();
 }
 
 bool
 BackgroundChildImpl::DeallocPCamerasChild(camera::PCamerasChild *aActor)
 {
+  nsRefPtr<camera::CamerasChild> child =
+      dont_AddRef(static_cast<camera::CamerasChild*>(aActor));
   MOZ_ASSERT(aActor);
-  delete static_cast<camera::CamerasChild*>(aActor);
   return true;
 }
 

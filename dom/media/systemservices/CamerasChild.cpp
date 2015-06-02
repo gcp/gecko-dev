@@ -15,7 +15,8 @@
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/SyncRunnable.h"
-#include "xpcom/glue/nsThreadUtils.h"
+#include "MediaUtils.h"
+#include "nsThreadUtils.h"
 #include "prlog.h"
 
 #undef LOG
@@ -85,7 +86,7 @@ public:
     return getInstance().mCameras;
   }
 
-  static nsIThread*& getThread() {
+  static nsCOMPtr<nsIThread>& getThread() {
     getInstance().getMutex().AssertCurrentThreadOwns();
     return getInstance().mCamerasChildThread;
   }
@@ -129,7 +130,7 @@ public:
 
 private:
   ipc::PBackgroundChild* mBackgroundChild;
-}
+};
 
 static CamerasChild* Cameras(bool trace) {
   OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
@@ -162,6 +163,16 @@ static CamerasChild* Cameras(bool trace) {
   return CamerasSingleton::getChild();
 }
 
+bool
+CamerasChild::RecvReplyFailed(void)
+{
+  LOG((__PRETTY_FUNCTION__));
+  MonitorAutoLock monitor(mReplyMonitor);
+  mReplySuccess = false;
+  monitor.Notify();
+  return true;
+}
+
 int NumberOfCapabilities(CaptureEngine aCapEngine, const char* deviceUniqueIdUTF8)
 {
   return Cameras(true)->NumberOfCapabilities(aCapEngine, deviceUniqueIdUTF8);
@@ -172,6 +183,7 @@ CamerasChild::RecvReplyNumberOfCapabilities(const int& numdev)
 {
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
+  mReplySuccess = true;
   mReplyInteger = numdev;
   monitor.Notify();
   return true;
@@ -186,10 +198,13 @@ CamerasChild::NumberOfCapabilities(CaptureEngine aCapEngine,
   MonitorAutoLock monitor(mReplyMonitor);
   nsCString unique_id(deviceUniqueIdUTF8);
   nsRefPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArgs<CaptureEngine>(
-      this, &CamerasChild::SendNumberOfCapabilities,
-      aCapEngine, unique_id);
-  getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+    media::NewRunnableFrom([this, aCapEngine, unique_id]() -> nsresult {
+      if (this->SendNumberOfCapabilities(aCapEngine, unique_id)) {
+        return NS_OK;
+      }
+      return NS_ERROR_FAILURE;
+    });
+  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
   monitor.Wait();
   LOG(("Capture capability count: %d", mReplyInteger));
   return mReplyInteger;
@@ -206,12 +221,14 @@ CamerasChild::NumberOfCaptureDevices(CaptureEngine aCapEngine)
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
   nsRefPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArgs<CaptureEngine>(
-      this, &CamerasChild::SendNumberOfCaptureDevices, aCapEngine);
-  getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+    media::NewRunnableFrom([this, aCapEngine]() -> nsresult {
+      if (this->SendNumberOfCaptureDevices(aCapEngine)) {
+        return NS_OK;
+      }
+      return NS_ERROR_FAILURE;
+    });
+  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
   monitor.Wait();
-  // Note: This is typically the first call, so there's no guarantee
-  // gLog is initialized yet before the Cameras() call.
   LOG(("Capture Devices: %d", mReplyInteger));
   return mReplyInteger;
 }
@@ -221,6 +238,7 @@ CamerasChild::RecvReplyNumberOfCaptureDevices(const int& numdev)
 {
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
+  mReplySuccess = true;
   mReplyInteger = numdev;
   monitor.Notify();
   return true;
@@ -230,20 +248,51 @@ int GetCaptureCapability(CaptureEngine aCapEngine, const char* unique_idUTF8,
                          const unsigned int capability_number,
                          webrtc::CaptureCapability& capability)
 {
-  LOG(("GetCaptureCapability: %s %d", unique_idUTF8, capability_number));
-  nsCString unique_id(unique_idUTF8);
-  CaptureCapability ipcCapability;
-  Cameras(true)->SendGetCaptureCapability(aCapEngine,
-                                      unique_id,
-                                      capability_number, &ipcCapability);
-  capability.width = ipcCapability.width();
-  capability.height = ipcCapability.height();
-  capability.maxFPS = ipcCapability.maxFPS();
-  capability.expectedCaptureDelay = ipcCapability.expectedCaptureDelay();
-  capability.rawType = static_cast<webrtc::RawVideoType>(ipcCapability.rawType());
-  capability.codecType = static_cast<webrtc::VideoCodecType>(ipcCapability.codecType());
-  capability.interlaced = ipcCapability.interlaced();
+  Cameras(true)->GetCaptureCapability(aCapEngine,
+                                      unique_idUTF8,
+                                      capability_number,
+                                      capability);
   return 0;
+
+}
+
+int
+CamerasChild::GetCaptureCapability(CaptureEngine aCapEngine,
+                                   const char* unique_idUTF8,
+                                   const unsigned int capability_number,
+                                   webrtc::CaptureCapability& capability)
+{
+  LOG(("GetCaptureCapability: %s %d", unique_idUTF8, capability_number));
+  MonitorAutoLock monitor(mReplyMonitor);
+  nsCString unique_id(unique_idUTF8);
+  nsRefPtr<nsIRunnable> runnable =
+    media::NewRunnableFrom([this, aCapEngine, unique_id, capability_number]() -> nsresult {
+      if (this->SendGetCaptureCapability(aCapEngine, unique_id, capability_number)) {
+        return NS_OK;
+      }
+      return NS_ERROR_FAILURE;
+    });
+  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  monitor.Wait();
+  capability = mReplyCapability;
+  return 0;
+}
+
+bool
+CamerasChild::RecvReplyGetCaptureCapability(const CaptureCapability& ipcCapability)
+{
+  LOG((__PRETTY_FUNCTION__));
+  MonitorAutoLock monitor(mReplyMonitor);
+  mReplySuccess = true;
+  mReplyCapability.width = ipcCapability.width();
+  mReplyCapability.height = ipcCapability.height();
+  mReplyCapability.maxFPS = ipcCapability.maxFPS();
+  mReplyCapability.expectedCaptureDelay = ipcCapability.expectedCaptureDelay();
+  mReplyCapability.rawType = static_cast<webrtc::RawVideoType>(ipcCapability.rawType());
+  mReplyCapability.codecType = static_cast<webrtc::VideoCodecType>(ipcCapability.codecType());
+  mReplyCapability.interlaced = ipcCapability.interlaced();
+  monitor.Notify();
+  return true;
 }
 
 
@@ -253,18 +302,50 @@ int GetCaptureDevice(CaptureEngine aCapEngine,
                      char* unique_idUTF8,
                      const unsigned int unique_idUTF8Length)
 {
+  Cameras(true)->GetCaptureDevice(aCapEngine,
+                                  list_number,
+                                  device_nameUTF8,
+                                  device_nameUTF8Length,
+                                  unique_idUTF8,
+                                  unique_idUTF8Length);
+  return 0;
+}
+
+int
+CamerasChild::GetCaptureDevice(CaptureEngine aCapEngine,
+                               unsigned int list_number, char* device_nameUTF8,
+                               const unsigned int device_nameUTF8Length,
+                               char* unique_idUTF8,
+                               const unsigned int unique_idUTF8Length)
+{
   LOG((__PRETTY_FUNCTION__));
-  nsCString device_name;
-  nsCString unique_id;
-  if (Cameras(true)->SendGetCaptureDevice(aCapEngine,
-                                      list_number, &device_name, &unique_id)) {
-    base::strlcpy(device_nameUTF8, device_name.get(), device_nameUTF8Length);
-    base::strlcpy(unique_idUTF8, unique_id.get(), unique_idUTF8Length);
-    LOG(("Got %s name %s id", device_nameUTF8, unique_idUTF8));
-    return 0;
-  } else {
-    return -1;
-  }
+  MonitorAutoLock monitor(mReplyMonitor);
+  nsRefPtr<nsIRunnable> runnable =
+    media::NewRunnableFrom([this, aCapEngine, list_number]() -> nsresult {
+      if (this->SendGetCaptureDevice(aCapEngine, list_number)) {
+        return NS_OK;
+      }
+      return NS_ERROR_FAILURE;
+    });
+  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  monitor.Wait();
+  base::strlcpy(device_nameUTF8, mReplyDeviceName.get(), device_nameUTF8Length);
+  base::strlcpy(unique_idUTF8, mReplyDeviceID.get(), unique_idUTF8Length);
+  LOG(("Got %s name %s id", device_nameUTF8, unique_idUTF8));
+  return 0;
+}
+
+bool
+CamerasChild::RecvReplyGetCaptureDevice(const nsCString& device_name,
+                                        const nsCString& device_id)
+{
+  LOG((__PRETTY_FUNCTION__));
+  MonitorAutoLock monitor(mReplyMonitor);
+  mReplySuccess = true;
+  mReplyDeviceName = device_name;
+  mReplyDeviceID = device_id;
+  monitor.Notify();
+  return true;
 }
 
 int AllocateCaptureDevice(CaptureEngine aCapEngine,
@@ -272,26 +353,65 @@ int AllocateCaptureDevice(CaptureEngine aCapEngine,
                           const unsigned int unique_idUTF8Length,
                           int& capture_id)
 {
+  capture_id = Cameras(true)->AllocateCaptureDevice(aCapEngine,
+                                                    unique_idUTF8,
+                                                    unique_idUTF8Length);
+  return 0;
+}
+
+int
+CamerasChild::AllocateCaptureDevice(CaptureEngine aCapEngine,
+                                    const char* unique_idUTF8,
+                                    const unsigned int unique_idUTF8Length)
+{
   LOG((__PRETTY_FUNCTION__));
+  MonitorAutoLock monitor(mReplyMonitor);
   nsCString unique_id(unique_idUTF8);
-  if (Cameras(true)->SendAllocateCaptureDevice(aCapEngine,
-                                           unique_id, &capture_id)) {
-    LOG(("Success allocating %s %d", unique_idUTF8, capture_id));
-    return 0;
-  } else {
-    LOG(("Failure allocating capture device %s %d", unique_idUTF8, capture_id));
-    return -1;
-  }
+  nsRefPtr<nsIRunnable> runnable =
+    media::NewRunnableFrom([this, aCapEngine, unique_id]() -> nsresult {
+      if (this->SendAllocateCaptureDevice(aCapEngine, unique_id)) {
+        return NS_OK;
+      }
+      return NS_ERROR_FAILURE;
+    });
+  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  monitor.Wait();
+  LOG(("Capture Device allocated: %d", mReplyInteger));
+  return mReplyInteger;
+}
+
+
+bool
+CamerasChild::RecvReplyAllocateCaptureDevice(const int& numdev)
+{
+  LOG((__PRETTY_FUNCTION__));
+  MonitorAutoLock monitor(mReplyMonitor);
+  mReplySuccess = true;
+  mReplyInteger = numdev;
+  monitor.Notify();
+  return true;
 }
 
 int ReleaseCaptureDevice(CaptureEngine aCapEngine, const int capture_id)
 {
+  Cameras(true)->ReleaseCaptureDevice(aCapEngine, capture_id);
+  return 0;
+}
+
+int
+CamerasChild::ReleaseCaptureDevice(CaptureEngine aCapEngine,
+                                   const int capture_id)
+{
   LOG((__PRETTY_FUNCTION__));
-  if (Cameras(true)->SendReleaseCaptureDevice(aCapEngine, capture_id)) {
-    return 0;
-  } else {
-    return -1;
-  }
+  nsRefPtr<nsIRunnable> runnable =
+    media::NewRunnableFrom([this, aCapEngine, capture_id]() -> nsresult {
+      if (this->SendReleaseCaptureDevice(aCapEngine, capture_id)) {
+        return NS_OK;
+      }
+      return NS_ERROR_FAILURE;
+    });
+  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  return 0;
 }
 
 void
@@ -328,6 +448,7 @@ int StartCapture(CaptureEngine aCapEngine,
                               capture_id,
                               webrtcCaps,
                               cb);
+  return 0;
 }
 
 int
@@ -346,29 +467,38 @@ CamerasChild::StartCapture(CaptureEngine aCapEngine,
                            webrtcCaps.codecType,
                            webrtcCaps.interlaced);
   nsRefPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArgs<CaptureEngine, const int,
-                                 webrtc::CaptureCapability&,
-                                 webrtc::ExternalRenderer*>(
-      this, &CamerasChild::SendStopCapture, aCapEngine, capture_id, capCap);
-  getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+    media::NewRunnableFrom([this, aCapEngine, capture_id, capCap]() -> nsresult {
+      if (this->SendStartCapture(aCapEngine, capture_id, capCap)) {
+        return NS_OK;
+      }
+      return NS_ERROR_FAILURE;
+    });
+  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  return 0;
 }
 
 int StopCapture(CaptureEngine aCapEngine, const int capture_id)
 {
   Cameras(true)->StopCapture(aCapEngine, capture_id);
+  return 0;
 }
 
 int
-CamerasChild::StopCapture(aCapEngine, const int capture_id)
+CamerasChild::StopCapture(CaptureEngine aCapEngine, const int capture_id)
 {
   LOG((__PRETTY_FUNCTION__));
   nsRefPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArgs<CaptureEngine, const int>(
-      this, &CamerasChild::SendStopCapture, aCapEngine, capture_id);
-  getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+    media::NewRunnableFrom([this, aCapEngine, capture_id]() -> nsresult {
+      if (this->SendStopCapture(aCapEngine, capture_id)) {
+        return NS_OK;
+      }
+      return NS_ERROR_FAILURE;
+    });
+  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
   // XXX: the stopcapture can be delayed infinitely, what if we
   // end up reusing the capture_id?
   RemoveCallback(aCapEngine, capture_id);
+  return 0;
 }
 
 class ShutdownRunnable : public nsRunnable {
@@ -464,7 +594,7 @@ CamerasChild::~CamerasChild()
   MOZ_COUNT_DTOR(CamerasChild);
 }
 
-PCamerasChild* CreateCamerasChild() {
+CamerasChild* CreateCamerasChild() {
   return new CamerasChild();
 }
 

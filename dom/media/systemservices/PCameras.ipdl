@@ -31,16 +31,19 @@ child:
                      int64_t ntp_time, int64_t render_time);
   async ReplyNumberOfCaptureDevices(int numdev);
   async ReplyNumberOfCapabilities(int numdev);
+  async ReplyAllocateCaptureDevice(int numdev);
+  async ReplyGetCaptureCapability(CaptureCapability cap);
+  async ReplyGetCaptureDevice(nsCString device_name, nsCString device_id);
+  async ReplyFailed();
 
 parent:
   async NumberOfCaptureDevices(int engine);
   async NumberOfCapabilities(int engine, nsCString deviceUniqueIdUTF8);
 
-  sync GetCaptureCapability(int engine, nsCString unique_idUTF8, int capability_number)
-                            returns (CaptureCapability capability);
-  sync GetCaptureDevice(int engine, int num) returns (nsCString device_name, nsCString device_id);
+  async GetCaptureCapability(int engine, nsCString unique_idUTF8, int capability_number);
+  async GetCaptureDevice(int engine, int num);
 
-  sync AllocateCaptureDevice(int engine, nsCString unique_idUTF8) returns (int numdev);
+  async AllocateCaptureDevice(int engine, nsCString unique_idUTF8);
   async ReleaseCaptureDevice(int engine, int numdev);
   async StartCapture(int engine, int numdev, CaptureCapability capability);
   async StopCapture(int engine, int numdev);

@@ -64,10 +64,12 @@ int StartCapture(CaptureEngine aCapEngine,
                  webrtc::ExternalRenderer* func);
 int StopCapture(CaptureEngine aCapEngine, const int capture_id);
 
-class CamerasChild :
-  public PCamerasChild
+class CamerasChild final : public PCamerasChild
 {
 public:
+  NS_INLINE_DECL_REFCOUNTING(CamerasChild)
+  explicit CamerasChild();
+
   virtual bool RecvDeliverFrame(const int&, const int&, mozilla::ipc::Shmem&&,
                                 const int&, const uint32_t&, const int64_t&,
                                 const int64_t&) override;
@@ -75,6 +77,11 @@ public:
                                    const int& w, const int& h) override;
   virtual bool RecvReplyNumberOfCaptureDevices(const int&) override;
   virtual bool RecvReplyNumberOfCapabilities(const int&) override;
+  virtual bool RecvReplyAllocateCaptureDevice(const int&) override;
+  virtual bool RecvReplyGetCaptureCapability(const CaptureCapability& capability) override;
+  virtual bool RecvReplyGetCaptureDevice(const nsCString& device_name,
+                                         const nsCString& device_id) override;
+  virtual bool RecvReplyFailed(void) override;
 
   int NumberOfCaptureDevices(CaptureEngine aCapEngine);
   int NumberOfCapabilities(CaptureEngine aCapEngine,
@@ -85,16 +92,27 @@ public:
                    const int capture_id, webrtc::CaptureCapability& capability,
                    webrtc::ExternalRenderer* func);
   int StopCapture(CaptureEngine aCapEngine, const int capture_id);
+  int AllocateCaptureDevice(CaptureEngine aCapEngine,
+                            const char* unique_idUTF8,
+                            const unsigned int unique_idUTF8Length);
+  int GetCaptureCapability(CaptureEngine aCapEngine,
+                           const char* unique_idUTF8,
+                           const unsigned int capability_number,
+                           webrtc::CaptureCapability& capability);
+  int GetCaptureDevice(CaptureEngine aCapEngine,
+                       unsigned int list_number, char* device_nameUTF8,
+                       const unsigned int device_nameUTF8Length,
+                       char* unique_idUTF8,
+                       const unsigned int unique_idUTF8Length);
 
   webrtc::ExternalRenderer* Callback(CaptureEngine aCapEngine, int capture_id);
   void AddCallback(const CaptureEngine aCapEngine, const int capture_id,
                    webrtc::ExternalRenderer* render);
   void RemoveCallback(const CaptureEngine aCapEngine, const int capture_id);
 
-  CamerasChild();
-  virtual ~CamerasChild();
 
 private:
+  virtual ~CamerasChild();
   void XShutdown();
 
   nsTArray<CapturerElement> mCallbacks;
@@ -104,10 +122,14 @@ private:
   // Hold to wait for an async response to our calls
   Monitor mReplyMonitor;
   // Aynsc reponses data contents
+  bool mReplySuccess;
   int mReplyInteger;
+  webrtc::CaptureCapability mReplyCapability;
+  nsCString mReplyDeviceName;
+  nsCString mReplyDeviceID;
 };
 
-PCamerasChild* CreateCamerasChild();
+CamerasChild* CreateCamerasChild();
 
 } // namespace camera
 } // namespace mozilla
