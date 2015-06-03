@@ -118,7 +118,7 @@ class InitializeIPCThread : public nsRunnable
 {
 public:
   explicit InitializeIPCThread()
-    : mBackgroundChild(nullptr), mCamerasChild(nullptr) {}
+    : mCamerasChild(nullptr) {}
 
   NS_IMETHOD Run() override {
     // Try to get the PBackground handle
@@ -134,18 +134,12 @@ public:
     }
     // By now PBackground is guaranteed to be up
     MOZ_RELEASE_ASSERT(existingBackgroundChild);
-    mBackgroundChild = existingBackgroundChild;
 
     // Create CamerasChild
     mCamerasChild =
-      static_cast<CamerasChild*>(mBackgroundChild->SendPCamerasConstructor());
+      static_cast<CamerasChild*>(existingBackgroundChild->SendPCamerasConstructor());
 
     return NS_OK;
-  }
-
-  ipc::PBackgroundChild* GetBackgroundChild() {
-    MOZ_ASSERT(mBackgroundChild);
-    return mBackgroundChild;
   }
 
   CamerasChild* GetCamerasChild() {
@@ -154,7 +148,6 @@ public:
   }
 
 private:
-  ipc::PBackgroundChild* mBackgroundChild;
   CamerasChild* mCamerasChild;
 };
 
@@ -180,9 +173,7 @@ static CamerasChild* Cameras(bool trace) {
     nsRefPtr<InitializeIPCThread> runnable = new InitializeIPCThread();
     nsRefPtr<SyncRunnable> sr = new SyncRunnable(runnable);
     sr->DispatchToThread(CamerasSingleton::getThread());
-    ipc::PBackgroundChild* backgroundChild = runnable->GetBackgroundChild();
     CamerasSingleton::getChild() = runnable->GetCamerasChild();
-    MOZ_ASSERT(backgroundChild);
   }
   if (trace) {
     CamerasChild* tmp = CamerasSingleton::getChild();
