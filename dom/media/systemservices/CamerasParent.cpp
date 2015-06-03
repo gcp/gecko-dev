@@ -192,10 +192,39 @@ CamerasParent::RecvReleaseFrame(mozilla::ipc::Shmem&& s) {
   return true;
 }
 
+// Will send a failure reply over IPC unless we
+// set the success flag. Use it to cover all exit
+// paths on calls expecting IPC replies.
+class AutoIPCReplier
+{
+public:
+  AutoIPCReplier(CamerasParent *aCP)
+    : mCP(aCP), mSuccess(false) {};
+
+  void GoodFinish() {
+    mSuccess = true;
+  }
+
+  ~AutoIPCReplier() {
+    if (!mSuccess) {
+      bool shutup = mCP->SendReplyFailure();
+      if (!shutup) {
+        LOG(("Failure to send failure"));
+      }
+    }
+  }
+
+private:
+  CamerasParent *mCP;
+  bool mSuccess;
+};
+
 bool
 CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
                                          const nsCString& unique_id)
 {
+  AutoIPCReplier ipc(this);
+
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("Fails to initialize"));
@@ -211,6 +240,7 @@ CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
   }
   LOG(("Allocated device nr %d", numdev));
 
+  ipc.GoodFinish();
   success &= SendReplyAllocateCaptureDevice(numdev);
   return success;
 }
@@ -219,6 +249,7 @@ bool
 CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
                                         const int &numdev)
 {
+  AutoIPCReplier ipc(this);
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("Fails to initialize"));
@@ -229,8 +260,13 @@ CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
   if (mEngines[aCapEngine].mPtrViECapture->ReleaseCaptureDevice(numdev)) {
     return false;
   }
+
+  bool success = true;
+  ipc.GoodFinish();
+  success &= SendReplySuccess();
+
   LOG(("Freed device nr %d", numdev));
-  return true;
+  return success;
 }
 
 bool
@@ -352,16 +388,17 @@ CamerasParent::EnsureInitialized(int aEngine)
 bool
 CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine)
 {
+  AutoIPCReplier ipc(this);
   bool success = true;
 
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
-    success &= SendReplyNumberOfCaptureDevices(0);
     LOG(("RecvNumberOfCaptureDevices fails to initialize"));
     return false;
   }
 
   int num = mEngines[aCapEngine].mPtrViECapture->NumberOfCaptureDevices();
+  ipc.GoodFinish();
   success &= SendReplyNumberOfCaptureDevices(num);
 
   if (num < 0) {
@@ -377,11 +414,11 @@ bool
 CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
                                         const nsCString& unique_id)
 {
+  AutoIPCReplier ipc(this);
   int numCaps = 0;
 
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
-    SendReplyNumberOfCapabilities(numCaps);
     LOG(("RecvNumberOfCapabilities fails to initialize"));
     return false;
   }
@@ -396,13 +433,13 @@ CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
 
   if (num < 0) {
     LOG(("RecvNumberOfCapabilities couldn't find capabilities"));
-    SendReplyNumberOfCapabilities(numCaps);
     return false;
   } else {
     LOG(("RecvNumberOfCapabilities: %d", numCaps));
   }
 
   bool success = true;
+  ipc.GoodFinish();
   success &= SendReplyNumberOfCapabilities(numCaps);
 
   return success;
@@ -413,6 +450,7 @@ CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
                                         const nsCString& unique_id,
                                         const int& num)
 {
+  AutoIPCReplier ipc(this);
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("Fails to initialize"));
@@ -443,6 +481,7 @@ CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
        webrtcCaps.expectedCaptureDelay,
        webrtcCaps.rawType,
        webrtcCaps.codecType));
+  ipc.GoodFinish();
   success &= SendReplyGetCaptureCapability(capCap);
   return success;
 }
@@ -451,6 +490,7 @@ bool
 CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
                                     const int& i)
 {
+  AutoIPCReplier ipc(this);
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("Fails to initialize"));
@@ -480,6 +520,7 @@ CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
   uniqueId.Assign(deviceUniqueId);
 
   bool success = true;
+  ipc.GoodFinish();
   success &= SendReplyGetCaptureDevice(name, uniqueId);
 
   return true;
@@ -490,6 +531,7 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
                                 const int& capnum,
                                 const CaptureCapability& ipcCaps)
 {
+  AutoIPCReplier ipc(this);
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("Failure to initialize"));
@@ -527,13 +569,19 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
   }
 
   helper->mEngineIsRunning = true;
-  return true;
+
+  bool success = true;
+  ipc.GoodFinish();
+  success &= SendReplySuccess();
+
+  return success;
 }
 
 bool
 CamerasParent::RecvStopCapture(const int& aCapEngine,
                                const int& capnum)
 {
+  AutoIPCReplier ipc(this);
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("Failure to initialize"));
@@ -553,6 +601,10 @@ CamerasParent::RecvStopCapture(const int& aCapEngine,
       break;
     }
   }
+
+  bool success = true;
+  ipc.GoodFinish();
+  success &= SendReplySuccess();
 
   return true;
 }

@@ -87,7 +87,8 @@ public:
   virtual bool RecvReplyGetCaptureCapability(const CaptureCapability& capability) override;
   virtual bool RecvReplyGetCaptureDevice(const nsCString& device_name,
                                          const nsCString& device_id) override;
-  virtual bool RecvReplyFailed(void) override;
+  virtual bool RecvReplyFailure(void) override;
+  virtual bool RecvReplySuccess(void) override;
 
   int NumberOfCaptureDevices(CaptureEngine aCapEngine);
   int NumberOfCapabilities(CaptureEngine aCapEngine,
@@ -100,7 +101,8 @@ public:
   int StopCapture(CaptureEngine aCapEngine, const int capture_id);
   int AllocateCaptureDevice(CaptureEngine aCapEngine,
                             const char* unique_idUTF8,
-                            const unsigned int unique_idUTF8Length);
+                            const unsigned int unique_idUTF8Length,
+                            int& capture_id);
   int GetCaptureCapability(CaptureEngine aCapEngine,
                            const char* unique_idUTF8,
                            const unsigned int capability_number,

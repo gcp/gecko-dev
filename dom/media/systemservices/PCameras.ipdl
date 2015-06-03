@@ -19,7 +19,7 @@ struct CaptureCapability
   bool interlaced;
 };
 
-sync protocol PCameras
+async protocol PCameras
 {
   manager PBackground;
 
@@ -34,7 +34,8 @@ child:
   async ReplyAllocateCaptureDevice(int numdev);
   async ReplyGetCaptureCapability(CaptureCapability cap);
   async ReplyGetCaptureDevice(nsCString device_name, nsCString device_id);
-  async ReplyFailed();
+  async ReplyFailure();
+  async ReplySuccess();
 
 parent:
   async NumberOfCaptureDevices(int engine);
