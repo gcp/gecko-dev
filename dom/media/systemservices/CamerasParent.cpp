@@ -447,6 +447,8 @@ CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
     media::NewRunnableFrom([=]() -> nsresult {
       char deviceName[MediaEngineSource::kMaxDeviceNameLength];
       char deviceUniqueId[MediaEngineSource::kMaxUniqueIdLength];
+      nsCString name;
+      nsCString uniqueId;
 
       int error =
         mEngines[aCapEngine].mPtrViECapture->GetCaptureDevice(i,
@@ -454,6 +456,11 @@ CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
                                                               sizeof(deviceName),
                                                               deviceUniqueId,
                                                               sizeof(deviceUniqueId));
+      if (!error) {
+        name.Assign(deviceName);
+        uniqueId.Assign(deviceUniqueId);
+      }
+
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([=]() -> nsresult {
           if (error) {
@@ -462,13 +469,7 @@ CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
             return NS_ERROR_FAILURE;
           }
 
-          LOG(("Returning %s name %s id", deviceName, deviceUniqueId));
-
-          nsCString name;
-          nsCString uniqueId;
-          name.Assign(deviceName);
-          uniqueId.Assign(deviceUniqueId);
-
+          LOG(("Returning %s name %s id", name.get(), uniqueId.get()));
           unused << SendReplyGetCaptureDevice(name, uniqueId);
           return NS_OK;
         });
