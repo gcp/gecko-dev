@@ -32,10 +32,6 @@
 #include "IHistory.h"
 #include "imgIContainer.h"
 #include "mozIApplication.h"
-#ifdef ACCESSIBILITY
-#include "mozilla/a11y/DocAccessibleParent.h"
-#include "nsAccessibilityService.h"
-#endif
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/docshell/OfflineCacheUpdateParent.h"
 #include "mozilla/dom/DataStoreService.h"
@@ -2035,6 +2031,15 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
         obs->NotifyObservers((nsIPropertyBag2*) props, "ipc:content-shutdown", nullptr);
     }
 
+    // Remove any and all idle listeners.
+    nsCOMPtr<nsIIdleService> idleService =
+        do_GetService("@mozilla.org/widget/idleservice;1");
+    MOZ_ASSERT(idleService);
+    nsRefPtr<ParentIdleListener> listener;
+    for (int32_t i = mIdleListeners.Length() - 1; i >= 0; --i) {
+        listener = static_cast<ParentIdleListener*>(mIdleListeners[i].get());
+        idleService->RemoveIdleObserver(listener, listener->mTime);
+    }
     mIdleListeners.Clear();
 
     MessageLoop::current()->
@@ -3144,42 +3149,6 @@ ContentParent::Observe(nsISupports* aSubject,
     }
 #endif
     return NS_OK;
-}
-
-  a11y::PDocAccessibleParent*
-ContentParent::AllocPDocAccessibleParent(PDocAccessibleParent* aParent, const uint64_t&)
-{
-#ifdef ACCESSIBILITY
-  return new a11y::DocAccessibleParent();
-#else
-  return nullptr;
-#endif
-}
-
-bool
-ContentParent::DeallocPDocAccessibleParent(PDocAccessibleParent* aParent)
-{
-#ifdef ACCESSIBILITY
-  delete static_cast<a11y::DocAccessibleParent*>(aParent);
-#endif
-  return true;
-}
-
-bool
-ContentParent::RecvPDocAccessibleConstructor(PDocAccessibleParent* aDoc, PDocAccessibleParent* aParentDoc, const uint64_t& aParentID)
-{
-#ifdef ACCESSIBILITY
-  auto doc = static_cast<a11y::DocAccessibleParent*>(aDoc);
-  if (aParentDoc) {
-    MOZ_ASSERT(aParentID);
-    auto parentDoc = static_cast<a11y::DocAccessibleParent*>(aParentDoc);
-    return parentDoc->AddChildDoc(doc, aParentID);
-  } else {
-    MOZ_ASSERT(!aParentID);
-    a11y::DocManager::RemoteDocAdded(doc);
-  }
-#endif
-  return true;
 }
 
 PGMPServiceParent*
@@ -4660,30 +4629,34 @@ ContentParent::RecvAddIdleObserver(const uint64_t& aObserver, const uint32_t& aI
 {
     nsresult rv;
     nsCOMPtr<nsIIdleService> idleService =
-      do_GetService("@mozilla.org/widget/idleservice;1", &rv);
+        do_GetService("@mozilla.org/widget/idleservice;1", &rv);
     NS_ENSURE_SUCCESS(rv, false);
 
-    nsRefPtr<ParentIdleListener> listener = new ParentIdleListener(this, aObserver);
-    mIdleListeners.Put(aObserver, listener);
-    idleService->AddIdleObserver(listener, aIdleTimeInS);
+    nsRefPtr<ParentIdleListener> listener =
+        new ParentIdleListener(this, aObserver, aIdleTimeInS);
+    rv = idleService->AddIdleObserver(listener, aIdleTimeInS);
+    NS_ENSURE_SUCCESS(rv, false);
+    mIdleListeners.AppendElement(listener);
     return true;
 }
 
 bool
 ContentParent::RecvRemoveIdleObserver(const uint64_t& aObserver, const uint32_t& aIdleTimeInS)
 {
-    nsresult rv;
-    nsCOMPtr<nsIIdleService> idleService =
-      do_GetService("@mozilla.org/widget/idleservice;1", &rv);
-    NS_ENSURE_SUCCESS(rv, false);
-
     nsRefPtr<ParentIdleListener> listener;
-    bool found = mIdleListeners.Get(aObserver, &listener);
-    if (found) {
-        mIdleListeners.Remove(aObserver);
-        idleService->RemoveIdleObserver(listener, aIdleTimeInS);
+    for (int32_t i = mIdleListeners.Length() - 1; i >= 0; --i) {
+        listener = static_cast<ParentIdleListener*>(mIdleListeners[i].get());
+        if (listener->mObserver == aObserver &&
+            listener->mTime == aIdleTimeInS) {
+            nsresult rv;
+            nsCOMPtr<nsIIdleService> idleService =
+                do_GetService("@mozilla.org/widget/idleservice;1", &rv);
+            NS_ENSURE_SUCCESS(rv, false);
+            idleService->RemoveIdleObserver(listener, aIdleTimeInS);
+            mIdleListeners.RemoveElementAt(i);
+            break;
+        }
     }
-
     return true;
 }
 

@@ -33,210 +33,6 @@ using mozilla::PodZero;
 /* Except for the first and last, slices of less than 10ms are not reported. */
 static const int64_t SLICE_MIN_REPORT_TIME = 10 * PRMJ_USEC_PER_MSEC;
 
-class gcstats::StatisticsSerializer
-{
-    typedef Vector<char, 128, SystemAllocPolicy> CharBuffer;
-    CharBuffer buf_;
-    bool asJSON_;
-    bool needComma_;
-    bool oom_;
-
-    static const int MaxFieldValueLength = 128;
-
-  public:
-    enum Mode {
-        AsJSON = true,
-        AsText = false
-    };
-
-    explicit StatisticsSerializer(Mode asJSON)
-      : buf_(), asJSON_(asJSON), needComma_(false), oom_(false)
-    {}
-
-    bool isJSON() { return asJSON_; }
-
-    bool isOOM() { return oom_; }
-
-    void endLine() {
-        if (!asJSON_) {
-            p("\n");
-            needComma_ = false;
-        }
-    }
-
-    void extra(const char* str) {
-        if (!asJSON_) {
-            needComma_ = false;
-            p(str);
-        }
-    }
-
-    void appendString(const char* name, const char* value) {
-        put(name, value, "", true);
-    }
-
-    void appendNumber(const char* name, const char* vfmt, const char* units, ...) {
-        va_list va;
-        va_start(va, units);
-        append(name, vfmt, va, units);
-        va_end(va);
-    }
-
-    void appendDecimal(const char* name, const char* units, double d) {
-        if (d < 0)
-            d = 0;
-        if (asJSON_)
-            appendNumber(name, "%d.%d", units, (int)d, (int)(d * 10.) % 10);
-        else
-            appendNumber(name, "%.1f", units, d);
-    }
-
-    void appendIfNonzeroMS(const char* name, double v) {
-        if (asJSON_ || v >= 0.1)
-            appendDecimal(name, "ms", v);
-    }
-
-    void beginObject(const char* name) {
-        if (needComma_)
-            pJSON(", ");
-        if (asJSON_ && name) {
-            putKey(name);
-            pJSON(": ");
-        }
-        pJSON("{");
-        needComma_ = false;
-    }
-
-    void endObject() {
-        needComma_ = false;
-        pJSON("}");
-        needComma_ = true;
-    }
-
-    void beginArray(const char* name) {
-        if (needComma_)
-            pJSON(", ");
-        if (asJSON_)
-            putKey(name);
-        pJSON(": [");
-        needComma_ = false;
-    }
-
-    void endArray() {
-        needComma_ = false;
-        pJSON("]");
-        needComma_ = true;
-    }
-
-    char16_t* finishJSString() {
-        char* buf = finishCString();
-        if (!buf)
-            return nullptr;
-
-        size_t nchars = strlen(buf);
-        char16_t* out = js_pod_malloc<char16_t>(nchars + 1);
-        if (!out) {
-            oom_ = true;
-            js_free(buf);
-            return nullptr;
-        }
-
-        CopyAndInflateChars(out, buf, nchars);
-        js_free(buf);
-
-        out[nchars] = 0;
-        return out;
-    }
-
-    char* finishCString() {
-        if (oom_)
-            return nullptr;
-
-        buf_.append('\0');
-
-        char* buf = buf_.extractRawBuffer();
-        if (!buf)
-            oom_ = true;
-
-        return buf;
-    }
-
-  private:
-    void append(const char* name, const char* vfmt,
-                va_list va, const char* units)
-    {
-        char val[MaxFieldValueLength];
-        JS_vsnprintf(val, MaxFieldValueLength, vfmt, va);
-        put(name, val, units, false);
-    }
-
-    void p(const char* cstr) {
-        if (oom_)
-            return;
-
-        if (!buf_.append(cstr, strlen(cstr)))
-            oom_ = true;
-    }
-
-    void p(const char c) {
-        if (oom_)
-            return;
-
-        if (!buf_.append(c))
-            oom_ = true;
-    }
-
-    void pJSON(const char* str) {
-        if (asJSON_)
-            p(str);
-    }
-
-    void put(const char* name, const char* val, const char* units, bool valueIsQuoted) {
-        if (needComma_)
-            p(", ");
-        needComma_ = true;
-
-        putKey(name);
-        p(": ");
-        if (valueIsQuoted)
-            putQuoted(val);
-        else
-            p(val);
-        if (!asJSON_)
-            p(units);
-    }
-
-    void putQuoted(const char* str) {
-        pJSON("\"");
-        p(str);
-        pJSON("\"");
-    }
-
-    void putKey(const char* str) {
-        if (!asJSON_) {
-            p(str);
-            return;
-        }
-
-        p("\"");
-        const char* c = str;
-        while (*c) {
-            if (*c == ' ' || *c == '\t')
-                p('_');
-            else if (isupper(*c))
-                p(tolower(*c));
-            else if (*c == '+')
-                p("added_");
-            else if (*c == '-')
-                p("removed_");
-            else if (*c != '(' && *c != ')')
-                p(*c);
-            c++;
-        }
-        p("\"");
-    }
-};
-
 /*
  * If this fails, then you can either delete this assertion and allow all
  * larger-numbered reasons to pile up in the last telemetry bucket, or switch
@@ -443,25 +239,11 @@ struct AllPhaseIterator {
     }
 };
 
-static void
-FormatPhaseTimes(StatisticsSerializer& ss, const char* name, Statistics::PhaseTimeTable times)
-{
-    ss.beginObject(name);
-
-    for (AllPhaseIterator iter(times); !iter.done(); iter.advance()) {
-        Phase phase;
-        size_t dagSlot;
-        iter.get(&phase, &dagSlot);
-        ss.appendIfNonzeroMS(phases[phase].name, t(times[dagSlot][phase]));
-    }
-    ss.endObject();
-}
-
 void
-Statistics::gcDuration(int64_t* total, int64_t* maxPause)
+Statistics::gcDuration(int64_t* total, int64_t* maxPause) const
 {
     *total = *maxPause = 0;
-    for (SliceData* slice = slices.begin(); slice != slices.end(); slice++) {
+    for (const SliceData* slice = slices.begin(); slice != slices.end(); slice++) {
         *total += slice->duration();
         if (slice->duration() > *maxPause)
             *maxPause = slice->duration();
@@ -480,97 +262,17 @@ Statistics::sccDurations(int64_t* total, int64_t* maxPause)
     }
 }
 
-bool
-Statistics::formatData(StatisticsSerializer& ss, uint64_t timestamp)
-{
-    MOZ_ASSERT(!aborted);
-
-    int64_t total, longest;
-    gcDuration(&total, &longest);
-
-    int64_t sccTotal, sccLongest;
-    sccDurations(&sccTotal, &sccLongest);
-
-    double mmu20 = computeMMU(20 * PRMJ_USEC_PER_MSEC);
-    double mmu50 = computeMMU(50 * PRMJ_USEC_PER_MSEC);
-
-    ss.beginObject(nullptr);
-    if (ss.isJSON())
-        ss.appendNumber("Timestamp", "%llu", "", (unsigned long long)timestamp);
-    if (slices.length() > 1 || ss.isJSON())
-        ss.appendDecimal("Max Pause", "ms", t(longest));
-    else
-        ss.appendString("Reason", ExplainReason(slices[0].reason));
-    ss.appendDecimal("Total Time", "ms", t(total));
-    ss.appendNumber("Zones Collected", "%d", "", zoneStats.collectedZoneCount);
-    ss.appendNumber("Total Zones", "%d", "", zoneStats.zoneCount);
-    ss.appendNumber("Total Compartments", "%d", "", zoneStats.compartmentCount);
-    ss.appendNumber("Minor GCs", "%d", "", counts[STAT_MINOR_GC]);
-    ss.appendNumber("Store Buffer Overflows", "%d", "", counts[STAT_STOREBUFFER_OVERFLOW]);
-    ss.appendNumber("MMU (20ms)", "%d", "%", int(mmu20 * 100));
-    ss.appendNumber("MMU (50ms)", "%d", "%", int(mmu50 * 100));
-    ss.appendDecimal("SCC Sweep Total", "ms", t(sccTotal));
-    ss.appendDecimal("SCC Sweep Max Pause", "ms", t(sccLongest));
-    if (nonincrementalReason_ || ss.isJSON()) {
-        ss.appendString("Nonincremental Reason",
-                        nonincrementalReason_ ? nonincrementalReason_ : "none");
-    }
-    ss.appendNumber("Allocated", "%u", "MB", unsigned(preBytes / 1024 / 1024));
-    ss.appendNumber("+Chunks", "%d", "", counts[STAT_NEW_CHUNK]);
-    ss.appendNumber("-Chunks", "%d", "", counts[STAT_DESTROY_CHUNK]);
-    ss.endLine();
-
-    if (slices.length() > 1 || ss.isJSON()) {
-        ss.beginArray("Slices");
-        for (size_t i = 0; i < slices.length(); i++) {
-            int64_t width = slices[i].duration();
-            if (i != 0 && i != slices.length() - 1 && width < SLICE_MIN_REPORT_TIME &&
-                !slices[i].resetReason && !ss.isJSON())
-            {
-                continue;
-            }
-
-            char budgetDescription[200];
-            slices[i].budget.describe(budgetDescription, sizeof(budgetDescription) - 1);
-
-            ss.beginObject(nullptr);
-            ss.extra("    ");
-            ss.appendNumber("Slice", "%d", "", i);
-            ss.appendDecimal("Pause", "", t(width));
-            ss.extra(" (");
-            ss.appendDecimal("When", "ms", t(slices[i].start - slices[0].start));
-            ss.appendString("Reason", ExplainReason(slices[i].reason));
-            ss.appendString("Budget", budgetDescription);
-            if (ss.isJSON()) {
-                ss.appendDecimal("Page Faults", "",
-                                 double(slices[i].endFaults - slices[i].startFaults));
-
-                ss.appendNumber("Start Timestamp", "%llu", "", (unsigned long long)slices[i].start);
-                ss.appendNumber("End Timestamp", "%llu", "", (unsigned long long)slices[i].end);
-            }
-            if (slices[i].resetReason)
-                ss.appendString("Reset", slices[i].resetReason);
-            ss.extra("): ");
-            FormatPhaseTimes(ss, "Times", slices[i].phaseTimes);
-            ss.endLine();
-            ss.endObject();
-        }
-        ss.endArray();
-    }
-    ss.extra("    Totals: ");
-    FormatPhaseTimes(ss, "Totals", phaseTimes);
-    ss.endObject();
-
-    return !ss.isOOM();
-}
-
 typedef Vector<UniqueChars, 8, SystemAllocPolicy> FragmentVector;
 
 static UniqueChars
-Join(const FragmentVector& fragments) {
+Join(const FragmentVector& fragments, const char* separator = "") {
+    const size_t separatorLength = strlen(separator);
     size_t length = 0;
-    for (size_t i = 0; i < fragments.length(); ++i)
+    for (size_t i = 0; i < fragments.length(); ++i) {
         length += fragments[i] ? strlen(fragments[i].get()) : 0;
+        if (i < (fragments.length() - 1))
+            length += separatorLength;
+    }
 
     char* joined = js_pod_malloc<char>(length + 1);
     joined[length] = '\0';
@@ -580,6 +282,11 @@ Join(const FragmentVector& fragments) {
         if (fragments[i])
             strcpy(cursor, fragments[i].get());
         cursor += fragments[i] ? strlen(fragments[i].get()) : 0;
+        if (i < (fragments.length() - 1)) {
+            if (separatorLength)
+                strcpy(cursor, separator);
+            cursor += separatorLength;
+        }
     }
 
     return UniqueChars(joined);
@@ -606,6 +313,119 @@ SumChildTimes(size_t phaseSlot, Phase phase, Statistics::PhaseTimeTable phaseTim
         }
     }
     return total;
+}
+
+UniqueChars
+Statistics::formatCompactSliceMessage() const
+{
+    // Skip if we OOM'ed.
+    if (slices.length() == 0)
+        return UniqueChars(nullptr);
+
+    const size_t index = slices.length() - 1;
+    const SliceData& slice = slices[index];
+
+    char budgetDescription[200];
+    slice.budget.describe(budgetDescription, sizeof(budgetDescription) - 1);
+
+    const char* format =
+        "GC Slice %u - Pause: %.3fms of %s budget (@ %.3fms); Reason: %s; Reset: %s%s; Times: ";
+    char buffer[1024];
+    memset(buffer, 0, sizeof(buffer));
+    JS_snprintf(buffer, sizeof(buffer), format, index,
+                t(slice.duration()), budgetDescription, t(slice.start - slices[0].start),
+                ExplainReason(slice.reason),
+                slice.resetReason ? "yes - " : "no", slice.resetReason ? slice.resetReason : "");
+
+    FragmentVector fragments;
+    if (!fragments.append(make_string_copy(buffer)) ||
+        !fragments.append(formatCompactSlicePhaseTimes(slices[index].phaseTimes)))
+    {
+        return UniqueChars(nullptr);
+    }
+    return Join(fragments);
+}
+
+UniqueChars
+Statistics::formatCompactSummaryMessage() const
+{
+    const double bytesPerMiB = 1024 * 1024;
+
+    FragmentVector fragments;
+    if (!fragments.append(make_string_copy("Summary - ")))
+        return UniqueChars(nullptr);
+
+    int64_t total, longest;
+    gcDuration(&total, &longest);
+
+    const double mmu20 = computeMMU(20 * PRMJ_USEC_PER_MSEC);
+    const double mmu50 = computeMMU(50 * PRMJ_USEC_PER_MSEC);
+
+    char buffer[1024];
+    if (!nonincrementalReason_) {
+        JS_snprintf(buffer, sizeof(buffer),
+                    "Max Pause: %.3fms; MMU 20ms: %.1f%%; MMU 50ms: %.1f%%; Total: %.3fms; ",
+                    t(longest), mmu20 * 100., mmu50 * 100., t(total));
+    } else {
+        JS_snprintf(buffer, sizeof(buffer), "Non-Incremental: %.3fms; ", t(total));
+    }
+    if (!fragments.append(make_string_copy(buffer)))
+        return UniqueChars(nullptr);
+
+    JS_snprintf(buffer, sizeof(buffer),
+                "Zones: %d of %d; Compartments: %d of %d; HeapSize: %.3f MiB; "\
+                "HeapChange (abs): %+d (%d); ",
+                zoneStats.collectedZoneCount, zoneStats.zoneCount,
+                zoneStats.collectedCompartmentCount, zoneStats.compartmentCount,
+                double(preBytes) / bytesPerMiB,
+                counts[STAT_NEW_CHUNK] - counts[STAT_DESTROY_CHUNK],
+                counts[STAT_NEW_CHUNK] + counts[STAT_DESTROY_CHUNK]);
+    if (!fragments.append(make_string_copy(buffer)))
+        return UniqueChars(nullptr);
+
+    MOZ_ASSERT_IF(counts[STAT_ARENA_RELOCATED], gckind == GC_SHRINK);
+    if (gckind == GC_SHRINK) {
+        JS_snprintf(buffer, sizeof(buffer),
+                    "Kind: %s; Relocated: %.3f MiB; ",
+                    ExplainInvocationKind(gckind),
+                    double(ArenaSize * counts[STAT_ARENA_RELOCATED]) / bytesPerMiB);
+        if (!fragments.append(make_string_copy(buffer)))
+            return UniqueChars(nullptr);
+    }
+
+    return Join(fragments);
+}
+
+UniqueChars
+Statistics::formatCompactSlicePhaseTimes(PhaseTimeTable phaseTimes) const
+{
+    static const int64_t MaxUnaccountedTimeUS = 100;
+
+    FragmentVector fragments;
+    char buffer[128];
+    for (AllPhaseIterator iter(phaseTimes); !iter.done(); iter.advance()) {
+        Phase phase;
+        size_t dagSlot;
+        size_t level;
+        iter.get(&phase, &dagSlot, &level);
+        MOZ_ASSERT(level < 4);
+
+        int64_t ownTime = phaseTimes[dagSlot][phase];
+        int64_t childTime = SumChildTimes(dagSlot, phase, phaseTimes);
+        if (ownTime > MaxUnaccountedTimeUS) {
+            JS_snprintf(buffer, sizeof(buffer), "%s: %.3fms", phases[phase].name, t(ownTime));
+            if (!fragments.append(make_string_copy(buffer)))
+                return UniqueChars(nullptr);
+
+            if (childTime && (ownTime - childTime) > MaxUnaccountedTimeUS) {
+                MOZ_ASSERT(level < 3);
+                JS_snprintf(buffer, sizeof(buffer), "%s: %.3fms", "Other", t(ownTime - childTime));
+                if (!fragments.append(make_string_copy(buffer)))
+                    return UniqueChars(nullptr);
+            }
+        }
+    }
+    return Join(fragments, ", ");
 }
 
 UniqueChars
@@ -755,20 +575,159 @@ Statistics::formatDetailedTotals()
     return make_string_copy(buffer);
 }
 
-char16_t*
-Statistics::formatMessage()
+UniqueChars
+Statistics::formatJsonMessage(uint64_t timestamp)
 {
-    StatisticsSerializer ss(StatisticsSerializer::AsText);
-    formatData(ss, 0);
-    return ss.finishJSString();
+    MOZ_ASSERT(!aborted);
+
+    FragmentVector fragments;
+
+    if (!fragments.append(make_string_copy("{")) ||
+        !fragments.append(formatJsonDescription(timestamp)) ||
+        !fragments.append(make_string_copy("\"slices\":[")))
+    {
+        return UniqueChars(nullptr);
+    }
+
+    for (unsigned i = 0; i < slices.length(); i++) {
+        if (!fragments.append(make_string_copy("{")) ||
+            !fragments.append(formatJsonSliceDescription(i, slices[i])) ||
+            !fragments.append(make_string_copy("\"times\":{")) ||
+            !fragments.append(formatJsonPhaseTimes(slices[i].phaseTimes)) ||
+            !fragments.append(make_string_copy("}}")) ||
+            (i < (slices.length() - 1) && !fragments.append(make_string_copy(","))))
+        {
+            return UniqueChars(nullptr);
+        }
+    }
+
+    if (!fragments.append(make_string_copy("],\"totals\":{")) ||
+        !fragments.append(formatJsonPhaseTimes(phaseTimes)) ||
+        !fragments.append(make_string_copy("}}")))
+    {
+        return UniqueChars(nullptr);
+    }
+
+    return Join(fragments);
 }
 
-char16_t*
-Statistics::formatJSON(uint64_t timestamp)
+UniqueChars
+Statistics::formatJsonDescription(uint64_t timestamp)
 {
-    StatisticsSerializer ss(StatisticsSerializer::AsJSON);
-    formatData(ss, timestamp);
-    return ss.finishJSString();
+    int64_t total, longest;
+    gcDuration(&total, &longest);
+
+    int64_t sccTotal, sccLongest;
+    sccDurations(&sccTotal, &sccLongest);
+
+    double mmu20 = computeMMU(20 * PRMJ_USEC_PER_MSEC);
+    double mmu50 = computeMMU(50 * PRMJ_USEC_PER_MSEC);
+
+    const char *format =
+        "\"timestamp\":%llu,"
+        "\"max_pause\":%llu.%03llu,"
+        "\"total_time\":%llu.%03llu,"
+        "\"zones_collected\":%d,"
+        "\"total_zones\":%d,"
+        "\"total_compartments\":%d,"
+        "\"minor_gcs\":%d,"
+        "\"store_buffer_overflows\":%d,"
+        "\"mmu_20ms\":%d,"
+        "\"mmu_50ms\":%d,"
+        "\"scc_sweep_total\":%llu.%03llu,"
+        "\"scc_sweep_max_pause\":%llu.%03llu,"
+        "\"nonincremental_reason\":\"%s\","
+        "\"allocated\":%u,"
+        "\"added_chunks\":%d,"
+        "\"removed_chunks\":%d,";
+    char buffer[1024];
+    memset(buffer, 0, sizeof(buffer));
+    JS_snprintf(buffer, sizeof(buffer), format,
+                (unsigned long long)timestamp,
+                longest / 1000, longest % 1000,
+                total / 1000, total % 1000,
+                zoneStats.collectedZoneCount,
+                zoneStats.zoneCount,
+                zoneStats.compartmentCount,
+                counts[STAT_MINOR_GC],
+                counts[STAT_STOREBUFFER_OVERFLOW],
+                int(mmu20 * 100),
+                int(mmu50 * 100),
+                sccTotal / 1000, sccTotal % 1000,
+                sccLongest / 1000, sccLongest % 1000,
+                nonincrementalReason_ ? nonincrementalReason_ : "none",
+                unsigned(preBytes / 1024 / 1024),
+                counts[STAT_NEW_CHUNK],
+                counts[STAT_DESTROY_CHUNK]);
+    return make_string_copy(buffer);
+}
+
+UniqueChars
+Statistics::formatJsonSliceDescription(unsigned i, const SliceData& slice)
+{
+    int64_t duration = slices[i].duration();
+    int64_t when = slices[i].start - slices[0].start;
+    char budgetDescription[200];
+    slice.budget.describe(budgetDescription, sizeof(budgetDescription) - 1);
+    int64_t pageFaults = slices[i].endFaults - slices[i].startFaults;
+
+    const char* format =
+        "\"slice\":%d,"
+        "\"pause\":%llu.%03llu,"
+        "\"when\":%llu.%03llu,"
+        "\"reason\":\"%s\","
+        "\"budget\":\"%s\","
+        "\"page_faults\":%llu,"
+        "\"start_timestamp\":%llu,"
+        "\"end_timestamp\":%llu,";
+    char buffer[1024];
+    memset(buffer, 0, sizeof(buffer));
+    JS_snprintf(buffer, sizeof(buffer), format,
+                i,
+                duration / 1000, duration % 1000,
+                when / 1000, when % 1000,
+                ExplainReason(slices[i].reason),
+                budgetDescription,
+                pageFaults,
+                slices[i].start,
+                slices[i].end);
+    return make_string_copy(buffer);
+}
+
+UniqueChars
+FilterJsonKey(const char*const buffer)
+{
+    char* mut = strdup(buffer);
+    char* c = mut;
+    while (*c) {
+        if (!isalpha(*c))
+            *c = '_';
+        else if (isupper(*c))
+            *c = tolower(*c);
+        ++c;
+    }
+    return UniqueChars(mut);
+}
+
+UniqueChars
+Statistics::formatJsonPhaseTimes(PhaseTimeTable phaseTimes)
+{
+    FragmentVector fragments;
+    char buffer[128];
+    for (AllPhaseIterator iter(phaseTimes); !iter.done(); iter.advance()) {
+        Phase phase;
+        size_t dagSlot;
+        iter.get(&phase, &dagSlot);
+
+        UniqueChars name = FilterJsonKey(phases[phase].name);
+        int64_t ownTime = phaseTimes[dagSlot][phase];
+        JS_snprintf(buffer, sizeof(buffer), "\"%s\":%llu.%03llu",
+                    name.get(), ownTime / 1000, ownTime % 1000);
+
+        if (!fragments.append(make_string_copy(buffer)))
+            return UniqueChars(nullptr);
+    }
+    return Join(fragments, ",");
 }
 
 Statistics::Statistics(JSRuntime* rt)
@@ -856,18 +815,8 @@ Statistics::Statistics(JSRuntime* rt)
 
 Statistics::~Statistics()
 {
-    if (fp) {
-        StatisticsSerializer ss(StatisticsSerializer::AsText);
-        FormatPhaseTimes(ss, "", phaseTotals);
-        char* msg = ss.finishCString();
-        if (msg) {
-            fprintf(fp, "TOTALS\n%s\n\n-------\n", msg);
-            js_free(msg);
-        }
-
-        if (fp != stdout && fp != stderr)
-            fclose(fp);
-    }
+    if (fp && fp != stdout && fp != stderr)
+        fclose(fp);
 }
 
 JS::GCSliceCallback
@@ -1158,7 +1107,7 @@ Statistics::endSCC(unsigned scc, int64_t start)
  * as long as the total time it spends is at most 10ms.
  */
 double
-Statistics::computeMMU(int64_t window)
+Statistics::computeMMU(int64_t window) const
 {
     MOZ_ASSERT(!slices.empty());
 

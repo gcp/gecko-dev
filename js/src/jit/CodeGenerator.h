@@ -108,6 +108,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitLambdaForSingleton(LLambdaForSingleton* lir);
     void visitPointer(LPointer* lir);
     void visitNurseryObject(LNurseryObject* lir);
+    void visitKeepAliveObject(LKeepAliveObject* lir);
     void visitSlots(LSlots* lir);
     void visitLoadSlotT(LLoadSlotT* lir);
     void visitLoadSlotV(LLoadSlotV* lir);
@@ -214,7 +215,6 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitHypot(LHypot* lir);
     void visitPowI(LPowI* lir);
     void visitPowD(LPowD* lir);
-    void visitRandom(LRandom* lir);
     void visitMathFunctionD(LMathFunctionD* ins);
     void visitMathFunctionF(LMathFunctionF* ins);
     void visitModD(LModD* ins);
@@ -264,6 +264,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitArrayPushV(LArrayPushV* lir);
     void visitArrayPushT(LArrayPushT* lir);
     void visitArrayConcat(LArrayConcat* lir);
+    void visitArraySlice(LArraySlice* lir);
     void visitArrayJoin(LArrayJoin* lir);
     void visitLoadUnboxedScalar(LLoadUnboxedScalar* lir);
     void visitLoadTypedArrayElementHole(LLoadTypedArrayElementHole* lir);

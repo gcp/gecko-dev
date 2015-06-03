@@ -118,7 +118,13 @@ class UpvarCookie
     F(WITH) \
     F(RETURN) \
     F(NEW) \
-    F(DELETE) \
+    /* Delete operations.  These must be sequential. */ \
+    F(DELETENAME) \
+    F(DELETEPROP) \
+    F(DELETESUPERPROP) \
+    F(DELETEELEM) \
+    F(DELETESUPERELEM) \
+    F(DELETEEXPR) \
     F(TRY) \
     F(CATCH) \
     F(CATCHLIST) \
@@ -138,10 +144,10 @@ class UpvarCookie
     F(IMPORT_SPEC) \
     F(EXPORT) \
     F(EXPORT_FROM) \
+    F(EXPORT_DEFAULT) \
     F(EXPORT_SPEC_LIST) \
     F(EXPORT_SPEC) \
     F(EXPORT_BATCH_SPEC) \
-    F(SEQ) \
     F(FORIN) \
     F(FOROF) \
     F(FORHEAD) \
@@ -157,7 +163,8 @@ class UpvarCookie
     F(SUPERELEM) \
     \
     /* Unary operators. */ \
-    F(TYPEOF) \
+    F(TYPEOFNAME) \
+    F(TYPEOFEXPR) \
     F(VOID) \
     F(NOT) \
     F(BITNOT) \
@@ -227,6 +234,12 @@ enum ParseNodeKind
     PNK_ASSIGNMENT_LAST = PNK_MODASSIGN
 };
 
+inline bool
+IsDeleteKind(ParseNodeKind kind)
+{
+    return PNK_DELETENAME <= kind && kind <= PNK_DELETEEXPR;
+}
+
 /*
  * Label        Variant     Members
  * -----        -------     -------
@@ -240,12 +253,21 @@ enum ParseNodeKind
  *                          pn_cookie: static level and var index for function
  *                          pn_dflags: PND_* definition/use flags (see below)
  *                          pn_blockid: block id number
- * PNK_ARGSBODY list        list of formal parameters followed by:
+ * PNK_ARGSBODY list        list of formal parameters with
+ *                              PNK_NAME node with non-empty name for
+ *                                SingleNameBinding without Initializer
+ *                              PNK_ASSIGN node for SingleNameBinding with
+ *                                Initializer
+ *                              PNK_NAME node with empty name for destructuring
+ *                                pn_expr: PNK_ARRAY, PNK_OBJECT, or PNK_ASSIGN
+ *                                  PNK_ARRAY or PNK_OBJECT for BindingPattern
+ *                                    without Initializer
+ *                                  PNK_ASSIGN for BindingPattern with
+ *                                    Initializer
+ *                          followed by:
  *                              PNK_STATEMENTLIST node for function body
  *                                statements,
- *                              PNK_RETURN for expression closure, or
- *                              PNK_SEQ for expression closure with
- *                                destructured formal parameters
+ *                              PNK_RETURN for expression closure
  *                          pn_count: 1 + number of formal parameters
  *                          pn_tree: PNK_ARGSBODY or PNK_STATEMENTLIST node
  * PNK_SPREAD   unary       pn_kid: expression being spread
@@ -324,6 +346,12 @@ enum ParseNodeKind
  *                              in original source, not introduced via
  *                              constant folding or other tree rewriting
  * PNK_LABEL    name        pn_atom: label, pn_expr: labeled statement
+ * PNK_IMPORT   binary      pn_left: PNK_IMPORT_SPEC_LIST import specifiers
+ *                          pn_right: PNK_STRING module specifier
+ * PNK_EXPORT   unary       pn_kid: declaration expression
+ * PNK_EXPORT_FROM binary   pn_left: PNK_EXPORT_SPEC_LIST export specifiers
+ *                          pn_right: PNK_STRING module specifier
+ * PNK_EXPORT_DEFAULT unary pn_kid: export default declaration or expression
  *
  * <Expressions>
  * All left-associated binary trees of the same type are optimized into lists
@@ -367,10 +395,11 @@ enum ParseNodeKind
  * PNK_MOD
  * PNK_POS,     unary       pn_kid: UNARY expr
  * PNK_NEG
- * PNK_TYPEOF,  unary       pn_kid: UNARY expr
- * PNK_VOID,
+ * PNK_VOID,    unary       pn_kid: UNARY expr
  * PNK_NOT,
  * PNK_BITNOT
+ * PNK_TYPEOFNAME, unary    pn_kid: UNARY expr
+ * PNK_TYPEOFEXPR
  * PNK_PREINCREMENT, unary  pn_kid: MEMBER expr
  * PNK_POSTINCREMENT,
  * PNK_PREDECREMENT,
@@ -378,7 +407,16 @@ enum ParseNodeKind
  * PNK_NEW      list        pn_head: list of ctor, arg1, arg2, ... argN
  *                          pn_count: 1 + N (where N is number of args)
  *                          ctor is a MEMBER expr
- * PNK_DELETE   unary       pn_kid: MEMBER expr
+ * PNK_DELETENAME unary     pn_kid: PNK_NAME expr
+ * PNK_DELETEPROP unary     pn_kid: PNK_DOT expr
+ * PNK_DELETESUPERPROP unary pn_kid: PNK_SUPERPROP expr
+ * PNK_DELETEELEM unary     pn_kid: PNK_ELEM expr
+ * PNK_DELETESUPERELEM unary pn_kid: PNK_SUPERELEM expr
+ * PNK_DELETEEXPR unary     pn_kid: MEMBER expr that's evaluated, then the
+ *                          overall delete evaluates to true; can't be a kind
+ *                          for a more-specific PNK_DELETE* unless constant
+ *                          folding (or a similar parse tree manipulation) has
+ *                          occurred
  * PNK_DOT      name        pn_expr: MEMBER expr to left of .
  *                          pn_atom: name to right of .
  * PNK_ELEM     binary      pn_left: MEMBER expr to left of [
@@ -689,7 +727,7 @@ class ParseNode
                                            still valid, but this use no longer
                                            optimizable via an upvar opcode */
 #define PND_CLOSED              0x40    /* variable is closed over */
-#define PND_DEFAULT             0x80    /* definition is an arg with a default */
+// 0x80 is available
 #define PND_IMPLICITARGUMENTS  0x100    /* the definition is a placeholder for
                                            'arguments' that has been converted
                                            into a definition after the function
@@ -706,8 +744,7 @@ class ParseNode
                                            needs popping */
 #define PNX_FUNCDEFS    0x02            /* contains top-level function statements */
 #define PNX_SETCALL     0x04            /* call expression in lvalue context */
-#define PNX_DESTRUCT    0x08            /* code evaluating destructuring
-                                           arguments occurs before function body */
+/* 0x08 is available */
 #define PNX_ARRAYHOLESPREAD 0x10        /* one or more of
                                            1. array initialiser has holes
                                            2. array initializer has spread node */

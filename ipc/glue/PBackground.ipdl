@@ -10,9 +10,10 @@ include protocol PCache;
 include protocol PCacheStorage;
 include protocol PCacheStreamControl;
 include protocol PFileDescriptorSet;
-include protocol PVsync;
 include protocol PCameras;
 include protocol PMedia;
+include protocol PUDPSocket;
+include protocol PVsync;
 
 include DOMTypes;
 include PBackgroundSharedTypes;
@@ -35,9 +36,10 @@ sync protocol PBackground
   manages PCacheStorage;
   manages PCacheStreamControl;
   manages PFileDescriptorSet;
-  manages PVsync;
   manages PCameras;
   manages PMedia;
+  manages PUDPSocket;
+  manages PVsync;
 
 parent:
   // Only called at startup during mochitests to check the basic infrastructure.
@@ -50,6 +52,7 @@ parent:
 
   PCameras();
 
+  PUDPSocket(OptionalPrincipalInfo pInfo, nsCString filter);
   PBroadcastChannel(PrincipalInfo pInfo, nsString origin, nsString channel,
                     bool privateBrowsing);
 

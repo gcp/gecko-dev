@@ -39,13 +39,6 @@ namespace js {
 
 unsigned GetCPUCount();
 
-enum HeapState {
-    Idle,             // doing nothing with the GC heap
-    Tracing,          // tracing the GC heap without collecting, e.g. IterateCompartments()
-    MajorCollecting,  // doing a GC of the major heap
-    MinorCollecting   // doing a GC of the minor heap (nursery)
-};
-
 enum ThreadType
 {
     MainThread,
@@ -1408,7 +1401,7 @@ class AutoEnterOOMUnsafeRegion
 
   public:
     AutoEnterOOMUnsafeRegion()
-      : oomEnabled_(OOM_maxAllocations != UINT32_MAX)
+      : oomEnabled_(OOM_maxAllocations != UINT32_MAX), oomAfter_(0)
     {
         if (oomEnabled_) {
             oomAfter_ = OOM_maxAllocations - OOM_counter;

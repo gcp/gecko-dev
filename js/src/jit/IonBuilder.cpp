@@ -29,7 +29,9 @@
 
 #include "jit/CompileInfo-inl.h"
 #include "vm/NativeObject-inl.h"
+#include "vm/ObjectGroup-inl.h"
 #include "vm/ScopeObject-inl.h"
+#include "vm/UnboxedObject-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -6617,7 +6619,7 @@ IonBuilder::jsop_initelem_array()
 
     if (unboxedType != JSVAL_TYPE_MAGIC) {
         // Note: storeUnboxedValue takes care of any post barriers on the value.
-        storeUnboxedValue(obj, elements, 0, id, unboxedType, value);
+        storeUnboxedValue(obj, elements, 0, id, unboxedType, value, /* preBarrier = */ false);
 
         MInstruction* increment = MIncrementUnboxedArrayInitializedLength::New(alloc(), obj);
         current->add(increment);
@@ -7099,6 +7101,7 @@ static bool
 ClassHasEffectlessLookup(const Class* clasp)
 {
     return (clasp == &UnboxedPlainObject::class_) ||
+           (clasp == &UnboxedArrayObject::class_) ||
            IsTypedObjectClass(clasp) ||
            (clasp->isNative() && !clasp->ops.lookupProperty);
 }
@@ -7191,27 +7194,26 @@ IonBuilder::testSingletonProperty(JSObject* obj, PropertyName* name)
     return nullptr;
 }
 
-bool
-IonBuilder::testSingletonPropertyTypes(MDefinition* obj, JSObject* singleton, PropertyName* name,
-                                       bool* testObject, bool* testString)
+JSObject*
+IonBuilder::testSingletonPropertyTypes(MDefinition* obj, PropertyName* name)
 {
     // As for TestSingletonProperty, but the input is any value in a type set
-    // rather than a specific object. If testObject is set then the constant
-    // result can only be used after ensuring the input is an object.
-
-    *testObject = false;
-    *testString = false;
+    // rather than a specific object.
 
     TemporaryTypeSet* types = obj->resultTypeSet();
     if (types && types->unknownObject())
-        return false;
+        return nullptr;
 
     JSObject* objectSingleton = types ? types->maybeSingleton() : nullptr;
     if (objectSingleton)
-        return testSingletonProperty(objectSingleton, name) == singleton;
+        return testSingletonProperty(objectSingleton, name);
+
+    MIRType objType = obj->type();
+    if (objType == MIRType_Value && types)
+        objType = types->getKnownMIRType();
 
     JSProtoKey key;
-    switch (obj->type()) {
+    switch (objType) {
       case MIRType_String:
         key = JSProto_String;
         break;
@@ -7229,23 +7231,14 @@ IonBuilder::testSingletonPropertyTypes(MDefinition* obj, JSObject* singleton, Pr
         key = JSProto_Boolean;
         break;
 
-      case MIRType_Object:
-      case MIRType_Value: {
+      case MIRType_Object: {
         if (!types)
-            return false;
-
-        if (types->hasType(TypeSet::StringType())) {
-            key = JSProto_String;
-            *testString = true;
-            break;
-        }
-
-        if (!types->maybeObject())
-            return false;
+            return nullptr;
 
         // For property accesses which may be on many objects, we just need to
         // find a prototype common to all the objects; if that prototype
         // has the singleton property, the access will not be on a missing property.
+        JSObject* singleton = nullptr;
         for (unsigned i = 0; i < types->getObjectCount(); i++) {
             TypeSet::ObjectKey* key = types->getObject(i);
             if (!key)
@@ -7255,35 +7248,40 @@ IonBuilder::testSingletonPropertyTypes(MDefinition* obj, JSObject* singleton, Pr
 
             const Class* clasp = key->clasp();
             if (!ClassHasEffectlessLookup(clasp) || ObjectHasExtraOwnProperty(compartment, key, name))
-                return false;
+                return nullptr;
             if (key->unknownProperties())
-                return false;
+                return nullptr;
             HeapTypeSetKey property = key->property(NameToId(name));
             if (property.isOwnProperty(constraints()))
-                return false;
+                return nullptr;
 
             if (JSObject* proto = key->proto().toObjectOrNull()) {
                 // Test this type.
-                if (testSingletonProperty(proto, name) != singleton)
-                    return false;
+                JSObject* thisSingleton = testSingletonProperty(proto, name);
+                if (!thisSingleton)
+                    return nullptr;
+                if (singleton) {
+                    if (thisSingleton != singleton)
+                        return nullptr;
+                } else {
+                    singleton = thisSingleton;
+                }
             } else {
                 // Can't be on the prototype chain with no prototypes...
-                return false;
+                return nullptr;
             }
         }
-        // If this is not a known object, a test will be needed.
-        *testObject = (obj->type() != MIRType_Object);
-        return true;
+        return singleton;
       }
       default:
-        return false;
+        return nullptr;
     }
 
     JSObject* proto = GetBuiltinPrototypePure(&script()->global(), key);
     if (proto)
-        return testSingletonProperty(proto, name) == singleton;
+        return testSingletonProperty(proto, name);
 
-    return false;
+    return nullptr;
 }
 
 bool
@@ -7727,6 +7725,8 @@ IonBuilder::jsop_getelem()
         TemporaryTypeSet* types = bytecodeTypes(pc);
         return pushTypeBarrier(ins, types, BarrierKind::TypeSet);
     }
+
+    obj = maybeUnboxForPropertyAccess(obj);
 
     bool emitted = false;
 
@@ -9107,7 +9107,9 @@ IonBuilder::setElemTryCache(bool* emitted, MDefinition* object,
     bool guardHoles = ElementAccessHasExtraIndexedProperty(constraints(), object);
 
     // Make sure the object being written to doesn't have copy on write elements.
-    object = addMaybeCopyElementsForWrite(object);
+    const Class* clasp = object->resultTypeSet() ? object->resultTypeSet()->getKnownClass(constraints()) : nullptr;
+    bool checkNative = !clasp || !clasp->isNative();
+    object = addMaybeCopyElementsForWrite(object, checkNative);
 
     if (NeedsPostBarrier(info(), value))
         current->add(MPostWriteBarrier::New(alloc(), object, value));
@@ -9150,7 +9152,7 @@ IonBuilder::jsop_setelem_dense(TemporaryTypeSet::DoubleConversion conversion,
     id = idInt32;
 
     // Copy the elements vector if necessary.
-    obj = addMaybeCopyElementsForWrite(obj);
+    obj = addMaybeCopyElementsForWrite(obj, /* checkNative = */ false);
 
     // Get the elements vector.
     MElements* elements = MElements::New(alloc(), obj, unboxedType != JSVAL_TYPE_MAGIC);
@@ -10004,6 +10006,21 @@ IonBuilder::shouldAbortOnPreliminaryGroups(MDefinition *obj)
     return preliminary;
 }
 
+MDefinition*
+IonBuilder::maybeUnboxForPropertyAccess(MDefinition* def)
+{
+    if (def->type() != MIRType_Value)
+        return def;
+
+    MIRType type = inspector->expectedPropertyAccessInputType(pc);
+    if (type == MIRType_Value || !def->mightBeType(type))
+        return def;
+
+    MUnbox* unbox = MUnbox::New(alloc(), def, type, MUnbox::Fallible);
+    current->add(unbox);
+    return unbox;
+}
+
 bool
 IonBuilder::jsop_getprop(PropertyName* name)
 {
@@ -10028,6 +10045,8 @@ IonBuilder::jsop_getprop(PropertyName* name)
         if (!getPropTryArgumentsCallee(&emitted, obj, name) || emitted)
             return emitted;
     }
+
+    obj = maybeUnboxForPropertyAccess(obj);
 
     BarrierKind barrier = PropertyReadNeedsTypeBarrier(analysisContext, constraints(),
                                                        obj, name, types);
@@ -10296,24 +10315,19 @@ IonBuilder::getPropTryConstant(bool* emitted, MDefinition* obj, PropertyName* na
 {
     MOZ_ASSERT(*emitted == false);
 
-    JSObject* singleton = types ? types->maybeSingleton() : nullptr;
-    if (!singleton) {
-        trackOptimizationOutcome(TrackedOutcome::NotSingleton);
+    if (!types->mightBeMIRType(MIRType_Object)) {
+        // If we have not observed an object result here, don't look for a
+        // singleton constant.
+        trackOptimizationOutcome(TrackedOutcome::NotObject);
         return true;
     }
 
-    bool testObject, testString;
-    if (!testSingletonPropertyTypes(obj, singleton, name, &testObject, &testString))
+    JSObject* singleton = testSingletonPropertyTypes(obj, name);
+    if (!singleton)
         return true;
 
     // Property access is a known constant -- safe to emit.
-    MOZ_ASSERT(!testString || !testObject);
-    if (testObject)
-        current->add(MGuardObject::New(alloc(), obj));
-    else if (testString)
-        current->add(MGuardString::New(alloc(), obj));
-    else
-        obj->setImplicitlyUsedUnchecked();
+    obj->setImplicitlyUsedUnchecked();
 
     pushConstant(ObjectValue(*singleton));
 
@@ -11501,7 +11515,7 @@ IonBuilder::storeUnboxedProperty(MDefinition* obj, size_t offset, JSValueType un
 MInstruction*
 IonBuilder::storeUnboxedValue(MDefinition* obj, MDefinition* elements, int32_t elementsOffset,
                               MDefinition* scaledOffset, JSValueType unboxedType,
-                              MDefinition* value)
+                              MDefinition* value, bool preBarrier /* = true */)
 {
     MInstruction* store;
     switch (unboxedType) {
@@ -11521,12 +11535,13 @@ IonBuilder::storeUnboxedValue(MDefinition* obj, MDefinition* elements, int32_t e
         break;
 
       case JSVAL_TYPE_STRING:
-        store = MStoreUnboxedString::New(alloc(), elements, scaledOffset, value, elementsOffset);
+        store = MStoreUnboxedString::New(alloc(), elements, scaledOffset, value,
+                                         elementsOffset, preBarrier);
         break;
 
       case JSVAL_TYPE_OBJECT:
         store = MStoreUnboxedObjectOrNull::New(alloc(), elements, scaledOffset, value, obj,
-                                               elementsOffset);
+                                               elementsOffset, preBarrier);
         break;
 
       default:
@@ -12531,11 +12546,11 @@ IonBuilder::addConvertElementsToDoubles(MDefinition* elements)
 }
 
 MDefinition*
-IonBuilder::addMaybeCopyElementsForWrite(MDefinition* object)
+IonBuilder::addMaybeCopyElementsForWrite(MDefinition* object, bool checkNative)
 {
     if (!ElementAccessMightBeCopyOnWrite(constraints(), object))
         return object;
-    MInstruction* copy = MMaybeCopyElementsForWrite::New(alloc(), object);
+    MInstruction* copy = MMaybeCopyElementsForWrite::New(alloc(), object, checkNative);
     current->add(copy);
     return copy;
 }

@@ -303,11 +303,9 @@ js::IsAtomsCompartment(JSCompartment* comp)
 }
 
 JS_FRIEND_API(bool)
-js::IsInNonStrictPropertySet(JSContext* cx)
+js::IsAtomsZone(JS::Zone* zone)
 {
-    jsbytecode* pc;
-    JSScript* script = cx->currentScript(&pc, JSContext::ALLOW_CROSS_COMPARTMENT);
-    return script && !IsStrictSetPC(pc) && (js_CodeSpec[*pc].format & JOF_SET);
+    return zone->runtimeFromAnyThread()->isAtomsZone(zone);
 }
 
 JS_FRIEND_API(bool)
@@ -779,7 +777,7 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
                                         name ? name :"",
                                         name ? " = " : "",
                                         arg.isString() ? "\"" : "",
-                                        value ? value : "?unknown?",
+                                        value,
                                         arg.isString() ? "\"" : "");
                 if (!buf)
                     return buf;
@@ -888,27 +886,21 @@ JS::FormatStackDump(JSContext* cx, char* buf, bool showArgs, bool showLocals, bo
 
 struct DumpHeapTracer : public JS::CallbackTracer, public WeakMapTracer
 {
-    FILE*  output;
+    const char* prefix;
+    FILE* output;
 
     DumpHeapTracer(FILE* fp, JSRuntime* rt, JSTraceCallback callback)
       : JS::CallbackTracer(rt, callback, DoNotTraceWeakMaps),
-        js::WeakMapTracer(rt, DumpWeakMap), output(fp)
+        js::WeakMapTracer(rt), prefix(""), output(fp)
     {}
 
-private:
-    static void
-    DumpWeakMap(js::WeakMapTracer* trc, JSObject* map,
-                JS::GCCellPtr key, JS::GCCellPtr value)
-    {
-        DumpHeapTracer* tracer =
-            static_cast<DumpHeapTracer*>(trc);
-
+  private:
+    void trace(JSObject* map, JS::GCCellPtr key, JS::GCCellPtr value) override {
         JSObject* kdelegate = nullptr;
-        if (key.isObject()) {
+        if (key.isObject())
             kdelegate = js::GetWeakmapKeyDelegate(key.toObject());
-        }
 
-        fprintf(tracer->output, "WeakMapEntry map=%p key=%p keyDelegate=%p value=%p\n",
+        fprintf(output, "WeakMapEntry map=%p key=%p keyDelegate=%p value=%p\n",
                 map, key.asCell(), kdelegate, value.asCell());
     }
 };
@@ -964,7 +956,7 @@ DumpHeapVisitCell(JSRuntime* rt, void* data, void* thing,
 }
 
 static void
-DumpHeapVisitChild(JS::CallbackTracer* trc, void** thingp, JS::TraceKind kind)
+DumpHeapVisitGCThing(JS::CallbackTracer* trc, void** thingp, JS::TraceKind kind)
 {
     if (gc::IsInsideNursery((js::gc::Cell*)*thingp))
         return;
@@ -972,28 +964,16 @@ DumpHeapVisitChild(JS::CallbackTracer* trc, void** thingp, JS::TraceKind kind)
     DumpHeapTracer* dtrc = static_cast<DumpHeapTracer*>(trc);
     char buffer[1024];
     dtrc->getTracingEdgeName(buffer, sizeof(buffer));
-    fprintf(dtrc->output, "> %p %c %s\n", *thingp, MarkDescriptor(*thingp), buffer);
-}
-
-static void
-DumpHeapVisitRoot(JS::CallbackTracer* trc, void** thingp, JS::TraceKind kind)
-{
-    if (gc::IsInsideNursery((js::gc::Cell*)*thingp))
-        return;
-
-    DumpHeapTracer* dtrc = static_cast<DumpHeapTracer*>(trc);
-    char buffer[1024];
-    dtrc->getTracingEdgeName(buffer, sizeof(buffer));
-    fprintf(dtrc->output, "%p %c %s\n", *thingp, MarkDescriptor(*thingp), buffer);
+    fprintf(dtrc->output, "%s%p %c %s\n", dtrc->prefix, *thingp, MarkDescriptor(*thingp), buffer);
 }
 
 void
-js::DumpHeapComplete(JSRuntime* rt, FILE* fp, js::DumpHeapNurseryBehaviour nurseryBehaviour)
+js::DumpHeap(JSRuntime* rt, FILE* fp, js::DumpHeapNurseryBehaviour nurseryBehaviour)
 {
     if (nurseryBehaviour == js::CollectNurseryBeforeDump)
         rt->gc.evictNursery(JS::gcreason::API);
 
-    DumpHeapTracer dtrc(fp, rt, DumpHeapVisitRoot);
+    DumpHeapTracer dtrc(fp, rt, DumpHeapVisitGCThing);
     fprintf(dtrc.output, "# Roots.\n");
     TraceRuntime(&dtrc);
 
@@ -1002,7 +982,7 @@ js::DumpHeapComplete(JSRuntime* rt, FILE* fp, js::DumpHeapNurseryBehaviour nurse
 
     fprintf(dtrc.output, "==========\n");
 
-    dtrc.setTraceCallback(DumpHeapVisitChild);
+    dtrc.prefix = "> ";
     IterateZonesCompartmentsArenasCells(rt, &dtrc,
                                         DumpHeapVisitZone,
                                         DumpHeapVisitCompartment,
@@ -1152,22 +1132,30 @@ js::detail::IdMatchesAtom(jsid id, JSAtom* atom)
     return id == INTERNED_STRING_TO_JSID(nullptr, atom);
 }
 
-JS_FRIEND_API(JSContext*)
-js::DefaultJSContext(JSRuntime* rt)
+JS_FRIEND_API(bool)
+js::PrepareScriptEnvironmentAndInvoke(JSRuntime* rt, HandleObject scope, ScriptEnvironmentPreparer::Closure& closure)
 {
-    if (rt->defaultJSContextCallback) {
-        JSContext* cx = rt->defaultJSContextCallback(rt);
-        MOZ_ASSERT(cx);
-        return cx;
-    }
+    if (rt->scriptEnvironmentPreparer)
+        return rt->scriptEnvironmentPreparer->invoke(scope, closure);
+
     MOZ_ASSERT(rt->contextList.getFirst() == rt->contextList.getLast());
-    return rt->contextList.getFirst();
+    JSContext* cx = rt->contextList.getFirst();
+    JSAutoCompartment ac(cx, scope);
+    bool ok = closure(cx);
+
+    // NB: This does not affect Gecko, which has a prepareScriptEnvironment
+    // callback.
+    if (JS_IsExceptionPending(cx)) {
+        JS_ReportPendingException(cx);
+    }
+
+    return ok;
 }
 
 JS_FRIEND_API(void)
-js::SetDefaultJSContextCallback(JSRuntime* rt, DefaultJSContextCallback cb)
+js::SetScriptEnvironmentPreparer(JSRuntime* rt, ScriptEnvironmentPreparer* preparer)
 {
-    rt->defaultJSContextCallback = cb;
+    rt->scriptEnvironmentPreparer = preparer;
 }
 
 #ifdef DEBUG

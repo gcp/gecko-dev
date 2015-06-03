@@ -4,8 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/SVGAnimationElement.h"
 #include "nsSMILAnimationFunction.h"
+
+#include "mozilla/dom/SVGAnimationElement.h"
+#include "mozilla/Move.h"
 #include "nsISMILAttr.h"
 #include "nsSMILParserUtils.h"
 #include "nsSMILNullType.h"
@@ -267,9 +269,7 @@ nsSMILAnimationFunction::ComposeResult(const nsISMILAttr& aSMILAttr,
 
   // If additive animation isn't required or isn't supported, set the value.
   if (!isAdditive || NS_FAILED(aResult.SandwichAdd(result))) {
-    aResult.Swap(result);
-    // Note: The old value of aResult is now in |result|, and it will get
-    // cleaned up when |result| goes out of scope, when this function returns.
+    aResult = Move(result);
   }
 }
 
@@ -787,20 +787,20 @@ nsSMILAnimationFunction::GetValues(const nsISMILAttr& aSMILAttr,
     // AppendElement() below must succeed, because SetCapacity() succeeded.
     if (!to.IsNull()) {
       if (!from.IsNull()) {
-        MOZ_ALWAYS_TRUE(result.AppendElement(from));
-        MOZ_ALWAYS_TRUE(result.AppendElement(to));
+        MOZ_ALWAYS_TRUE(result.AppendElement(from, mozilla::fallible));
+        MOZ_ALWAYS_TRUE(result.AppendElement(to, mozilla::fallible));
       } else {
-        MOZ_ALWAYS_TRUE(result.AppendElement(to));
+        MOZ_ALWAYS_TRUE(result.AppendElement(to, mozilla::fallible));
       }
     } else if (!by.IsNull()) {
       nsSMILValue effectiveFrom(by.mType);
       if (!from.IsNull())
         effectiveFrom = from;
       // Set values to 'from; from + by'
-      MOZ_ALWAYS_TRUE(result.AppendElement(effectiveFrom));
+      MOZ_ALWAYS_TRUE(result.AppendElement(effectiveFrom, mozilla::fallible));
       nsSMILValue effectiveTo(effectiveFrom);
       if (!effectiveTo.IsNull() && NS_SUCCEEDED(effectiveTo.Add(by))) {
-        MOZ_ALWAYS_TRUE(result.AppendElement(effectiveTo));
+        MOZ_ALWAYS_TRUE(result.AppendElement(effectiveTo, mozilla::fallible));
       } else {
         // Using by-animation with non-additive type or bad base-value
         return NS_ERROR_FAILURE;

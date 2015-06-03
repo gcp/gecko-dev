@@ -55,82 +55,6 @@
 
 namespace mozilla {
 
-/**
- * The WebRTC implementation of the MediaEngine interface.
- */
-class MediaEngineWebRTCVideoSource : public MediaEngineCameraVideoSource
-                                   , public webrtc::ExternalRenderer
-{
-public:
-  NS_DECL_THREADSAFE_ISUPPORTS
-
-  // ViEExternalRenderer.
-  virtual int FrameSizeChange(unsigned int w, unsigned int h, unsigned int streams) override;
-  virtual int DeliverFrame(unsigned char* buffer,
-                           int size,
-                           uint32_t time_stamp,
-                           int64_t ntp_time_ms,
-                           int64_t render_time,
-                           void *handle) override;
-  /**
-   * Does DeliverFrame() support a null buffer and non-null handle
-   * (video texture)?
-   * XXX Investigate!  Especially for Android/B2G
-   */
-  virtual bool IsTextureSupported() override { return false; }
-
-  MediaEngineWebRTCVideoSource(webrtc::VideoEngine* aVideoEnginePtr, int aIndex,
-                               dom::MediaSourceEnum aMediaSource = dom::MediaSourceEnum::Camera)
-    : MediaEngineCameraVideoSource(aIndex, "WebRTCCamera.Monitor")
-    , mVideoEngine(aVideoEnginePtr)
-    , mMediaSource(aMediaSource)
-  {
-    MOZ_ASSERT(aVideoEnginePtr);
-    Init();
-  }
-
-  virtual nsresult Allocate(const dom::MediaTrackConstraints& aConstraints,
-                            const MediaEnginePrefs& aPrefs) override;
-  virtual nsresult Deallocate() override;
-  virtual nsresult Start(SourceMediaStream*, TrackID) override;
-  virtual nsresult Stop(SourceMediaStream*, TrackID) override;
-  virtual void NotifyPull(MediaStreamGraph* aGraph,
-                          SourceMediaStream* aSource,
-                          TrackID aId,
-                          StreamTime aDesiredTime) override;
-
-  virtual const dom::MediaSourceEnum GetMediaSource() override {
-    return mMediaSource;
-  }
-  virtual nsresult TakePhoto(PhotoCallback* aCallback) override
-  {
-    return NS_ERROR_NOT_IMPLEMENTED;
-  }
-
-  void Refresh(int aIndex);
-
-  virtual void Shutdown() override;
-
-protected:
-  ~MediaEngineWebRTCVideoSource() { Shutdown(); }
-
-private:
-  // Initialize the needed Video engine interfaces.
-  void Init();
-
-  // Engine variables.
-  webrtc::VideoEngine* mVideoEngine; // Weak reference, don't free.
-  ScopedCustomReleasePtr<webrtc::VoEBase> mVoEBase;
-  ScopedCustomReleasePtr<webrtc::VoEExternalMedia> mVoERender;
-  ScopedCustomReleasePtr<webrtc::VoENetwork> mVoENetwork;
-  ScopedCustomReleasePtr<webrtc::VoEAudioProcessing> mVoEProcessing;
-
-  dom::MediaSourceEnum mMediaSource; // source of media (camera | application | screen)
-
-  size_t NumCapabilities() override;
-  void GetCapability(size_t aIndex, webrtc::CaptureCapability& aOut) override;
-};
-
 class MediaEngineWebRTCAudioSource : public MediaEngineAudioSource,
                                      public webrtc::VoEMediaProcess
 {
@@ -244,9 +168,9 @@ public:
   void Shutdown() override;
 
   virtual void EnumerateVideoDevices(dom::MediaSourceEnum,
-                                    nsTArray<nsRefPtr<MediaEngineVideoSource> >*) override;
+                                     nsTArray<nsRefPtr<MediaEngineVideoSource>>*) override;
   virtual void EnumerateAudioDevices(dom::MediaSourceEnum,
-                                    nsTArray<nsRefPtr<MediaEngineAudioSource> >*) override;
+                                     nsTArray<nsRefPtr<MediaEngineAudioSource>>*) override;
 private:
   ~MediaEngineWebRTC() {
     Shutdown();

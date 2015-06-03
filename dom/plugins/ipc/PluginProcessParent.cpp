@@ -37,6 +37,7 @@ struct RunnableMethodTraits<PluginProcessParent>
 PluginProcessParent::PluginProcessParent(const std::string& aPluginFilePath) :
     GeckoChildProcessHost(GeckoProcessType_Plugin),
     mPluginFilePath(aPluginFilePath),
+    mTaskFactory(this),
     mMainMsgLoop(MessageLoop::current()),
     mRunCompleteTaskImmediately(false)
 {
@@ -75,7 +76,7 @@ AddSandboxAllowedFiles(int32_t aSandboxLevel,
                        vector<std::wstring>& aAllowedFilesRead,
                        vector<std::wstring>& aAllowedFilesReadWrite)
 {
-    if (aSandboxLevel < 3) {
+    if (aSandboxLevel < 2) {
         return;
     }
 
@@ -86,16 +87,26 @@ AddSandboxAllowedFiles(int32_t aSandboxLevel,
         return;
     }
 
-    AddSandboxAllowedFile(aAllowedFilesRead, dirSvc, NS_WIN_HOME_DIR);
-    AddSandboxAllowedFile(aAllowedFilesRead, dirSvc, NS_WIN_HOME_DIR,
-                          NS_LITERAL_STRING("\\*"));
+    // Higher than level 2 currently removes the users own rights.
+    if (aSandboxLevel > 2) {
+        AddSandboxAllowedFile(aAllowedFilesRead, dirSvc, NS_WIN_HOME_DIR);
+        AddSandboxAllowedFile(aAllowedFilesRead, dirSvc, NS_WIN_HOME_DIR,
+                              NS_LITERAL_STRING("\\*"));
+    }
 
+    // Level 2 and above is now using low integrity, so we need to give write
+    // access to the Flash directories.
     AddSandboxAllowedFile(aAllowedFilesReadWrite, dirSvc, NS_WIN_APPDATA_DIR,
                           NS_LITERAL_STRING("\\Macromedia\\Flash Player\\*"));
     AddSandboxAllowedFile(aAllowedFilesReadWrite, dirSvc, NS_WIN_APPDATA_DIR,
                           NS_LITERAL_STRING("\\Adobe\\Flash Player\\*"));
+
+#if defined(_X86_)
+    // Write access to the Temp directory should only be needed for 32-bit as
+    // it is used to turn off protected mode, which only applies to x86.
     AddSandboxAllowedFile(aAllowedFilesReadWrite, dirSvc, NS_OS_TEMP_DIR,
                           NS_LITERAL_STRING("\\*"));
+#endif
 }
 #endif
 
@@ -215,7 +226,7 @@ PluginProcessParent::OnChannelConnected(int32_t peer_pid)
     GeckoChildProcessHost::OnChannelConnected(peer_pid);
     if (mLaunchCompleteTask && !mRunCompleteTaskImmediately) {
         mLaunchCompleteTask->SetLaunchSucceeded();
-        mMainMsgLoop->PostTask(FROM_HERE, NewRunnableMethod(this,
+        mMainMsgLoop->PostTask(FROM_HERE, mTaskFactory.NewRunnableMethod(
                                    &PluginProcessParent::RunLaunchCompleteTask));
     }
 }
@@ -225,7 +236,7 @@ PluginProcessParent::OnChannelError()
 {
     GeckoChildProcessHost::OnChannelError();
     if (mLaunchCompleteTask && !mRunCompleteTaskImmediately) {
-        mMainMsgLoop->PostTask(FROM_HERE, NewRunnableMethod(this,
+        mMainMsgLoop->PostTask(FROM_HERE, mTaskFactory.NewRunnableMethod(
                                    &PluginProcessParent::RunLaunchCompleteTask));
     }
 }

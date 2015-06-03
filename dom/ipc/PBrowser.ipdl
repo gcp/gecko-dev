@@ -9,6 +9,7 @@ include protocol PBlob;
 include protocol PColorPicker;
 include protocol PContent;
 include protocol PContentBridge;
+include protocol PDocAccessible;
 include protocol PDocumentRenderer;
 include protocol PFilePicker;
 include protocol PIndexedDBPermissionRequest;
@@ -98,6 +99,7 @@ prio(normal upto urgent) sync protocol PBrowser
     manager PContent or PContentBridge;
 
     manages PColorPicker;
+    manages PDocAccessible;
     manages PDocumentRenderer;
     manages PFilePicker;
     manages PIndexedDBPermissionRequest;
@@ -115,6 +117,14 @@ both:
     PRenderFrame();
 
 parent:
+    /**
+     * Tell the parent process a new accessible document has been created.
+     * aParentDoc is the accessible document it was created in if any, and
+     * aParentAcc is the id of the accessible in that document the new document
+     * is a child of.
+     */
+    PDocAccessible(nullable PDocAccessible aParentDoc, uint64_t aParentAcc);
+
     /*
      * Creates a new remoted nsIWidget connection for windowed plugins
      * in e10s mode. This is always initiated from the child in response
@@ -156,36 +166,15 @@ parent:
       returns (OwningSerializedStructuredCloneBuffer[] retval);
 
     /**
-     * The IME sequence number (seqno) parameter is used to make sure
-     * that a notification is discarded if it arrives at the chrome process
-     * too late. If the notification is late and we accept it, we will have
-     * an out-of-date view of the content process, which means events that we
-     * dispatch based on this out-of-date view will be wrong also.
-     * (see Bug 599550 and Bug 591047 comments 44, 50, and 54)
-     *
-     * Chrome increments seqno and includes it in each IME event sent to
-     * content, and content sends its current seqno back to chrome with each
-     * notification. A notification is up-to-date only if the content
-     * seqno is the same as the current chrome seqno, meaning no additional
-     * event was sent to content before the notification was received
-     *
-     * On blur, chrome returns the current seqno to content, and content
-     * uses it to discard subsequent events until the content seqno and
-     * chrome seqno-on-blur match again. These events, meant for the blurred
-     * textfield, are discarded to prevent events going to the wrong target
-     */
-
-    /**
      * Notifies chrome that there is a focus change involving an editable
      * object (input, textarea, document, contentEditable. etc.)
      *
      *  focus        PR_TRUE if editable object is receiving focus
      *               PR_FALSE if losing focus
      *  preference   Native widget preference for IME updates
-     *  seqno        Current seqno value on the chrome side
      */
     prio(urgent) sync NotifyIMEFocus(bool focus)
-      returns (nsIMEUpdatePreference preference, uint32_t seqno);
+      returns (nsIMEUpdatePreference preference);
 
     /**
      * Notifies chrome that there has been a change in text content
@@ -221,13 +210,12 @@ parent:
      * Notifies chrome that there has been a change in selection
      * Only called when NotifyIMEFocus returns PR_TRUE for mWantUpdates
      *
-     *  seqno        Current seqno value on the content side
      *  anchor       Offset where the selection started
      *  focus        Offset where the caret is
      *  writingMode  CSS writing-mode in effect at the focus
      *  causedByComposition true if the change is caused by composition
      */
-    prio(urgent) async NotifyIMESelection(uint32_t seqno, uint32_t anchor,
+    prio(urgent) async NotifyIMESelection(uint32_t anchor,
                                           uint32_t focus,
                                           WritingMode writingMode,
                                           bool causedByComposition);

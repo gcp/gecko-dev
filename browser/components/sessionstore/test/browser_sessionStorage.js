@@ -30,7 +30,7 @@ add_task(function session_storage() {
     "sessionStorage data for mochi.test has been serialized correctly");
 
   // Ensure that modifying sessionStore values works for the inner frame only.
-  yield modifySessionStorage2(browser, {test: "modified1"});
+  yield modifySessionStorage(browser, {test: "modified1"}, {frameIndex: 0});
   yield TabStateFlusher.flush(browser);
 
   ({storage} = JSON.parse(ss.getTabState(tab)));
@@ -41,7 +41,7 @@ add_task(function session_storage() {
 
   // Ensure that modifying sessionStore values works for both frames.
   yield modifySessionStorage(browser, {test: "modified"});
-  yield modifySessionStorage2(browser, {test: "modified2"});
+  yield modifySessionStorage(browser, {test: "modified2"}, {frameIndex: 0});
   yield TabStateFlusher.flush(browser);
 
   ({storage} = JSON.parse(ss.getTabState(tab)));
@@ -164,6 +164,13 @@ add_task(function respect_privacy_level() {
   [{state: {storage}}] = JSON.parse(ss.getClosedTabData(window));
   ok(!storage, "sessionStorage data has *not* been saved");
 
+  // Remove all closed tabs before continuing with the next test.
+  // As Date.now() isn't monotonic we might sometimes check
+  // the wrong closedTabData entry.
+  while (ss.getClosedTabCount(window) > 0) {
+    ss.forgetClosedTab(window, 0);
+  }
+
   // Restore the default privacy level and close the duplicated tab.
   Services.prefs.clearUserPref("browser.sessionstore.privacy_level");
   yield promiseRemoveTab(tab2);
@@ -175,20 +182,6 @@ add_task(function respect_privacy_level() {
   is(storage["https://example.com"].test, INNER_VALUE,
     "https sessionStorage data has been saved");
 });
-
-function waitForStorageEvent(browser) {
-  return promiseContentMessage(browser, "ss-test:MozStorageChanged");
-}
-
-function modifySessionStorage(browser, data) {
-  browser.messageManager.sendAsyncMessage("ss-test:modifySessionStorage", data);
-  return waitForStorageEvent(browser);
-}
-
-function modifySessionStorage2(browser, data) {
-  browser.messageManager.sendAsyncMessage("ss-test:modifySessionStorage2", data);
-  return waitForStorageEvent(browser);
-}
 
 function purgeDomainData(browser, domain) {
   return sendMessage(browser, "ss-test:purgeDomainData", domain);

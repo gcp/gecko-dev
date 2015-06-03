@@ -441,6 +441,7 @@ function checkActiveAddon(data){
     hasBinaryComponents: "boolean",
     installDay: "number",
     updateDay: "number",
+    signedState: "number",
   };
 
   for (let f in EXPECTED_ADDON_FIELDS_TYPES) {
@@ -857,6 +858,7 @@ add_task(function* test_addonsAndPlugins() {
     hasBinaryComponents: false,
     installDay: ADDON_INSTALL_DATE,
     updateDay: ADDON_INSTALL_DATE,
+    signedState: AddonManager.SIGNEDSTATE_MISSING,
   };
 
   const EXPECTED_PLUGIN_DATA = {
@@ -901,6 +903,49 @@ add_task(function* test_addonsAndPlugins() {
 
   let personaId = (gIsGonk) ? null : PERSONA_ID;
   Assert.equal(data.addons.persona, personaId, "The correct Persona Id must be reported.");
+});
+
+add_task(function* test_signedAddon() {
+  const ADDON_INSTALL_URL = gDataRoot + "signed.xpi";
+  const ADDON_ID = "tel-signed-xpi@tests.mozilla.org";
+  const ADDON_INSTALL_DATE = truncateToDays(Date.now());
+  const EXPECTED_ADDON_DATA = {
+    blocklisted: false,
+    description: "A signed addon which gets enabled without a reboot.",
+    name: "XPI Telemetry Signed Test",
+    userDisabled: false,
+    appDisabled: false,
+    version: "1.0",
+    scope: 1,
+    type: "extension",
+    foreignInstall: false,
+    hasBinaryComponents: false,
+    installDay: ADDON_INSTALL_DATE,
+    updateDay: ADDON_INSTALL_DATE,
+    signedState: AddonManager.SIGNEDSTATE_SIGNED,
+  };
+
+  // Set the clock in the future so our changes don't get throttled.
+  gNow = fakeNow(futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE));
+  let deferred = PromiseUtils.defer();
+  TelemetryEnvironment.registerChangeListener("test_signedAddon", deferred.resolve);
+
+  // Install the addon.
+  yield AddonTestUtils.installXPIFromURL(ADDON_INSTALL_URL);
+
+  yield deferred.promise;
+  // Unregister the listener.
+  TelemetryEnvironment.unregisterChangeListener("test_signedAddon");
+
+  let data = TelemetryEnvironment.currentEnvironment;
+  checkEnvironmentData(data);
+
+  // Check addon data.
+  Assert.ok(ADDON_ID in data.addons.activeAddons, "Add-on should be in the environment.");
+  let targetAddon = data.addons.activeAddons[ADDON_ID];
+  for (let f in EXPECTED_ADDON_DATA) {
+    Assert.equal(targetAddon[f], EXPECTED_ADDON_DATA[f], f + " must have the correct value.");
+  }
 });
 
 add_task(function* test_changeThrottling() {
@@ -998,6 +1043,30 @@ add_task(function* test_defaultSearchEngine() {
   checkEnvironmentData(data);
 
   const EXPECTED_SEARCH_ENGINE = "other-" + SEARCH_ENGINE_ID;
+  Assert.equal(data.settings.defaultSearchEngine, EXPECTED_SEARCH_ENGINE);
+  TelemetryEnvironment.unregisterChangeListener("testWatch_SearchDefault");
+
+  // Define and reset the test preference.
+  const PREF_TEST = "toolkit.telemetry.test.pref1";
+  const PREFS_TO_WATCH = new Map([
+    [PREF_TEST, TelemetryEnvironment.RECORD_PREF_STATE],
+  ]);
+  Preferences.reset(PREF_TEST);
+
+  // Set the clock in the future so our changes don't get throttled.
+  gNow = fakeNow(futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE));
+  // Watch the test preference.
+  TelemetryEnvironment._watchPreferences(PREFS_TO_WATCH);
+  deferred = PromiseUtils.defer();
+  TelemetryEnvironment.registerChangeListener("testSearchEngine_pref", deferred.resolve);
+  // Trigger an environment change.
+  Preferences.set(PREF_TEST, 1);
+  yield deferred.promise;
+  TelemetryEnvironment.unregisterChangeListener("testSearchEngine_pref");
+
+  // Check that the search engine information is correctly retained when prefs change.
+  data = TelemetryEnvironment.currentEnvironment;
+  checkEnvironmentData(data);
   Assert.equal(data.settings.defaultSearchEngine, EXPECTED_SEARCH_ENGINE);
 });
 

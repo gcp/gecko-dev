@@ -27,6 +27,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Services.h"
+#include "mozilla/dom/ScriptSettings.h"
 
 #include "nsContentUtils.h"
 #include "nsCCUncollectableMarker.h"
@@ -59,6 +60,7 @@ using namespace mozilla;
 using namespace xpc;
 using namespace JS;
 using mozilla::dom::PerThreadAtomCache;
+using mozilla::dom::AutoEntryScript;
 
 /***************************************************************************/
 
@@ -1370,11 +1372,15 @@ xpc::SimulateActivityCallback(bool aActive)
 }
 
 // static
-JSContext*
-XPCJSRuntime::DefaultJSContextCallback(JSRuntime* rt)
+bool
+XPCJSRuntime::EnvironmentPreparer::invoke(HandleObject scope, js::ScriptEnvironmentPreparer::Closure& closure)
 {
-    MOZ_ASSERT(rt == Get()->Runtime());
-    return Get()->GetJSContextStack()->GetSafeJSContext();
+    MOZ_ASSERT(NS_IsMainThread());
+    nsIGlobalObject* global = NativeGlobal(scope);
+    NS_ENSURE_TRUE(global && global->GetGlobalJSObject(), false);
+    AutoEntryScript aes(global, "JS-engine-initiated execution");
+    aes.TakeOwnershipOfErrorReporting();
+    return closure(aes.cx());
 }
 
 // static
@@ -1387,22 +1393,6 @@ XPCJSRuntime::ActivityCallback(void* arg, bool active)
 
     XPCJSRuntime* self = static_cast<XPCJSRuntime*>(arg);
     self->mWatchdogManager->RecordRuntimeActivity(active);
-}
-
-// static
-//
-// JS-CTypes creates and caches a JSContext that it uses when executing JS
-// callbacks. When we're notified that ctypes is about to call into some JS,
-// push the cx to maintain the integrity of the context stack.
-void
-XPCJSRuntime::CTypesActivityCallback(JSContext* cx, js::CTypesActivityType type)
-{
-  if (type == js::CTYPES_CALLBACK_BEGIN) {
-    if (!xpc::PushJSContextNoScriptContext(cx))
-      MOZ_CRASH();
-  } else if (type == js::CTYPES_CALLBACK_END) {
-    xpc::PopJSContextNoScriptContext();
-  }
 }
 
 // static
@@ -1787,6 +1777,20 @@ GetCompartmentName(JSCompartment* c, nsCString& name, int* anonymizeID,
     } else {
         name.AssignLiteral("null-principal");
     }
+}
+
+extern void
+xpc::GetCurrentCompartmentName(JSContext* cx, nsCString& name)
+{
+    RootedObject global(cx, JS::CurrentGlobalOrNull(cx));
+    if (!global) {
+        name.AssignLiteral("no global");
+        return;
+    }
+
+    JSCompartment* compartment = GetObjectCompartment(global);
+    int anonymizeID = 0;
+    GetCompartmentName(compartment, name, &anonymizeID, false);
 }
 
 static int64_t
@@ -3236,6 +3240,10 @@ ReadSourceFromFilename(JSContext* cx, const char* filename, char16_t** src, size
     if (!scheme.EqualsLiteral("file") && !scheme.EqualsLiteral("jar"))
         return NS_OK;
 
+    // Explicitly set the content type so that we don't load the
+    // exthandler to guess it.
+    scriptChannel->SetContentType(NS_LITERAL_CSTRING("text/plain"));
+
     nsCOMPtr<nsIInputStream> scriptStream;
     rv = scriptChannel->Open(getter_AddRefs(scriptStream));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -3311,6 +3319,47 @@ static const JSWrapObjectCallbacks WrapObjectCallbacks = {
     xpc::WrapperFactory::Rewrap,
     xpc::WrapperFactory::PrepareForWrapping
 };
+
+/**
+ * Group JSCompartments into PerformanceGroups.
+ *
+ * - All JSCompartments from the same add-on belong to the same
+ *   PerformanceGroup.
+ * - All JSCompartments from the same same webpage (including
+ *   frames) belong to the same PerformanceGroup.
+ * - All other JSCompartments (normally, system add-ons)
+ *   belong to to a big uncategorized PerformanceGroup.
+ */
+static void*
+GetCurrentPerfGroupCallback(JSContext* cx) {
+    RootedObject global(cx, CurrentGlobalOrNull(cx));
+    if (!global) {
+        // This can happen for the atom compartments, which is system
+        // code.
+        return nullptr;
+    }
+
+    JSAddonId* addonId = AddonIdOfObject(global);
+    if (addonId) {
+        // If this is an add-on, use the id as key.
+        return addonId;
+    }
+
+    // If the compartment belongs to a webpage, use the address of the
+    // topmost scriptable window, hence regrouping all frames of a
+    // window.
+    nsRefPtr<nsGlobalWindow> win = WindowOrNull(global);
+    if (win) {
+        nsCOMPtr<nsIDOMWindow> top;
+        nsresult rv = win->GetScriptableTop(getter_AddRefs(top));
+        NS_ENSURE_SUCCESS(rv, nullptr);
+
+        return top.get();
+    }
+
+    // Otherwise, this is platform code, use `nullptr` as key.
+    return nullptr;
+}
 
 XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
    : CycleCollectedJSRuntime(nullptr, JS::DefaultHeapMaxBytes, JS::DefaultNurseryBytes),
@@ -3450,9 +3499,8 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
         stack->sampleRuntime(runtime);
 #endif
     JS_SetAccumulateTelemetryCallback(runtime, AccumulateTelemetryCallback);
-    js::SetDefaultJSContextCallback(runtime, DefaultJSContextCallback);
+    js::SetScriptEnvironmentPreparer(runtime, &mEnvironmentPreparer);
     js::SetActivityCallback(runtime, ActivityCallback, this);
-    js::SetCTypesActivityCallback(runtime, CTypesActivityCallback);
     JS_SetInterruptCallback(runtime, InterruptCallback);
 
     // The JS engine needs to keep the source code around in order to implement
@@ -3492,6 +3540,8 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     // Watch for the JS boolean options.
     ReloadPrefsCallback(nullptr, this);
     Preferences::RegisterCallback(ReloadPrefsCallback, JS_OPTIONS_DOT_STR, this);
+
+    JS_SetCurrentPerfGroupCallback(runtime, ::GetCurrentPerfGroupCallback);
 }
 
 // static

@@ -32,6 +32,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Logging.h"
+#include "gfxPrefs.h"
 
 #if defined(MOZ_CRASHREPORTER)
 #include "nsExceptionHandler.h"
@@ -165,7 +166,7 @@ GetPrefValueForFeature(int32_t aFeature, int32_t& aValue)
   if (!prefname)
     return false;
 
-  aValue = false;
+  aValue = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
   return NS_SUCCEEDED(Preferences::GetInt(prefname, &aValue));
 }
 
@@ -361,7 +362,8 @@ BlacklistFeatureStatusToGfxFeatureStatus(const nsAString& aStatus)
   else if (aStatus.EqualsLiteral("BLOCKED_OS_VERSION"))
     return nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION;
 
-  // Do not allow it to set STATUS_UNKNOWN.
+  // Do not allow it to set STATUS_UNKNOWN.  Also, we are not
+  // expecting the "mismatch" status showing up here.
 
   return nsIGfxInfo::FEATURE_STATUS_OK;
 }
@@ -665,6 +667,17 @@ GfxInfoBase::Init()
 NS_IMETHODIMP
 GfxInfoBase::GetFeatureStatus(int32_t aFeature, int32_t* aStatus)
 {
+  int32_t blocklistAll = gfxPrefs::BlocklistAll();
+  if (blocklistAll > 0) {
+    gfxCriticalErrorOnce(gfxCriticalError::DefaultOptions(false)) << "Forcing blocklisting all features";
+    *aStatus = FEATURE_BLOCKED_DEVICE;
+    return NS_OK;
+  } else if (blocklistAll < 0) {
+    gfxCriticalErrorOnce(gfxCriticalError::DefaultOptions(false)) << "Ignoring any feature blocklisting.";
+    *aStatus = FEATURE_STATUS_OK;
+    return NS_OK;
+  }
+
   if (GetPrefValueForFeature(aFeature, *aStatus))
     return NS_OK;
 
@@ -986,6 +999,7 @@ GfxInfoBase::EvaluateDownloadedBlacklist(nsTArray<GfxDriverInfo>& aDriverInfo)
           }
           // FALLTHROUGH
 
+        case nsIGfxInfo::FEATURE_BLOCKED_MISMATCHED_VERSION:
         case nsIGfxInfo::FEATURE_BLOCKED_DEVICE:
         case nsIGfxInfo::FEATURE_DISCOURAGED:
         case nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION:

@@ -1,7 +1,10 @@
 //Used by JSHint:
-/*global Cu, ManifestObtainer, BrowserTestUtils, add_task, SpecialPowers, todo_is, gBrowser, Assert*/
+/*global Cu, BrowserTestUtils, add_task, SpecialPowers, gBrowser, Assert*/
 'use strict';
-Cu.import('resource://gre/modules/ManifestObtainer.jsm', this);
+const {
+  ManifestObtainer
+} = Cu.import('resource://gre/modules/WebManifest.jsm', {});
+
 requestLongerTimeout(4); // e10s tests take time.
 const defaultURL =
   'http://example.org/tests/dom/manifest/test/resource.sjs';
@@ -106,6 +109,51 @@ const tests = [
         href='${remoteURL}?${body}&${CORS}'>`;
       return link;
     }
+  },{
+    expected: 'Trying to load from about:whatever is a TypeError.',
+    get tabURL() {
+      let query = [
+        `body=<h1>${this.expected}</h1>`,
+        'Content-Type=text/html; charset=utf-8',
+      ];
+      const URL = `${defaultURL}?${query.join('&')}`;
+      return URL;
+    },
+    run(err) {
+      Assert.strictEqual(err.name, 'TypeError', this.expected);
+    },
+    testData: `<link rel="manifest" href='about:whatever'>`
+  },
+  {
+    expected: 'Trying to load from file://whatever is a TypeError.',
+    get tabURL() {
+      let query = [
+        `body=<h1>${this.expected}</h1>`,
+        'Content-Type=text/html; charset=utf-8',
+      ];
+      const URL = `${defaultURL}?${query.join('&')}`;
+      return URL;
+    },
+    run(err) {
+      Assert.strictEqual(err.name, 'TypeError', this.expected);
+    },
+    testData: `<link rel="manifest" href='file://manifest'>`
+  },
+  //URL parsing tests
+  {
+    expected: 'Trying to load invalid URL is a TypeError.',
+    get tabURL() {
+      let query = [
+        `body=<h1>${this.expected}</h1>`,
+        'Content-Type=text/html; charset=utf-8',
+      ];
+      const URL = `${defaultURL}?${query.join('&')}`;
+      return URL;
+    },
+    run(err) {
+      Assert.strictEqual(err.name, 'TypeError', this.expected);
+    },
+    testData: `<link rel="manifest" href='http://[12.1212.21.21.12.21.12]'>`
   },
 ];
 
@@ -189,7 +237,7 @@ add_task(function*() {
   // Flood random browsers with requests. Once promises settle, check that
   // responses all pass.
   const results = yield Promise.all((
-    for (browser of randBrowsers(browsers, 1000)) obtainer.obtainManifest(browser)
+    for (browser of randBrowsers(browsers, 100)) obtainer.obtainManifest(browser)
   ));
   const expected = 'Expect every manifest to have name equal to `pass`.';
   const pass = results.every(manifest => manifest.name === 'pass');

@@ -672,20 +672,23 @@ let ViewSourceContent = {
 
   /**
    * Toggles the "wrap" class on the document body, which sets whether
-   * or not long lines are wrapped.
+   * or not long lines are wrapped.  Notifies parent to update the pref.
    */
   toggleWrapping() {
     let body = content.document.body;
-    body.classList.toggle("wrap");
+    let state = body.classList.toggle("wrap");
+    sendAsyncMessage("ViewSource:StoreWrapping", { state });
   },
 
   /**
    * Toggles the "highlight" class on the document body, which sets whether
-   * or not syntax highlighting is displayed.
+   * or not syntax highlighting is displayed.  Notifies parent to update the
+   * pref.
    */
   toggleSyntaxHighlighting() {
     let body = content.document.body;
-    body.classList.toggle("highlight");
+    let state = body.classList.toggle("highlight");
+    sendAsyncMessage("ViewSource:StoreSyntaxHighlighting", { state });
   },
 
   /**
@@ -885,6 +888,7 @@ let ViewSourceContent = {
   contextMenuItems: [
     {
       id: "goToLine",
+      accesskey: true,
       handler() {
         sendAsyncMessage("ViewSource:PromptAndGoToLine");
       }
@@ -929,6 +933,11 @@ let ViewSourceContent = {
       item.setAttribute("label", label);
       if ("checked" in itemSpec) {
         item.setAttribute("type", "checkbox");
+      }
+      if (itemSpec.accesskey) {
+        let accesskeyName = `context_${itemSpec.id}_accesskey`;
+        item.setAttribute("accesskey",
+                          this.bundle.GetStringFromName(accesskeyName))
       }
       menu.appendChild(item);
     });

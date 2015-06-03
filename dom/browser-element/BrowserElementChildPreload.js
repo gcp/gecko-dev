@@ -530,6 +530,7 @@ BrowserElementChild.prototype = {
     debug('Got metaChanged: (' + e.target.name + ') ' + e.target.content);
 
     let handlers = {
+      'viewmode': this._viewmodeChangedHandler,
       'theme-color': this._themeColorChangedHandler,
       'application-name': this._applicationNameChangedHandler
     };
@@ -700,6 +701,16 @@ BrowserElementChild.prototype = {
     }
 
     sendAsyncMsg('selectionstatechanged', detail);
+  },
+
+
+  _viewmodeChangedHandler: function(eventType, target) {
+    let meta = {
+      name: 'viewmode',
+      content: target.content,
+      type: eventType.replace('DOMMeta', '').toLowerCase()
+    };
+    sendAsyncMsg('metachange', meta);
   },
 
   _themeColorChangedHandler: function(eventType, target) {
@@ -965,7 +976,7 @@ BrowserElementChild.prototype = {
 
   _mozFullscreenOriginChange: function(e) {
     sendAsyncMsg("fullscreen-origin-change", {
-      origin: e.target.nodePrincipal.origin
+      originNoSuffix: e.target.nodePrincipal.originNoSuffix
     });
   },
 

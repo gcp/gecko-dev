@@ -37,6 +37,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/ScopeObject-inl.h"
 #include "vm/StringObject-inl.h"
+#include "vm/UnboxedObject-inl.h"
 
 using mozilla::BitwiseCast;
 using mozilla::DebugOnly;
@@ -3366,9 +3367,11 @@ CheckHasNoSuchProperty(JSContext* cx, HandleObject obj, HandlePropertyName name,
     while (curObj) {
         if (curObj->isNative()) {
             // Don't handle proto chains with resolve hooks.
-            if (curObj->getClass()->resolve)
+            if (ClassMayResolveId(cx->names(), curObj->getClass(), NameToId(name), curObj) ||
+                curObj->getClass()->addProperty)
+            {
                 return false;
-
+            }
             if (curObj->as<NativeObject>().contains(cx, NameToId(name)))
                 return false;
         } else if (curObj != obj) {
@@ -3540,9 +3543,12 @@ IsCacheableSetPropAddSlot(JSContext* cx, JSObject* obj, Shape* oldShape,
         return false;
     }
 
-    // If object has a resolve hook, don't inline
-    if (obj->getClass()->resolve)
+    // Watch out for resolve or addProperty hooks.
+    if (ClassMayResolveId(cx->names(), obj->getClass(), id, obj) ||
+        obj->getClass()->addProperty)
+    {
         return false;
+    }
 
     size_t chainDepth = 0;
     // Walk up the object prototype chain and ensure that all prototypes are
@@ -3558,10 +3564,11 @@ IsCacheableSetPropAddSlot(JSContext* cx, JSObject* obj, Shape* oldShape,
         if (protoShape && !protoShape->hasDefaultSetter())
             return false;
 
-        // Otherise, if there's no such property, watch out for a resolve hook that would need
-        // to be invoked and thus prevent inlining of property addition.
-        if (proto->getClass()->resolve)
-             return false;
+        // Otherwise, if there's no such property, watch out for a resolve hook
+        // that would need to be invoked and thus prevent inlining of property
+        // addition.
+        if (ClassMayResolveId(cx->names(), proto->getClass(), id, proto))
+            return false;
     }
 
     // Only add a IC entry if the dynamic slots didn't change when the shapes
@@ -3801,7 +3808,7 @@ IsOptimizableElementPropertyName(JSContext* cx, HandleValue key, MutableHandleId
 static bool
 TryAttachNativeGetValueElemStub(JSContext* cx, HandleScript script, jsbytecode* pc,
                                 ICGetElem_Fallback* stub, HandleNativeObject obj,
-                                HandleValue key)
+                                HandleValue key, bool* attached)
 {
     RootedId id(cx);
     if (!IsOptimizableElementPropertyName(cx, key, &id))
@@ -3851,6 +3858,7 @@ TryAttachNativeGetValueElemStub(JSContext* cx, HandleScript script, jsbytecode* 
             return false;
 
         stub->addNewStub(newStub);
+        *attached = true;
     }
     return true;
 }
@@ -3858,7 +3866,7 @@ TryAttachNativeGetValueElemStub(JSContext* cx, HandleScript script, jsbytecode* 
 static bool
 TryAttachNativeGetAccessorElemStub(JSContext* cx, HandleScript script, jsbytecode* pc,
                                    ICGetElem_Fallback* stub, HandleNativeObject obj,
-                                   HandleValue key, bool* attached)
+                                   HandleValue key, bool* attached, bool* isTemporarilyUnoptimizable)
 {
     MOZ_ASSERT(!*attached);
 
@@ -3874,15 +3882,15 @@ TryAttachNativeGetAccessorElemStub(JSContext* cx, HandleScript script, jsbytecod
     RootedObject baseHolder(cx);
     if (!EffectlesslyLookupProperty(cx, obj, propName, &baseHolder, &shape))
         return false;
-    if(!baseHolder || baseHolder->isNative())
+    if (!baseHolder || baseHolder->isNative())
         return true;
 
     HandleNativeObject holder = baseHolder.as<NativeObject>();
 
     bool getterIsScripted = false;
-    bool isTemporarilyUnoptimizable = false;
     if (IsCacheableGetPropCall(cx, obj, baseHolder, shape, &getterIsScripted,
-                               &isTemporarilyUnoptimizable, /*isDOMProxy=*/false)) {
+                               isTemporarilyUnoptimizable, /*isDOMProxy=*/false))
+    {
         RootedFunction getter(cx, &shape->getterObject()->as<JSFunction>());
 
 #if JS_HAS_NO_SUCH_METHOD
@@ -3996,7 +4004,7 @@ IsNativeOrUnboxedDenseElementAccess(HandleObject obj, HandleValue key)
 
 static bool
 TryAttachGetElemStub(JSContext* cx, JSScript* script, jsbytecode* pc, ICGetElem_Fallback* stub,
-                     HandleValue lhs, HandleValue rhs, HandleValue res)
+                     HandleValue lhs, HandleValue rhs, HandleValue res, bool* attached)
 {
     bool isCallElem = (JSOp(*pc) == JSOP_CALLELEM);
 
@@ -4013,6 +4021,7 @@ TryAttachGetElemStub(JSContext* cx, JSScript* script, jsbytecode* pc, ICGetElem_
             return false;
 
         stub->addNewStub(stringStub);
+        *attached = true;
         return true;
     }
 
@@ -4031,6 +4040,7 @@ TryAttachGetElemStub(JSContext* cx, JSScript* script, jsbytecode* pc, ICGetElem_
             return false;
 
         stub->addNewStub(argsStub);
+        *attached = true;
         return true;
     }
 
@@ -4053,6 +4063,7 @@ TryAttachGetElemStub(JSContext* cx, JSScript* script, jsbytecode* pc, ICGetElem_
                 return false;
 
             stub->addNewStub(argsStub);
+            *attached = true;
             return true;
         }
     }
@@ -4067,6 +4078,7 @@ TryAttachGetElemStub(JSContext* cx, JSScript* script, jsbytecode* pc, ICGetElem_
             return false;
 
         stub->addNewStub(denseStub);
+        *attached = true;
         return true;
     }
 
@@ -4074,10 +4086,12 @@ TryAttachGetElemStub(JSContext* cx, JSScript* script, jsbytecode* pc, ICGetElem_
     if (obj->isNative() && rhs.isString()) {
         RootedScript rootedScript(cx, script);
         if (!TryAttachNativeGetValueElemStub(cx, rootedScript, pc, stub,
-            obj.as<NativeObject>(), rhs))
+                                             obj.as<NativeObject>(), rhs, attached))
         {
             return false;
         }
+        if (*attached)
+            return true;
         script = rootedScript;
     }
 
@@ -4091,6 +4105,7 @@ TryAttachGetElemStub(JSContext* cx, JSScript* script, jsbytecode* pc, ICGetElem_
             return false;
 
         stub->addNewStub(unboxedStub);
+        *attached = true;
         return true;
     }
 
@@ -4124,6 +4139,7 @@ TryAttachGetElemStub(JSContext* cx, JSScript* script, jsbytecode* pc, ICGetElem_
             return false;
 
         stub->addNewStub(typedArrayStub);
+        *attached = true;
         return true;
     }
 
@@ -4172,15 +4188,20 @@ DoGetElemFallback(JSContext* cx, BaselineFrame* frame, ICGetElem_Fallback* stub_
     if (stub->numOptimizedStubs() >= ICGetElem_Fallback::MAX_OPTIMIZED_STUBS) {
         // TODO: Discard all stubs in this IC and replace with inert megamorphic stub.
         // But for now we just bail.
+        stub->noteUnoptimizableAccess();
         attached = true;
     }
 
     // Try to attach an optimized getter stub.
+    bool isTemporarilyUnoptimizable = false;
     if (!attached && lhs.isObject() && lhs.toObject().isNative() && rhs.isString()){
         RootedScript rootedScript(cx, frame->script());
         RootedNativeObject obj(cx, &lhs.toObject().as<NativeObject>());
-        if (!TryAttachNativeGetAccessorElemStub(cx, rootedScript, pc, stub, obj, rhs, &attached))
+        if (!TryAttachNativeGetAccessorElemStub(cx, rootedScript, pc, stub, obj, rhs, &attached,
+                                                &isTemporarilyUnoptimizable))
+        {
             return false;
+        }
         script = rootedScript;
     }
 
@@ -4202,11 +4223,11 @@ DoGetElemFallback(JSContext* cx, BaselineFrame* frame, ICGetElem_Fallback* stub_
         return true;
 
     // Try to attach an optimized stub.
-    if (!TryAttachGetElemStub(cx, frame->script(), pc, stub, lhs, rhs, res))
+    if (!TryAttachGetElemStub(cx, frame->script(), pc, stub, lhs, rhs, res, &attached))
         return false;
 
-    // If we ever add a way to note unoptimizable accesses here, propagate the
-    // isTemporarilyUnoptimizable state from TryAttachNativeGetElemStub to here.
+    if (!attached && !isTemporarilyUnoptimizable)
+        stub->noteUnoptimizableAccess();
 
     return true;
 }
@@ -5154,29 +5175,13 @@ RemoveExistingTypedArraySetElemStub(JSContext* cx, ICSetElem_Fallback* stub, Han
     return false;
 }
 
-static size_t
-SetElemObjectInitializedLength(JSObject *obj)
-{
-    if (obj->isNative())
-        return obj->as<NativeObject>().getDenseInitializedLength();
-    return obj->as<UnboxedArrayObject>().initializedLength();
-}
-
-static size_t
-SetElemObjectCapacity(JSObject *obj)
-{
-    if (obj->isNative())
-        return obj->as<NativeObject>().getDenseCapacity();
-    return obj->as<UnboxedArrayObject>().capacity();
-}
-
 static bool
 CanOptimizeDenseOrUnboxedArraySetElem(JSObject* obj, uint32_t index,
                                       Shape* oldShape, uint32_t oldCapacity, uint32_t oldInitLength,
                                       bool* isAddingCaseOut, size_t* protoDepthOut)
 {
-    uint32_t initLength = SetElemObjectInitializedLength(obj);
-    uint32_t capacity = SetElemObjectCapacity(obj);
+    uint32_t initLength = GetAnyBoxedOrUnboxedInitializedLength(obj);
+    uint32_t capacity = GetAnyBoxedOrUnboxedCapacity(obj);
 
     *isAddingCaseOut = false;
     *protoDepthOut = 0;
@@ -5263,9 +5268,9 @@ DoSetElemFallback(JSContext* cx, BaselineFrame* frame, ICSetElem_Fallback* stub_
     // Check the old capacity
     uint32_t oldCapacity = 0;
     uint32_t oldInitLength = 0;
-    if (obj->isNative() && index.isInt32() && index.toInt32() >= 0) {
-        oldCapacity = obj->as<NativeObject>().getDenseCapacity();
-        oldInitLength = obj->as<NativeObject>().getDenseInitializedLength();
+    if (index.isInt32() && index.toInt32() >= 0) {
+        oldCapacity = GetAnyBoxedOrUnboxedCapacity(obj);
+        oldInitLength = GetAnyBoxedOrUnboxedInitializedLength(obj);
     }
 
     if (op == JSOP_INITELEM) {
@@ -5533,8 +5538,6 @@ ICSetElem_DenseOrUnboxedArray::Compiler::generateStubCode(MacroAssembler& masm)
     // Unbox key.
     Register key = masm.extractInt32(R1, ExtractTemp1);
 
-    Address valueAddr(BaselineStackReg, ICStackValueOffset);
-
     if (unboxedType_ == JSVAL_TYPE_MAGIC) {
         // Set element on a native object.
 
@@ -5569,6 +5572,8 @@ ICSetElem_DenseOrUnboxedArray::Compiler::generateStubCode(MacroAssembler& masm)
         regs.takeUnchecked(obj);
         regs.takeUnchecked(key);
 
+        Address valueAddr(BaselineStackReg, ICStackValueOffset);
+
         // We need to convert int32 values being stored into doubles. In this case
         // the heap typeset is guaranteed to contain both int32 and double, so it's
         // okay to store a double. Note that double arrays are only created by
@@ -5598,10 +5603,11 @@ ICSetElem_DenseOrUnboxedArray::Compiler::generateStubCode(MacroAssembler& masm)
         masm.loadPtr(Address(obj, UnboxedArrayObject::offsetOfElements()), scratchReg);
 
         // Compute the address being written to.
-        BaseIndex address(obj, key, ScaleFromElemWidth(UnboxedTypeSize(unboxedType_)));
+        BaseIndex address(scratchReg, key, ScaleFromElemWidth(UnboxedTypeSize(unboxedType_)));
 
         EmitUnboxedPreBarrierForBaseline(masm, address, unboxedType_);
 
+        Address valueAddr(BaselineStackReg, ICStackValueOffset + sizeof(Value));
         masm.Push(R0);
         masm.loadValue(valueAddr, R0);
         masm.storeUnboxedProperty(address, unboxedType_,
@@ -5748,8 +5754,6 @@ ICSetElemDenseOrUnboxedArrayAddCompiler::generateStubCode(MacroAssembler& masm)
     // Unbox key.
     Register key = masm.extractInt32(R1, ExtractTemp1);
 
-    Address valueAddr(BaselineStackReg, ICStackValueOffset);
-
     if (unboxedType_ == JSVAL_TYPE_MAGIC) {
         // Adding element to a native object.
 
@@ -5793,6 +5797,9 @@ ICSetElemDenseOrUnboxedArrayAddCompiler::generateStubCode(MacroAssembler& masm)
         masm.branchTest32(Assembler::Zero, elementsFlags,
                           Imm32(ObjectElements::CONVERT_DOUBLE_ELEMENTS),
                           &dontConvertDoubles);
+
+        Address valueAddr(BaselineStackReg, ICStackValueOffset);
+
         // Note that double arrays are only created by IonMonkey, so if we have no
         // floating-point support Ion is disabled and there should be no double arrays.
         if (cx->runtime()->jitSupportsFloatingPoint)
@@ -5815,31 +5822,31 @@ ICSetElemDenseOrUnboxedArrayAddCompiler::generateStubCode(MacroAssembler& masm)
         masm.and32(Imm32(UnboxedArrayObject::InitializedLengthMask), scratchReg);
         masm.branch32(Assembler::NotEqual, scratchReg, key, &failure);
 
-        Address lengthAddr(obj, UnboxedArrayObject::offsetOfLength());
-
         // Capacity check.
         masm.checkUnboxedArrayCapacity(obj, Int32Key(key), scratchReg, &failure);
-
-        // Increment initLength before write.
-        masm.add32(Imm32(1), initLengthAddr);
-
-        // If length is now <= key, increment length before write.
-        Label skipIncrementLength;
-        masm.branch32(Assembler::Above, lengthAddr, key, &skipIncrementLength);
-        masm.add32(Imm32(1), lengthAddr);
-        masm.bind(&skipIncrementLength);
 
         // Load obj->elements.
         masm.loadPtr(Address(obj, UnboxedArrayObject::offsetOfElements()), scratchReg);
 
+        // Write the value first, since this can fail. No need for pre-barrier
+        // since we're not overwriting an old value.
         masm.Push(R0);
+        Address valueAddr(BaselineStackReg, ICStackValueOffset + sizeof(Value));
         masm.loadValue(valueAddr, R0);
-
-        // Write the value. No need for pre-barrier since we're not overwriting an old value.
-        BaseIndex address(obj, key, ScaleFromElemWidth(UnboxedTypeSize(unboxedType_)));
+        BaseIndex address(scratchReg, key, ScaleFromElemWidth(UnboxedTypeSize(unboxedType_)));
         masm.storeUnboxedProperty(address, unboxedType_,
                                   ConstantOrRegister(TypedOrValueRegister(R0)), &failurePopR0);
         masm.Pop(R0);
+
+        // Increment initialized length.
+        masm.add32(Imm32(1), initLengthAddr);
+
+        // If length is now <= key, increment length.
+        Address lengthAddr(obj, UnboxedArrayObject::offsetOfLength());
+        Label skipIncrementLength;
+        masm.branch32(Assembler::Above, lengthAddr, key, &skipIncrementLength);
+        masm.add32(Imm32(1), lengthAddr);
+        masm.bind(&skipIncrementLength);
     }
 
     EmitReturnFromIC(masm);
@@ -7579,27 +7586,19 @@ ComputeGetPropResult(JSContext* cx, BaselineFrame* frame, JSOp op, HandlePropert
             res.setObject(*frame->callee());
         }
     } else {
-        // Handle when val is an object.
-        RootedObject obj(cx, ToObjectFromStack(cx, val));
-        if (!obj)
-            return false;
-
-        RootedId id(cx, NameToId(name));
-        if (op == JSOP_GETXPROP) {
-            if (!GetPropertyForNameLookup(cx, obj, id, res))
+        if (op == JSOP_GETPROP || op == JSOP_LENGTH) {
+            if (!GetProperty(cx, val, name, res))
+                return false;
+        } else if (op == JSOP_CALLPROP) {
+            if (!CallProperty(cx, val, name, res))
                 return false;
         } else {
-            if (!GetProperty(cx, obj, obj, id, res))
+            MOZ_ASSERT(op == JSOP_GETXPROP);
+            RootedObject obj(cx, &val.toObject());
+            RootedId id(cx, NameToId(name));
+            if (!GetPropertyForNameLookup(cx, obj, id, res))
                 return false;
         }
-
-#if JS_HAS_NO_SUCH_METHOD
-        // Handle objects with __noSuchMethod__.
-        if (op == JSOP_CALLPROP && MOZ_UNLIKELY(res.isUndefined()) && val.isObject()) {
-            if (!OnUnknownMethod(cx, obj, IdToValue(id), res))
-                return false;
-        }
-#endif
     }
 
     return true;
@@ -9955,19 +9954,12 @@ GetTemplateObjectForNative(JSContext* cx, HandleScript script, jsbytecode* pc,
         return true;
     }
 
-    if (native == js::array_concat) {
-        if (args.thisv().isObject() &&
-            args.thisv().toObject().is<ArrayObject>() &&
-            !args.thisv().toObject().isSingleton() &&
-            !args.thisv().toObject().group()->hasUnanalyzedPreliminaryObjects())
-        {
-            RootedObject proto(cx, args.thisv().toObject().getProto());
-            res.set(NewDenseEmptyArray(cx, proto, TenuredObject));
+    if (native == js::array_concat || native == js::array_slice) {
+        if (args.thisv().isObject() && !args.thisv().toObject().isSingleton()) {
+            res.set(NewFullyAllocatedArrayTryReuseGroup(cx, &args.thisv().toObject(), 0,
+                                                        TenuredObject, /* forceAnalyze = */ true));
             if (!res)
                 return false;
-
-            res->setGroup(args.thisv().toObject().group());
-            return true;
         }
     }
 
@@ -12696,11 +12688,15 @@ ICGetIntrinsic_Constant::~ICGetIntrinsic_Constant()
 { }
 
 ICGetProp_Primitive::ICGetProp_Primitive(JitCode* stubCode, ICStub* firstMonitorStub,
-                                         Shape* protoShape, uint32_t offset)
+                                         JSValueType primitiveType, Shape* protoShape,
+                                         uint32_t offset)
   : ICMonitoredStub(GetProp_Primitive, stubCode, firstMonitorStub),
     protoShape_(protoShape),
     offset_(offset)
-{ }
+{
+    extra_ = uint16_t(primitiveType);
+    MOZ_ASSERT(JSValueType(extra_) == primitiveType);
+}
 
 ICGetPropNativeStub::ICGetPropNativeStub(ICStub::Kind kind, JitCode* stubCode,
                                          ICStub* firstMonitorStub,

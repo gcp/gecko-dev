@@ -32,7 +32,6 @@
 #include "nsIXPConnect.h"
 #include "nsPerformance.h"
 #include "nsPIDOMWindow.h"
-#include "nsSerializationHelper.h"
 
 #include <algorithm>
 #include "jsfriendapi.h"
@@ -4076,17 +4075,6 @@ WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal,
 }
 
 template <class Derived>
-void
-WorkerPrivateParent<Derived>::SetSecurityInfo(nsISerializable* aSerializable)
-{
-  MOZ_ASSERT(IsServiceWorker());
-  AssertIsOnMainThread();
-  nsAutoCString securityInfo;
-  NS_SerializeToString(aSerializable, securityInfo);
-  SetSecurityInfo(securityInfo);
-}
-
-template <class Derived>
 JSContext*
 WorkerPrivateParent<Derived>::ParentJSContext() const
 {
@@ -4382,17 +4370,19 @@ WorkerDebugger::Initialize(const nsAString& aURL, JSContext* aCx)
 
   MutexAutoLock lock(mMutex);
 
-  if (!mWorkerPrivate || mIsInitialized) {
+  if (!mWorkerPrivate) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  nsRefPtr<CompileDebuggerScriptRunnable> runnable =
-    new CompileDebuggerScriptRunnable(mWorkerPrivate, aURL);
-  if (!runnable->Dispatch(aCx)) {
-    return NS_ERROR_FAILURE;
-  }
+  if (!mIsInitialized) {
+    nsRefPtr<CompileDebuggerScriptRunnable> runnable =
+      new CompileDebuggerScriptRunnable(mWorkerPrivate, aURL);
+    if (!runnable->Dispatch(aCx)) {
+      return NS_ERROR_FAILURE;
+    }
 
-  mIsInitialized = true;
+    mIsInitialized = true;
+  }
 
   return NS_OK;
 }

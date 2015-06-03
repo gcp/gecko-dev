@@ -845,11 +845,6 @@ private:
                           int32_t* aSliceRefCnt,
                           bool* aResult) override;
 
-    virtual PDocAccessibleParent* AllocPDocAccessibleParent(PDocAccessibleParent*, const uint64_t&) override;
-    virtual bool DeallocPDocAccessibleParent(PDocAccessibleParent*) override;
-    virtual bool RecvPDocAccessibleConstructor(PDocAccessibleParent* aDoc,
-                                               PDocAccessibleParent* aParentDoc, const uint64_t& aParentID) override;
-
     virtual PWebrtcGlobalParent* AllocPWebrtcGlobalParent() override;
     virtual bool DeallocPWebrtcGlobalParent(PWebrtcGlobalParent *aActor) override;
 
@@ -922,7 +917,7 @@ private:
     nsRefPtr<nsConsoleService>  mConsoleService;
     nsConsoleService* GetConsoleService();
 
-    nsDataHashtable<nsUint64HashKey, nsRefPtr<ParentIdleListener> > mIdleListeners;
+    nsTArray<nsCOMPtr<nsIObserver>> mIdleListeners;
 
 #ifdef MOZ_X11
     // Dup of child's X socket, used to scope its resources to this
@@ -942,17 +937,20 @@ private:
 } // namespace mozilla
 
 class ParentIdleListener : public nsIObserver {
+  friend class mozilla::dom::ContentParent;
+
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
 
-  ParentIdleListener(mozilla::dom::ContentParent* aParent, uint64_t aObserver)
-    : mParent(aParent), mObserver(aObserver)
+  ParentIdleListener(mozilla::dom::ContentParent* aParent, uint64_t aObserver, uint32_t aTime)
+    : mParent(aParent), mObserver(aObserver), mTime(aTime)
   {}
 private:
   virtual ~ParentIdleListener() {}
   nsRefPtr<mozilla::dom::ContentParent> mParent;
   uint64_t mObserver;
+  uint32_t mTime;
 };
 
 #endif

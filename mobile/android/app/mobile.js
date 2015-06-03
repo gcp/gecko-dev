@@ -180,6 +180,8 @@ pref("xpinstall.whitelist.fileRequest", false);
 pref("xpinstall.whitelist.add", "addons.mozilla.org");
 pref("xpinstall.whitelist.add.180", "marketplace.firefox.com");
 
+pref("xpinstall.signatures.required", false);
+
 pref("extensions.enabledScopes", 1);
 pref("extensions.autoupdate.enabled", true);
 pref("extensions.autoupdate.interval", 86400);
@@ -909,3 +911,10 @@ pref("touchcaret.extendedvisibility", true);
 // The TouchCaret and the SelectionCarets will indicate when the
 // TextSelection actionbar is to be openned or closed.
 pref("caret.manages-android-actionbar", true);
+
+// Disable sending console to logcat on release builds.
+#ifdef RELEASE_BUILD
+pref("consoleservice.logcat", false);
+#else
+pref("consoleservice.logcat", true);
+#endif

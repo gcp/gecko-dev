@@ -178,37 +178,141 @@ private:
     nsCOMPtr<nsIServerSocket> mServerSocket;
 };
 
-// Static class to create and destory LayerScopeWebSocketManager object
-class WebSocketHelper
+class DrawSession {
+public:
+    DrawSession()
+      : mOffsetX(0.0)
+      , mOffsetY(0.0)
+      , mRects(0)
+    { }
+
+    float mOffsetX;
+    float mOffsetY;
+    gfx::Matrix4x4 mMVMatrix;
+    size_t mRects;
+    gfx::Rect mLayerRects[4];
+};
+
+class ContentMonitor {
+public:
+    using THArray = nsTArray<const TextureHost *>;
+
+    // Notify the content of a TextureHost was changed.
+    void SetChangedHost(const TextureHost* host) {
+        if (THArray::NoIndex == mChangedHosts.IndexOf(host)) {
+            mChangedHosts.AppendElement(host);
+        }
+    }
+
+    // Clear changed flag of a host.
+    void ClearChangedHost(const TextureHost* host) {
+        if (THArray::NoIndex != mChangedHosts.IndexOf(host)) {
+          mChangedHosts.RemoveElement(host);
+        }
+    }
+
+    // Return true iff host is a new one or the content of it had been changed.
+    bool IsChangedOrNew(const TextureHost* host) {
+        if (THArray::NoIndex == mSeenHosts.IndexOf(host)) {
+            mSeenHosts.AppendElement(host);
+            return true;
+        }
+
+        if (decltype(mChangedHosts)::NoIndex != mChangedHosts.IndexOf(host)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    void Empty() {
+        mSeenHosts.SetLength(0);
+        mChangedHosts.SetLength(0);
+    }
+private:
+    THArray mSeenHosts;
+    THArray mChangedHosts;
+};
+
+// Hold all singleton objects used by LayerScope
+class LayerScopeManager
 {
 public:
-    static void CreateServerSocket()
+    void CreateServerSocket()
     {
-        // Create Web Server Socket (which has to be on the main thread)
-        MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-        if (!sWebSocketManager) {
-            sWebSocketManager = new LayerScopeWebSocketManager();
+        //  WebSocketManager must be created on the main thread.
+        if (NS_IsMainThread()) {
+            mWebSocketManager = mozilla::MakeUnique<LayerScopeWebSocketManager>();
+        } else {
+            // Dispatch creation to main thread, and make sure we
+            // dispatch this only once after booting
+            static bool dispatched = false;
+            if (dispatched) {
+                return;
+            }
+
+            DebugOnly<nsresult> rv =
+              NS_DispatchToMainThread(new CreateServerSocketRunnable(this));
+            MOZ_ASSERT(NS_SUCCEEDED(rv),
+                  "Failed to dispatch WebSocket Creation to main thread");
+            dispatched = true;
         }
     }
 
-    static void DestroyServerSocket()
+    void DestroyServerSocket()
     {
         // Destroy Web Server Socket
-        if (sWebSocketManager) {
-            sWebSocketManager->RemoveAllConnections();
+        if (mWebSocketManager) {
+            mWebSocketManager->RemoveAllConnections();
         }
     }
 
-    static LayerScopeWebSocketManager* GetSocketManager()
+    LayerScopeWebSocketManager* GetSocketManager()
     {
-        return sWebSocketManager;
+        return mWebSocketManager.get();
+    }
+
+    ContentMonitor* GetContentMonitor()
+    {
+        if (!mContentMonitor.get()) {
+            mContentMonitor = mozilla::MakeUnique<ContentMonitor>();
+        }
+
+        return mContentMonitor.get();
+    }
+
+    void NewDrawSession() {
+        mSession = mozilla::MakeUnique<DrawSession>();
+    }
+
+    DrawSession& CurrentSession() {
+        return *mSession;
     }
 
 private:
-    static StaticAutoPtr<LayerScopeWebSocketManager> sWebSocketManager;
+    friend class CreateServerSocketRunnable;
+    class CreateServerSocketRunnable : public nsRunnable
+    {
+    public:
+        explicit CreateServerSocketRunnable(LayerScopeManager *aLayerScopeManager)
+            : mLayerScopeManager(aLayerScopeManager)
+        {
+        }
+        NS_IMETHOD Run() {
+            mLayerScopeManager->mWebSocketManager =
+                mozilla::MakeUnique<LayerScopeWebSocketManager>();
+            return NS_OK;
+        }
+    private:
+        LayerScopeManager* mLayerScopeManager;
+    };
+
+    mozilla::UniquePtr<LayerScopeWebSocketManager> mWebSocketManager;
+    mozilla::UniquePtr<DrawSession> mSession;
+    mozilla::UniquePtr<ContentMonitor> mContentMonitor;
 };
 
-StaticAutoPtr<LayerScopeWebSocketManager> WebSocketHelper::sWebSocketManager;
+LayerScopeManager gLayerScopeManager;
 
 /*
  * DebugGLData is the base class of
@@ -230,13 +334,13 @@ public:
 
 protected:
     static bool WriteToStream(Packet& aPacket) {
-        if (!WebSocketHelper::GetSocketManager())
+        if (!gLayerScopeManager.GetSocketManager())
             return true;
 
         uint32_t size = aPacket.ByteSize();
         auto data = MakeUnique<uint8_t[]>(size);
         aPacket.SerializeToArray(data.get(), size);
-        return WebSocketHelper::GetSocketManager()->WriteAll(data.get(), size);
+        return gLayerScopeManager.GetSocketManager()->WriteAll(data.get(), size);
     }
 
     Packet::DataType mDataType;
@@ -269,6 +373,95 @@ public:
 protected:
     int64_t mFrameStamp;
 };
+
+#ifdef MOZ_WIDGET_GONK
+// B2G optimization.
+class DebugGLGraphicBuffer final: public DebugGLData {
+public:
+    DebugGLGraphicBuffer(void *layerRef,
+                         GLenum target,
+                         GLuint name,
+                         const LayerRenderState &aState)
+        : DebugGLData(Packet::TEXTURE),
+          mLayerRef(reinterpret_cast<uint64_t>(layerRef)),
+          mTarget(target),
+          mName(name),
+          mState(aState)
+    {
+    }
+
+    virtual bool Write() override {
+        return WriteToStream(mPacket);
+    }
+
+    bool TryPack(bool packData) {
+        android::sp<android::GraphicBuffer> buffer = mState.mSurface;
+        MOZ_ASSERT(buffer.get());
+
+        mPacket.set_type(mDataType);
+        TexturePacket* tp = mPacket.mutable_texture();
+        tp->set_layerref(mLayerRef);
+        tp->set_name(mName);
+        tp->set_target(mTarget);
+
+        int pFormat = buffer->getPixelFormat();
+        if (HAL_PIXEL_FORMAT_RGBA_8888 != pFormat &&
+            HAL_PIXEL_FORMAT_RGBX_8888 != pFormat) {
+            return false;
+        }
+
+        int32_t stride = buffer->getStride() * 4;
+        int32_t height = buffer->getHeight();
+        int32_t width = buffer->getWidth();
+        int32_t sourceSize = stride * height;
+        if (sourceSize <= 0) {
+            return false;
+        }
+
+        uint32_t dFormat = mState.FormatRBSwapped() ?
+                           LOCAL_GL_BGRA : LOCAL_GL_RGBA;
+        tp->set_dataformat(dFormat);
+        tp->set_dataformat((1 << 16 | tp->dataformat()));
+        tp->set_width(width);
+        tp->set_height(height);
+        tp->set_stride(stride);
+
+        if (packData) {
+            uint8_t* grallocData = nullptr;
+            if (BAD_VALUE == buffer->lock(GRALLOC_USAGE_SW_READ_OFTEN |
+                                           GRALLOC_USAGE_SW_WRITE_NEVER,
+                                           reinterpret_cast<void**>(&grallocData)))
+            {
+                return false;
+            }
+            // Do not return before buffer->unlock();
+            auto compressedData =
+                 MakeUnique<char[]>(LZ4::maxCompressedSize(sourceSize));
+            int compressedSize = LZ4::compress((char*)grallocData,
+                                               sourceSize,
+                                               compressedData.get());
+
+            if (compressedSize > 0) {
+                tp->set_data(compressedData.get(), compressedSize);
+            } else {
+                buffer->unlock();
+                return false;
+             }
+
+            buffer->unlock();
+        }
+
+        return true;
+    }
+
+private:
+    uint64_t mLayerRef;
+    GLenum mTarget;
+    GLuint mName;
+    const LayerRenderState &mState;
+    Packet mPacket;
+};
+#endif
 
 class DebugGLTextureData final: public DebugGLData {
 public:
@@ -495,11 +688,12 @@ public:
     NS_IMETHODIMP OnSocketAccepted(nsIServerSocket *aServ,
                                    nsISocketTransport *aTransport) override
     {
-        if (!WebSocketHelper::GetSocketManager())
+        if (!gLayerScopeManager.GetSocketManager())
             return NS_OK;
 
         printf_stderr("*** LayerScope: Accepted connection\n");
-        WebSocketHelper::GetSocketManager()->AddConnection(aTransport);
+        gLayerScopeManager.GetSocketManager()->AddConnection(aTransport);
+        gLayerScopeManager.GetContentMonitor()->Empty();
         return NS_OK;
     }
 
@@ -538,8 +732,6 @@ public:
             delete d;
     }
 
-    /* nsIRunnable impl; send the data */
-
     NS_IMETHODIMP Run() override {
         DebugGLData *d;
         nsresult rv = NS_OK;
@@ -555,7 +747,7 @@ public:
         Cleanup();
 
         if (NS_FAILED(rv)) {
-            WebSocketHelper::DestroyServerSocket();
+            gLayerScopeManager.DestroyServerSocket();
         }
 
         return NS_OK;
@@ -567,15 +759,6 @@ protected:
 
 NS_IMPL_ISUPPORTS(DebugDataSender, nsIRunnable);
 
-
-class CreateServerSocketRunnable : public nsRunnable
-{
-public:
-    NS_IMETHOD Run() {
-        WebSocketHelper::CreateServerSocket();
-        return NS_OK;
-    }
-};
 
 /*
  * LayerScope SendXXX Structure
@@ -608,7 +791,6 @@ public:
 
     static void ClearTextureIdList();
 
-    static bool IsTextureIdContainsInList(GLuint aTextureId);
 
 // Sender private functions
 private:
@@ -619,14 +801,23 @@ private:
     static void SendTextureSource(GLContext* aGLContext,
                                   void* aLayerRef,
                                   TextureSourceOGL* aSource,
+                                  GLuint aTexID,
                                   bool aFlipY);
+#ifdef MOZ_WIDGET_GONK
+    static bool SendGraphicBuffer(void* aLayerRef,
+                                  TextureSourceOGL* aSource,
+                                  GLuint aTexID,
+                                  const TexturedEffect* aEffect);
+#endif
     static void SendTexturedEffect(GLContext* aGLContext,
                                    void* aLayerRef,
                                    const TexturedEffect* aEffect);
     static void SendYCbCrEffect(GLContext* aGLContext,
                                 void* aLayerRef,
                                 const EffectYCbCr* aEffect);
-
+    static GLuint GetTextureID(GLContext* aGLContext,
+                               TextureSourceOGL* aSource);
+    static bool IsTextureIdContainsInList(GLuint aTextureId);
 // Data fields
 private:
     static bool sLayersTreeSendable;
@@ -710,14 +901,35 @@ SenderHelper::SendColor(void* aLayerRef,
                         int aWidth,
                         int aHeight)
 {
-    WebSocketHelper::GetSocketManager()->AppendDebugData(
+    gLayerScopeManager.GetSocketManager()->AppendDebugData(
         new DebugGLColorData(aLayerRef, aColor, aWidth, aHeight));
+}
+
+GLuint
+SenderHelper::GetTextureID(GLContext* aGLContext,
+                           TextureSourceOGL* aSource) {
+    GLenum textureTarget = aSource->GetTextureTarget();
+    aSource->BindTexture(LOCAL_GL_TEXTURE0, gfx::Filter::LINEAR);
+
+    GLuint texID = 0;
+    // This is horrid hack. It assumes that aGLContext matches the context
+    // aSource has bound to.
+    if (textureTarget == LOCAL_GL_TEXTURE_2D) {
+        aGLContext->GetUIntegerv(LOCAL_GL_TEXTURE_BINDING_2D, &texID);
+    } else if (textureTarget == LOCAL_GL_TEXTURE_EXTERNAL) {
+        aGLContext->GetUIntegerv(LOCAL_GL_TEXTURE_BINDING_EXTERNAL, &texID);
+    } else if (textureTarget == LOCAL_GL_TEXTURE_RECTANGLE) {
+        aGLContext->GetUIntegerv(LOCAL_GL_TEXTURE_BINDING_RECTANGLE, &texID);
+    }
+
+    return texID;
 }
 
 void
 SenderHelper::SendTextureSource(GLContext* aGLContext,
                                 void* aLayerRef,
                                 TextureSourceOGL* aSource,
+                                GLuint aTexID,
                                 bool aFlipY)
 {
     MOZ_ASSERT(aGLContext);
@@ -730,34 +942,51 @@ SenderHelper::SendTextureSource(GLContext* aGLContext,
                                                              aSource->GetFormat());
     int shaderConfig = config.mFeatures;
 
-    aSource->BindTexture(LOCAL_GL_TEXTURE0, gfx::Filter::LINEAR);
+    gfx::IntSize size = aSource->GetSize();
 
-    GLuint textureId = 0;
-    // This is horrid hack. It assumes that aGLContext matches the context
-    // aSource has bound to.
-    if (textureTarget == LOCAL_GL_TEXTURE_2D) {
-        aGLContext->GetUIntegerv(LOCAL_GL_TEXTURE_BINDING_2D, &textureId);
-    } else if (textureTarget == LOCAL_GL_TEXTURE_EXTERNAL) {
-        aGLContext->GetUIntegerv(LOCAL_GL_TEXTURE_BINDING_EXTERNAL, &textureId);
-    } else if (textureTarget == LOCAL_GL_TEXTURE_RECTANGLE) {
-        aGLContext->GetUIntegerv(LOCAL_GL_TEXTURE_BINDING_RECTANGLE, &textureId);
-    }
-
-    if (!IsTextureIdContainsInList(textureId)) {
-      gfx::IntSize size = aSource->GetSize();
-
-      // By sending 0 to ReadTextureImage rely upon aSource->BindTexture binding
-      // texture correctly. textureId is used for tracking in DebugGLTextureData.
-      RefPtr<DataSourceSurface> img =
-          aGLContext->ReadTexImageHelper()->ReadTexImage(0, textureTarget,
+    // By sending 0 to ReadTextureImage rely upon aSource->BindTexture binding
+    // texture correctly. texID is used for tracking in DebugGLTextureData.
+    RefPtr<DataSourceSurface> img =
+        aGLContext->ReadTexImageHelper()->ReadTexImage(0, textureTarget,
                                                          size,
                                                          shaderConfig, aFlipY);
-      sTextureIdList.push_back(textureId);
-      WebSocketHelper::GetSocketManager()->AppendDebugData(
-          new DebugGLTextureData(aGLContext, aLayerRef, textureTarget,
-                               textureId, img));
-    }
+    gLayerScopeManager.GetSocketManager()->AppendDebugData(
+        new DebugGLTextureData(aGLContext, aLayerRef, textureTarget,
+                               aTexID, img));
+
+    sTextureIdList.push_back(aTexID);
 }
+
+#ifdef MOZ_WIDGET_GONK
+bool
+SenderHelper::SendGraphicBuffer(void* aLayerRef,
+                                TextureSourceOGL* aSource,
+                                GLuint aTexID,
+                                const TexturedEffect* aEffect) {
+    if (!aEffect->mState.mSurface.get()) {
+        return false;
+    }
+
+    GLenum target = aSource->GetTextureTarget();
+    mozilla::UniquePtr<DebugGLGraphicBuffer> package =
+        MakeUnique<DebugGLGraphicBuffer>(aLayerRef, target, aTexID, aEffect->mState);
+
+    // The texure content in this TexureHost is not altered,
+    // we don't need to send it again.
+    bool changed = gLayerScopeManager.GetContentMonitor()->IsChangedOrNew(
+        aEffect->mState.mTexture);
+    if (!package->TryPack(changed)) {
+        return false;
+    }
+
+    // Transfer ownership to SocketManager.
+    gLayerScopeManager.GetSocketManager()->AppendDebugData(package.release());
+    sTextureIdList.push_back(aTexID);
+
+    gLayerScopeManager.GetContentMonitor()->ClearChangedHost(aEffect->mState.mTexture);
+    return true;
+}
+#endif
 
 void
 SenderHelper::SendTexturedEffect(GLContext* aGLContext,
@@ -765,11 +994,23 @@ SenderHelper::SendTexturedEffect(GLContext* aGLContext,
                                  const TexturedEffect* aEffect)
 {
     TextureSourceOGL* source = aEffect->mTexture->AsSourceOGL();
-    if (!source)
+    if (!source) {
         return;
+    }
 
-    bool flipY = false;
-    SendTextureSource(aGLContext, aLayerRef, source, flipY);
+    GLuint texID = GetTextureID(aGLContext, source);
+    if (IsTextureIdContainsInList(texID)) {
+        return;
+    }
+
+#ifdef MOZ_WIDGET_GONK
+    if (SendGraphicBuffer(aLayerRef, source, texID, aEffect)) {
+        return;
+    }
+#endif
+    // Fallback texture sending path.
+    // Render to texture and read pixels back.
+    SendTextureSource(aGLContext, aLayerRef, source, texID, false);
 }
 
 void
@@ -786,10 +1027,20 @@ SenderHelper::SendYCbCrEffect(GLContext* aGLContext,
     TextureSourceOGL* sourceCb = sourceYCbCr->GetSubSource(Cb)->AsSourceOGL();
     TextureSourceOGL* sourceCr = sourceYCbCr->GetSubSource(Cr)->AsSourceOGL();
 
-    bool flipY = false;
-    SendTextureSource(aGLContext, aLayerRef, sourceY,  flipY);
-    SendTextureSource(aGLContext, aLayerRef, sourceCb, flipY);
-    SendTextureSource(aGLContext, aLayerRef, sourceCr, flipY);
+    GLuint texID = GetTextureID(aGLContext, sourceY);
+    if (!IsTextureIdContainsInList(texID)) {
+        SendTextureSource(aGLContext, aLayerRef, sourceY, texID, false);
+    }
+
+    texID = GetTextureID(aGLContext, sourceCb);
+    if (!IsTextureIdContainsInList(texID)) {
+        SendTextureSource(aGLContext, aLayerRef, sourceCb, texID, false);
+    }
+
+    texID = GetTextureID(aGLContext, sourceCr);
+    if (!IsTextureIdContainsInList(texID)) {
+        SendTextureSource(aGLContext, aLayerRef, sourceCr, texID, false);
+    }
 }
 
 void
@@ -832,6 +1083,16 @@ SenderHelper::SendEffectChain(GLContext* aGLContext,
 
     //const Effect* secondaryEffect = aEffectChain.mSecondaryEffects[EffectTypes::MASK];
     // TODO:
+}
+
+void
+LayerScope::ContentChanged(TextureHost *host)
+{
+    if (!CheckSendable()) {
+      return;
+    }
+
+    gLayerScopeManager.GetContentMonitor()->SetChangedHost(host);
 }
 
 // ----------------------------------------------
@@ -1241,7 +1502,7 @@ LayerScopeWebSocketHandler::HandleDataFrame(uint8_t *aData,
 void
 LayerScopeWebSocketHandler::CloseConnection()
 {
-    WebSocketHelper::GetSocketManager()->CleanDebugData();
+    gLayerScopeManager.GetSocketManager()->CleanDebugData();
     if (mInputStream) {
         mInputStream->AsyncWait(nullptr, 0, 0, nullptr);
         mInputStream = nullptr;
@@ -1311,55 +1572,8 @@ LayerScope::Init()
         return;
     }
 
-    if (NS_IsMainThread()) {
-        WebSocketHelper::CreateServerSocket();
-    } else {
-        // Dispatch creation to main thread, and make sure we
-        // dispatch this only once after booting
-        static bool dispatched = false;
-        if (dispatched) {
-            return;
-        }
-        DebugOnly<nsresult> rv = NS_DispatchToMainThread(new CreateServerSocketRunnable());
-        MOZ_ASSERT(NS_SUCCEEDED(rv), "Failed to dispatch WebSocket Creation to main thread");
-        dispatched = true;
-    }
+    gLayerScopeManager.CreateServerSocket();
 }
-
-class DrawSession {
-public:
-    NS_INLINE_DECL_REFCOUNTING(DrawSession)
-
-    DrawSession()
-      : mOffsetX(0.0),
-        mOffsetY(0.0),
-        mRects(0)
-    { }
-
-    float mOffsetX;
-    float mOffsetY;
-    gfx::Matrix4x4 mMVMatrix;
-    size_t mRects;
-    gfx::Rect mLayerRects[4];
-private:
-    ~DrawSession() {}
-};
-
-class DrawSessionHolder {
-public:
-    static void setSession(DrawSession *aSession) {
-        mSession = aSession;
-    }
-
-    static DrawSession& current() {
-        return *mSession;
-    }
-
-private:
-    static nsRefPtr<DrawSession> mSession;
-};
-
-nsRefPtr<DrawSession> DrawSessionHolder::mSession;
 
 void
 LayerScope::DrawBegin()
@@ -1368,7 +1582,7 @@ LayerScope::DrawBegin()
         return;
     }
 
-    DrawSessionHolder::setSession(new DrawSession());
+    gLayerScopeManager.NewDrawSession();
 }
 
 void LayerScope::SetRenderOffset(float aX, float aY)
@@ -1377,8 +1591,8 @@ void LayerScope::SetRenderOffset(float aX, float aY)
         return;
     }
 
-    DrawSessionHolder::current().mOffsetX = aX;
-    DrawSessionHolder::current().mOffsetY = aY;
+    gLayerScopeManager.CurrentSession().mOffsetX = aX;
+    gLayerScopeManager.CurrentSession().mOffsetY = aY;
 }
 
 void LayerScope::SetLayerTransform(const gfx::Matrix4x4& aMatrix)
@@ -1387,7 +1601,7 @@ void LayerScope::SetLayerTransform(const gfx::Matrix4x4& aMatrix)
         return;
     }
 
-    DrawSessionHolder::current().mMVMatrix = aMatrix;
+    gLayerScopeManager.CurrentSession().mMVMatrix = aMatrix;
 }
 
 void LayerScope::SetLayerRects(size_t aRects, const gfx::Rect* aLayerRects)
@@ -1399,10 +1613,10 @@ void LayerScope::SetLayerRects(size_t aRects, const gfx::Rect* aLayerRects)
     MOZ_ASSERT(aRects > 0 && aRects <= 4);
     MOZ_ASSERT(aLayerRects);
 
-    DrawSessionHolder::current().mRects = aRects;
+    gLayerScopeManager.CurrentSession().mRects = aRects;
 
     for (size_t i = 0; i < aRects; i++){
-        DrawSessionHolder::current().mLayerRects[i] = aLayerRects[i];
+        gLayerScopeManager.CurrentSession().mLayerRects[i] = aLayerRects[i];
     }
 }
 
@@ -1419,8 +1633,8 @@ LayerScope::DrawEnd(gl::GLContext* aGLContext,
 
     // 1. Send parameters of draw call, such as uniforms and attributes of
     // vertex adnd fragment shader.
-    DrawSession& draws = DrawSessionHolder::current();
-    WebSocketHelper::GetSocketManager()->AppendDebugData(
+    DrawSession& draws = gLayerScopeManager.CurrentSession();
+    gLayerScopeManager.GetSocketManager()->AppendDebugData(
         new DebugGLDrawData(draws.mOffsetX, draws.mOffsetY,
                             draws.mMVMatrix, draws.mRects,
                             draws.mLayerRects,
@@ -1449,7 +1663,7 @@ LayerScope::SendLayerDump(UniquePtr<Packet> aPacket)
     if (!CheckSendable() || !SenderHelper::GetLayersTreeSendable()) {
         return;
     }
-    WebSocketHelper::GetSocketManager()->AppendDebugData(
+    gLayerScopeManager.GetSocketManager()->AppendDebugData(
         new DebugGLLayersData(Move(aPacket)));
 }
 
@@ -1462,11 +1676,11 @@ LayerScope::CheckSendable()
     if (!gfxPrefs::LayerScopeEnabled()) {
         return false;
     }
-    if (!WebSocketHelper::GetSocketManager()) {
+    if (!gLayerScopeManager.GetSocketManager()) {
         Init();
         return false;
     }
-    if (!WebSocketHelper::GetSocketManager()->IsConnected()) {
+    if (!gLayerScopeManager.GetSocketManager()->IsConnected()) {
         return false;
     }
     return true;
@@ -1476,7 +1690,7 @@ void
 LayerScope::CleanLayer()
 {
     if (CheckSendable()) {
-        WebSocketHelper::GetSocketManager()->CleanDebugData();
+        gLayerScopeManager.GetSocketManager()->CleanDebugData();
     }
 }
 
@@ -1484,7 +1698,7 @@ void
 LayerScope::SetHWComposed()
 {
     if (CheckSendable()) {
-        WebSocketHelper::GetSocketManager()->AppendDebugData(
+        gLayerScopeManager.GetSocketManager()->AppendDebugData(
             new DebugGLMetaData(Packet::META, true));
     }
 }
@@ -1513,7 +1727,7 @@ LayerScopeAutoFrame::BeginFrame(int64_t aFrameStamp)
         return;
     }
 
-    WebSocketHelper::GetSocketManager()->AppendDebugData(
+    gLayerScopeManager.GetSocketManager()->AppendDebugData(
         new DebugGLFrameStatusData(Packet::FRAMESTART, aFrameStamp));
 }
 
@@ -1524,9 +1738,9 @@ LayerScopeAutoFrame::EndFrame()
         return;
     }
 
-    WebSocketHelper::GetSocketManager()->AppendDebugData(
+    gLayerScopeManager.GetSocketManager()->AppendDebugData(
         new DebugGLFrameStatusData(Packet::FRAMEEND));
-    WebSocketHelper::GetSocketManager()->DispatchDebugData();
+    gLayerScopeManager.GetSocketManager()->DispatchDebugData();
 }
 
 } /* layers */

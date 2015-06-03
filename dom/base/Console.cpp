@@ -36,6 +36,10 @@
 #include "nsIWebNavigation.h"
 #include "nsIXPConnect.h"
 
+#ifdef MOZ_ENABLE_PROFILER_SPS
+#include "nsIProfiler.h"
+#endif
+
 // The maximum allowed number of concurrent timers per page.
 #define MAX_PAGE_TIMERS 10000
 
@@ -668,7 +672,7 @@ private:
         return;
       }
 
-      if (!arguments.AppendElement(value)) {
+      if (!arguments.AppendElement(value, fallible)) {
         return;
       }
     }
@@ -830,7 +834,7 @@ Console::Time(JSContext* aCx, const JS::Handle<JS::Value> aTime)
   Sequence<JS::Value> data;
   SequenceRooter<JS::Value> rooter(aCx, &data);
 
-  if (!aTime.isUndefined() && !data.AppendElement(aTime)) {
+  if (!aTime.isUndefined() && !data.AppendElement(aTime, fallible)) {
     return;
   }
 
@@ -843,7 +847,7 @@ Console::TimeEnd(JSContext* aCx, const JS::Handle<JS::Value> aTime)
   Sequence<JS::Value> data;
   SequenceRooter<JS::Value> rooter(aCx, &data);
 
-  if (!aTime.isUndefined() && !data.AppendElement(aTime)) {
+  if (!aTime.isUndefined() && !data.AppendElement(aTime, fallible)) {
     return;
   }
 
@@ -856,9 +860,26 @@ Console::TimeStamp(JSContext* aCx, const JS::Handle<JS::Value> aData)
   Sequence<JS::Value> data;
   SequenceRooter<JS::Value> rooter(aCx, &data);
 
-  if (aData.isString() && !data.AppendElement(aData)) {
+  if (aData.isString() && !data.AppendElement(aData, fallible)) {
     return;
   }
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  if (aData.isString() && NS_IsMainThread()) {
+    if (!mProfiler) {
+      mProfiler = do_GetService("@mozilla.org/tools/profiler;1");
+    }
+    if (mProfiler) {
+      bool active = false;
+      if (NS_SUCCEEDED(mProfiler->IsActive(&active)) && active) {
+        nsAutoJSString stringValue;
+        if (stringValue.init(aCx, aData)) {
+          mProfiler->AddMarker(NS_ConvertUTF16toUTF8(stringValue).get());
+        }
+      }
+    }
+  }
+#endif
 
   Method(aCx, MethodTimeStamp, NS_LITERAL_STRING("timeStamp"), data);
 }
@@ -896,7 +917,7 @@ Console::ProfileMethod(JSContext* aCx, const nsAString& aAction,
   Sequence<JS::Value>& sequence = event.mArguments.Value();
 
   for (uint32_t i = 0; i < aData.Length(); ++i) {
-    if (!sequence.AppendElement(aData[i])) {
+    if (!sequence.AppendElement(aData[i], fallible)) {
       return;
     }
   }
@@ -1044,7 +1065,6 @@ public:
                           const nsAString& aCause)
     : TimelineMarker(aDocShell, "TimeStamp", aMetaData, aCause)
   {
-    CaptureStack();
     MOZ_ASSERT(aMetaData == TRACING_TIMESTAMP);
   }
 
@@ -1054,7 +1074,6 @@ public:
     if (!GetCause().IsEmpty()) {
       aMarker.mCauseName.Construct(GetCause());
     }
-    aMarker.mEndStack = GetStack();
   }
 };
 
@@ -1440,7 +1459,7 @@ FlushOutput(JSContext* aCx, Sequence<JS::Value>& aSequence, nsString &aOutput)
       return false;
     }
 
-    if (!aSequence.AppendElement(JS::StringValue(str))) {
+    if (!aSequence.AppendElement(JS::StringValue(str), fallible)) {
       return false;
     }
 
@@ -1571,7 +1590,7 @@ Console::ProcessArguments(JSContext* aCx,
           v = aData[index++];
         }
 
-        if (!aSequence.AppendElement(v)) {
+        if (!aSequence.AppendElement(v, fallible)) {
           return false;
         }
 
@@ -1594,13 +1613,13 @@ Console::ProcessArguments(JSContext* aCx,
           int32_t diff = aSequence.Length() - aStyles.Length();
           if (diff > 0) {
             for (int32_t i = 0; i < diff; i++) {
-              if (!aStyles.AppendElement(JS::NullValue())) {
+              if (!aStyles.AppendElement(JS::NullValue(), fallible)) {
                 return false;
               }
             }
           }
 
-          if (!aStyles.AppendElement(JS::StringValue(jsString))) {
+          if (!aStyles.AppendElement(JS::StringValue(jsString), fallible)) {
             return false;
           }
         }
@@ -1672,7 +1691,7 @@ Console::ProcessArguments(JSContext* aCx,
 
   // The rest of the array, if unused by the format string.
   for (; index < aData.Length(); ++index) {
-    if (!aSequence.AppendElement(aData[index])) {
+    if (!aSequence.AppendElement(aData[index], fallible)) {
       return false;
     }
   }
@@ -1808,7 +1827,7 @@ Console::ArgumentsToValueList(const nsTArray<JS::Heap<JS::Value>>& aData,
                               Sequence<JS::Value>& aSequence)
 {
   for (uint32_t i = 0; i < aData.Length(); ++i) {
-    if (!aSequence.AppendElement(aData[i])) {
+    if (!aSequence.AppendElement(aData[i], fallible)) {
       return false;
     }
   }

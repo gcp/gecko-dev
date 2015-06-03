@@ -143,7 +143,9 @@ let HighlighterActor = exports.HighlighterActor = protocol.ActorClass({
     events.on(this._tabActor, "navigate", this._onNavigate);
   },
 
-  get conn() this._inspector && this._inspector.conn,
+  get conn() {
+    return this._inspector && this._inspector.conn;
+  },
 
   _createHighlighter: function() {
     this._isPreviousWindowXUL = isXUL(this._tabActor);
@@ -347,12 +349,10 @@ let HighlighterActor = exports.HighlighterActor = protocol.ActorClass({
   }),
 
   _findAndAttachElement: function(event) {
-    let doc = event.target.ownerDocument;
-
-    let x = event.clientX;
-    let y = event.clientY;
-
-    let node = doc.elementFromPoint(x, y);
+    // originalTarget allows access to the "real" element before any retargeting
+    // is applied, such as in the case of XBL anonymous elements.  See also
+    // https://developer.mozilla.org/docs/XBL/XBL_1.0_Reference/Anonymous_Content#Event_Flow_and_Targeting
+    let node = event.originalTarget || event.target;
     return this._walker.attachElement(node);
   },
 
@@ -434,7 +434,9 @@ let CustomHighlighterActor = exports.CustomHighlighterActor = protocol.ActorClas
     }
   },
 
-  get conn() this._inspector && this._inspector.conn,
+  get conn() {
+    return this._inspector && this._inspector.conn;
+  },
 
   destroy: function() {
     protocol.Actor.prototype.destroy.call(this);

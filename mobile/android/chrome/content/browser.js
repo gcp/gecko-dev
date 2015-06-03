@@ -3064,7 +3064,8 @@ var LightWeightThemeWebInstaller = {
       label: allowButtonText,
       callback: function () {
         LightWeightThemeWebInstaller._install(data);
-      }
+      },
+      positive: true
     }];
 
     NativeWindow.doorhanger.show(message, "Personas", buttons, BrowserApp.selectedTab.id);
@@ -4219,11 +4220,6 @@ Tab.prototype = {
 
           this.browser.addEventListener("pagehide", listener, true);
         }
-
-        if (docURI.startsWith("about:reader")) {
-          // Update the page action to show the "reader active" icon.
-          Reader.updatePageAction(this);
-        }
         break;
       }
 
@@ -4544,6 +4540,13 @@ Tab.prototype = {
     let sameDocument = (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT) != 0 ||
                        ((this.browser.lastURI != null) && fixedURI.equals(this.browser.lastURI) && !fixedURI.equals(aLocationURI));
     this.browser.lastURI = fixedURI;
+
+    // Let the reader logic know about same document changes because we won't get a DOMContentLoaded
+    // or pageshow event, but we'll still want to update the reader view button to account for this change.
+    // This mirrors the desktop logic in TabsProgressListener.
+    if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT) {
+      this.browser.messageManager.sendAsyncMessage("Reader:PushState", {isArticle: gBrowser.selectedBrowser.isArticle});
+    }
 
     // Reset state of click-to-play plugin notifications.
     clearTimeout(this.pluginDoorhangerTimeout);
@@ -5883,7 +5886,7 @@ var FormAssistant = {
 
     this._formAutoCompleteService.autoCompleteSearchAsync(aElement.name || aElement.id,
                                                           aSearchString, aElement, null,
-                                                          resultsAvailable);
+                                                          null, resultsAvailable);
   },
 
   /**
@@ -6257,7 +6260,8 @@ var XPInstallObserver = {
               // Kick off the install
               installInfo.install();
               return false;
-            }
+            },
+            positive: true
           }];
         }
         NativeWindow.doorhanger.show(message, aTopic, buttons, tab.id);
@@ -6351,7 +6355,8 @@ var XPInstallObserver = {
           let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"].getService(Ci.nsIAppStartup);
           appStartup.quit(Ci.nsIAppStartup.eRestart | Ci.nsIAppStartup.eAttemptQuit);
         }
-      }
+      },
+      positive: true
     }];
 
     let message = Strings.browser.GetStringFromName("notificationRestart.normal");
@@ -6647,6 +6652,13 @@ var PopupBlockerObserver = {
 
         let buttons = [
           {
+            label: strings.GetStringFromName("popup.dontShow"),
+            callback: function(aChecked) {
+              if (aChecked)
+                PopupBlockerObserver.allowPopupsForSite(false);
+            }
+          },
+          {
             label: strings.GetStringFromName("popup.show"),
             callback: function(aChecked) {
               // Set permission before opening popup windows
@@ -6654,14 +6666,8 @@ var PopupBlockerObserver = {
                 PopupBlockerObserver.allowPopupsForSite(true);
 
               PopupBlockerObserver.showPopupsForSite();
-            }
-          },
-          {
-            label: strings.GetStringFromName("popup.dontShow"),
-            callback: function(aChecked) {
-              if (aChecked)
-                PopupBlockerObserver.allowPopupsForSite(false);
-            }
+            },
+            positive: true
           }
         ];
 
@@ -6763,13 +6769,7 @@ var IndexedDB = {
       observer.observe(null, responseTopic, Ci.nsIPermissionManager.UNKNOWN_ACTION);
     }
 
-    let buttons = [{
-      label: strings.GetStringFromName("offlineApps.allow"),
-      callback: function() {
-        clearTimeout(timeoutId);
-        observer.observe(null, responseTopic, Ci.nsIPermissionManager.ALLOW_ACTION);
-      }
-    },
+    let buttons = [
     {
       label: strings.GetStringFromName("offlineApps.dontAllow2"),
       callback: function(aChecked) {
@@ -6777,6 +6777,14 @@ var IndexedDB = {
         let action = aChecked ? Ci.nsIPermissionManager.DENY_ACTION : Ci.nsIPermissionManager.UNKNOWN_ACTION;
         observer.observe(null, responseTopic, action);
       }
+    },
+    {
+      label: strings.GetStringFromName("offlineApps.allow"),
+      callback: function() {
+        clearTimeout(timeoutId);
+        observer.observe(null, responseTopic, Ci.nsIPermissionManager.ALLOW_ACTION);
+      },
+      positive: true
     }];
 
     let options = { checkbox: Strings.browser.GetStringFromName("offlineApps.dontAskAgain") };

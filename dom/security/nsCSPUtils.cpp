@@ -149,6 +149,9 @@ CSP_ContentTypeToDirective(nsContentPolicyType aType)
     case nsIContentPolicy::TYPE_MEDIA:
       return nsIContentSecurityPolicy::MEDIA_SRC_DIRECTIVE;
 
+    case nsIContentPolicy::TYPE_WEB_MANIFEST:
+      return nsIContentSecurityPolicy::WEB_MANIFEST_SRC_DIRECTIVE;
+
     case nsIContentPolicy::TYPE_SUBDOCUMENT:
       return nsIContentSecurityPolicy::FRAME_SRC_DIRECTIVE;
 
@@ -777,7 +780,7 @@ nsCSPDirective::toDomCSPStruct(mozilla::dom::CSP& outCSP) const
   for (uint32_t i = 0; i < mSrcs.Length(); i++) {
     src.Truncate();
     mSrcs[i]->toString(src);
-    srcs.AppendElement(src);
+    srcs.AppendElement(src, mozilla::fallible);
   }
 
   switch(mDirective) {
@@ -836,6 +839,10 @@ nsCSPDirective::toDomCSPStruct(mozilla::dom::CSP& outCSP) const
       outCSP.mFrame_ancestors.Value() = srcs;
       return;
 
+    case nsIContentSecurityPolicy::WEB_MANIFEST_SRC_DIRECTIVE:
+      outCSP.mManifest_src.Construct();
+      outCSP.mManifest_src.Value() = srcs;
+      return;
     // not supporting REFLECTED_XSS_DIRECTIVE
 
     case nsIContentSecurityPolicy::BASE_URI_DIRECTIVE:
@@ -1031,7 +1038,7 @@ nsCSPPolicy::toDomCSPStruct(mozilla::dom::CSP& outCSP) const
   for (uint32_t i = 0; i < mDirectives.Length(); ++i) {
     if (mDirectives[i]->equals(nsIContentSecurityPolicy::REFERRER_DIRECTIVE)) {
       mozilla::dom::Sequence<nsString> srcs;
-      srcs.AppendElement(mReferrerPolicy);
+      srcs.AppendElement(mReferrerPolicy, mozilla::fallible);
       outCSP.mReferrer.Construct();
       outCSP.mReferrer.Value() = srcs;
     } else {

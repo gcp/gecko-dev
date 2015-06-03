@@ -169,7 +169,7 @@ describe("loop.store.RoomStore", function () {
       });
 
       describe("refresh", function() {
-        it ("should clear the list of rooms", function() {
+        it("should clear the list of rooms", function() {
           fakeMozLoop.rooms.trigger("refresh", "refresh");
 
           expect(store.getStoreState().rooms).to.have.length.of(0);
@@ -322,7 +322,7 @@ describe("loop.store.RoomStore", function () {
       });
 
       it("should switch the pendingCreation state flag to false", function() {
-        store.setStoreState({pendingCreation:true});
+        store.setStoreState({pendingCreation: true});
 
         store.createdRoom(new sharedActions.CreatedRoom({
           roomToken: "fakeToken"
@@ -347,7 +347,7 @@ describe("loop.store.RoomStore", function () {
 
     describe("#createRoomError", function() {
       it("should switch the pendingCreation state flag to false", function() {
-        store.setStoreState({pendingCreation:true});
+        store.setStoreState({pendingCreation: true});
 
         store.createRoomError({
           error: new Error("fake")
@@ -644,9 +644,26 @@ describe("loop.store.RoomStore", function () {
       });
     });
 
+    it("should flag the the store as saving context", function() {
+      expect(store.getStoreState().savingContext).to.eql(false);
+
+      sandbox.stub(fakeMozLoop.rooms, "update", function(roomToken, roomData, cb) {
+        expect(store.getStoreState().savingContext).to.eql(true);
+        cb();
+      });
+
+      dispatcher.dispatch(new sharedActions.UpdateRoomContext({
+        roomToken: "42abc",
+        newRoomName: "silly name"
+      }));
+
+      expect(store.getStoreState().savingContext).to.eql(false);
+    });
+
     it("should store any update-encountered error", function() {
       var err = new Error("fake");
       sandbox.stub(fakeMozLoop.rooms, "update", function(roomToken, roomData, cb) {
+        expect(store.getStoreState().savingContext).to.eql(true);
         cb(err);
       });
 
@@ -655,7 +672,9 @@ describe("loop.store.RoomStore", function () {
         newRoomName: "silly name"
       }));
 
-      expect(store.getStoreState().error).eql(err);
+      var state = store.getStoreState();
+      expect(state.error).eql(err);
+      expect(state.savingContext).to.eql(false);
     });
 
     it("should ensure only submitting a non-empty room name", function() {
@@ -667,6 +686,7 @@ describe("loop.store.RoomStore", function () {
       }));
 
       sinon.assert.notCalled(fakeMozLoop.rooms.update);
+      expect(store.getStoreState().savingContext).to.eql(false);
     });
 
     it("should save updated context information", function() {
@@ -723,6 +743,7 @@ describe("loop.store.RoomStore", function () {
         }));
 
         sinon.assert.notCalled(fakeMozLoop.rooms.update);
+        expect(store.getStoreState().savingContext).to.eql(false);
       });
   });
 });

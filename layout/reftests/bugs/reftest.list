@@ -1847,7 +1847,7 @@ test-pref(layout.css.grid.enabled,true) == 1053035-1-grid.html 1053035-1-ref.htm
 == 1059498-2.html 1059498-1-ref.html
 == 1059498-3.html 1059498-1-ref.html
 skip-if(Mulet) == 1062108-1.html 1062108-1-ref.html # Bug 1139893: font rounding failure, tracked in bug 1141535
-fails-if(Android) fuzzy-if(Mulet,1,5) == 1062792-1.html 1062792-1-ref.html
+fuzzy-if(Mulet,1,5) == 1062792-1.html 1062792-1-ref.html
 == 1062963-floatmanager-reflow.html 1062963-floatmanager-reflow-ref.html
 test-pref(dom.webcomponents.enabled,true) == 1066554-1.html 1066554-1-ref.html
 == 1069716-1.html 1069716-1-ref.html
@@ -1902,11 +1902,11 @@ skip-if(!asyncPanZoom) == 1133905-3-rtl.html 1133905-ref-rtl.html
 skip-if(!asyncPanZoom) == 1133905-4-rtl.html 1133905-ref-rtl.html
 skip-if(!asyncPanZoom) == 1133905-5-rtl.html 1133905-ref-rtl.html
 skip-if(!asyncPanZoom) == 1133905-6-rtl.html 1133905-ref-rtl.html
-skip-if(!asyncPanZoom) fuzzy-if(B2G,22,175) == 1133905-1-v-rtl.html 1133905-ref-v-rtl.html
+skip-if(!asyncPanZoom) fuzzy-if(B2G,23,175) == 1133905-1-v-rtl.html 1133905-ref-v-rtl.html
 skip-if(!asyncPanZoom) fuzzy-if(B2G,18,175) == 1133905-2-v-rtl.html 1133905-ref-v-rtl.html
-skip-if(!asyncPanZoom) fuzzy-if(B2G,64,180) == 1133905-3-v-rtl.html 1133905-ref-v-rtl.html
+skip-if(!asyncPanZoom) fuzzy-if(B2G,64,181) == 1133905-3-v-rtl.html 1133905-ref-v-rtl.html
 skip-if(!asyncPanZoom) == 1133905-4-v-rtl.html 1133905-ref-v-rtl.html
-skip-if(!asyncPanZoom) fuzzy-if(B2G,32,146) == 1133905-5-v-rtl.html 1133905-ref-v-rtl.html
+skip-if(!asyncPanZoom) fuzzy-if(B2G,33,180) == 1133905-5-v-rtl.html 1133905-ref-v-rtl.html
 skip-if(!asyncPanZoom) fuzzy-if(B2G,62,222) == 1133905-6-v-rtl.html 1133905-ref-v-rtl.html
 skip-if(!asyncPanZoom) == 1133905-1-h-rtl.html 1133905-ref-h-rtl.html
 skip-if(!asyncPanZoom) == 1133905-2-h-rtl.html 1133905-ref-h-rtl.html
@@ -1914,13 +1914,14 @@ skip-if(!asyncPanZoom) == 1133905-3-h-rtl.html 1133905-ref-h-rtl.html
 skip-if(!asyncPanZoom) == 1133905-4-h-rtl.html 1133905-ref-h-rtl.html
 skip-if(!asyncPanZoom) == 1133905-5-h-rtl.html 1133905-ref-h-rtl.html
 skip-if(!asyncPanZoom) == 1133905-6-h-rtl.html 1133905-ref-h-rtl.html
-skip-if(!asyncPanZoom) fuzzy-if(B2G,22,175) == 1133905-1-vh-rtl.html 1133905-ref-vh-rtl.html
+skip-if(!asyncPanZoom) fuzzy-if(B2G,23,175) == 1133905-1-vh-rtl.html 1133905-ref-vh-rtl.html
 skip-if(!asyncPanZoom) fuzzy-if(B2G,62,175) == 1133905-2-vh-rtl.html 1133905-ref-vh-rtl.html
-skip-if(!asyncPanZoom) fuzzy-if(B2G,23,174) == 1133905-3-vh-rtl.html 1133905-ref-vh-rtl.html
+skip-if(!asyncPanZoom) fuzzy-if(B2G,23,176) == 1133905-3-vh-rtl.html 1133905-ref-vh-rtl.html
 skip-if(!asyncPanZoom) == 1133905-4-vh-rtl.html 1133905-ref-vh-rtl.html
-skip-if(!asyncPanZoom) fuzzy-if(B2G,102,545) == 1133905-5-vh-rtl.html 1133905-ref-vh-rtl.html
+skip-if(!asyncPanZoom) fuzzy-if(B2G,102,577) == 1133905-5-vh-rtl.html 1133905-ref-vh-rtl.html
 skip-if(!asyncPanZoom) fuzzy-if(B2G,101,887) == 1133905-6-vh-rtl.html 1133905-ref-vh-rtl.html
 skip-if(B2G||Mulet) == 1150021-1.xul 1150021-1-ref.xul
 == 1151145-1.html 1151145-1-ref.html
 == 1151306-1.html 1151306-1-ref.html
+== 1153845-1.html 1153845-1-ref.html
 == 1156129-1.html 1156129-1-ref.html

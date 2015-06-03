@@ -100,7 +100,7 @@ class LMoveGroup : public LInstructionHelper<0, 0, 0>
         return new(alloc) LMoveGroup(alloc);
     }
 
-    void printOperands(FILE* fp);
+    void printOperands(GenericPrinter& out);
 
     // Add a move which takes place simultaneously with all others in the group.
     bool add(LAllocation from, LAllocation to, LDefinition::Type type);
@@ -3126,23 +3126,6 @@ class LPowD : public LCallInstructionHelper<1, 2, 1>
     }
 };
 
-// Math.random().
-class LRandom : public LCallInstructionHelper<1, 0, 2>
-{
-  public:
-    LIR_HEADER(Random)
-    LRandom(const LDefinition& temp, const LDefinition& temp2) {
-        setTemp(0, temp);
-        setTemp(1, temp2);
-    }
-    const LDefinition* temp() {
-        return getTemp(0);
-    }
-    const LDefinition* temp2() {
-        return getTemp(1);
-    }
-};
-
 class LMathFunctionD : public LCallInstructionHelper<1, 1, 1>
 {
   public:
@@ -4046,6 +4029,20 @@ class LLambdaArrow : public LInstructionHelper<1, 1 + BOX_PIECES, 1>
     }
 };
 
+class LKeepAliveObject : public LInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(KeepAliveObject)
+
+    explicit LKeepAliveObject(const LAllocation& object) {
+        setOperand(0, object);
+    }
+
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+};
+
 // Load the "slots" member out of a JSObject.
 //   Input: JSObject pointer
 //   Output: slots pointer
@@ -4141,6 +4138,10 @@ class LMaybeCopyElementsForWrite : public LInstructionHelper<0, 1, 1>
 
     const LDefinition* temp() {
         return getTemp(0);
+    }
+
+    const MMaybeCopyElementsForWrite* mir() const {
+        return mir_->toMaybeCopyElementsForWrite();
     }
 };
 
@@ -4918,6 +4919,39 @@ class LArrayConcat : public LCallInstructionHelper<1, 2, 2>
     }
     const LAllocation* rhs() {
         return getOperand(1);
+    }
+    const LDefinition* temp1() {
+        return getTemp(0);
+    }
+    const LDefinition* temp2() {
+        return getTemp(1);
+    }
+};
+
+class LArraySlice : public LCallInstructionHelper<1, 3, 2>
+{
+  public:
+    LIR_HEADER(ArraySlice)
+
+    LArraySlice(const LAllocation& obj, const LAllocation& begin, const LAllocation& end,
+                const LDefinition& temp1, const LDefinition& temp2) {
+        setOperand(0, obj);
+        setOperand(1, begin);
+        setOperand(2, end);
+        setTemp(0, temp1);
+        setTemp(1, temp2);
+    }
+    const MArraySlice* mir() const {
+        return mir_->toArraySlice();
+    }
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+    const LAllocation* begin() {
+        return getOperand(1);
+    }
+    const LAllocation* end() {
+        return getOperand(2);
     }
     const LDefinition* temp1() {
         return getTemp(0);

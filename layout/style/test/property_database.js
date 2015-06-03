@@ -1045,7 +1045,7 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "content-box" ],
-    other_values: [ "border-box", "padding-box" ],
+    other_values: [ "border-box" ],
     invalid_values: [ "margin-box", "content", "padding", "border", "margin" ]
   },
   "-moz-box-sizing": {
@@ -1055,7 +1055,7 @@ var gCSSProperties = {
     alias_for: "box-sizing",
     subproperties: [ "box-sizing" ],
     initial_values: [ "content-box" ],
-    other_values: [ "border-box", "padding-box" ],
+    other_values: [ "border-box" ],
     invalid_values: [ "margin-box", "content", "padding", "border", "margin" ]
   },
   "-moz-columns": {
@@ -5263,6 +5263,17 @@ if (SpecialPowers.getBoolPref("svg.paint-order.enabled")) {
     initial_values: [ "normal" ],
     other_values: [ "fill", "fill stroke", "fill stroke markers", "stroke markers fill" ],
     invalid_values: [ "fill stroke markers fill", "fill normal" ]
+  };
+}
+
+if (SpecialPowers.getBoolPref("svg.transform-origin.enabled")) {
+  gCSSProperties["transform-box"] = {
+    domProp: "transformBox",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "border-box" ],
+    other_values: [ "fill-box", "view-box" ],
+    invalid_values: []
   };
 }
 
