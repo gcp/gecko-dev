@@ -28,7 +28,7 @@ PRLogModuleInfo *gCamerasChildLog;
 namespace mozilla {
 namespace camera {
 
-/*class CamerasThreadDestructor : public nsRunnable
+class CamerasThreadDestructor : public nsRunnable
 {
 public:
   explicit CamerasThreadDestructor(nsIThread *aThread)
@@ -46,7 +46,7 @@ public:
 private:
   ~CamerasThreadDestructor() {}
   nsCOMPtr<nsIThread> mThread;
-};*/
+};
 
 class CamerasSingleton {
 public:
@@ -63,10 +63,15 @@ public:
 
   ~CamerasSingleton() {
     mCameras = nullptr;
-    // We're off the main thread so we can spin the event loop here.
-    MOZ_ASSERT(!NS_IsMainThread());
+    MOZ_ASSERT(NS_IsMainThread());
+
     if (mCamerasChildThread) {
-      mCamerasChildThread->Shutdown();
+      nsCOMPtr<nsIRunnable> event =
+        new CamerasThreadDestructor(mCamerasChildThread);
+      // No event loop spinning in destructors.
+      if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
+        mCamerasChildThread->Shutdown();
+      }
       mCamerasChildThread = nullptr;
     }
     LOG(("~CamerasSingleton: %p", this));
@@ -91,7 +96,9 @@ public:
     return getInstance().mCamerasChildThread;
   }
 
-  // We will be alive on destruction.
+  // Reinitializing CamerasChild will change the pointers below.
+  // We don't want this to happen in the middle of preparing IPC.
+  // We will be alive on destruction, so this needs to be off the books.
   mozilla::OffTheBooksMutex mCamerasMutex;
 
 private:
@@ -99,14 +106,13 @@ private:
   nsCOMPtr<nsIThread> mCamerasChildThread;
 };
 
-class AttachPBackgroundToIPCThread : public nsRunnable
+class InitializeIPCThread : public nsRunnable
 {
 public:
-  explicit AttachPBackgroundToIPCThread()
-    : mBackgroundChild(nullptr) {}
+  explicit InitializeIPCThread()
+    : mBackgroundChild(nullptr), mCamerasChild(nullptr) {}
 
-  NS_IMETHOD Run() override
-  {
+  NS_IMETHOD Run() override {
     // Try to get the PBackground handle
     ipc::PBackgroundChild* existingBackgroundChild =
       ipc::BackgroundChild::GetForCurrentThread();
@@ -116,44 +122,58 @@ public:
       SynchronouslyCreatePBackground();
       existingBackgroundChild =
         ipc::BackgroundChild::GetForCurrentThread();
+      LOG(("BackgroundChild: %p", existingBackgroundChild));
     }
     // By now PBackground is guaranteed to be up
     MOZ_RELEASE_ASSERT(existingBackgroundChild);
     mBackgroundChild = existingBackgroundChild;
 
+    // Create CamerasChild
+    mCamerasChild =
+      static_cast<CamerasChild*>(mBackgroundChild->SendPCamerasConstructor());
+
     return NS_OK;
   }
 
   ipc::PBackgroundChild* GetBackgroundChild() {
+    MOZ_ASSERT(mBackgroundChild);
     return mBackgroundChild;
+  }
+
+  CamerasChild* GetCamerasChild() {
+    MOZ_ASSERT(mCamerasChild);
+    return mCamerasChild;
   }
 
 private:
   ipc::PBackgroundChild* mBackgroundChild;
+  CamerasChild* mCamerasChild;
 };
 
 static CamerasChild* Cameras(bool trace) {
-  OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
   if (!gCamerasChildLog)
     gCamerasChildLog = PR_NewLogModule("CamerasChild");
+
+  OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
   if (!CamerasSingleton::getChild()) {
     LOG(("No sCameras, setting up"));
-    if (!CamerasSingleton::getThread()) {
-      LOG(("Spinning up IPC Thread"));
-      nsresult rv = NS_NewNamedThread("Cameras IPC",
-        getter_AddRefs(CamerasSingleton::getThread()));
-      if (NS_FAILED(rv)) {
-        LOG(("Error launching IPC Thread"));
-        return nullptr;
-      }
+    MOZ_ASSERT(!CamerasSingleton::getThread());
+    LOG(("Spinning up IPC Thread"));
+    nsresult rv = NS_NewNamedThread("Cameras IPC",
+      getter_AddRefs(CamerasSingleton::getThread()));
+    if (NS_FAILED(rv)) {
+      LOG(("Error launching IPC Thread"));
+      return nullptr;
     }
-    AttachPBackgroundToIPCThread* runnable = new AttachPBackgroundToIPCThread();
-    SyncRunnable::DispatchToThread(CamerasSingleton::getThread(), runnable);
-    ipc::PBackgroundChild* backgroundChild = runnable->GetBackgroundChild();
 
-    // Create PCameras by sending a message to the parent
-    CamerasSingleton::getChild() =
-      static_cast<CamerasChild*>(backgroundChild->SendPCamerasConstructor());
+    // 1) Send message to create PBackground on the thread created earlier
+    // 2) Create PCameras by sending a message to the parent on that thread
+    nsRefPtr<InitializeIPCThread> runnable = new InitializeIPCThread();
+    nsRefPtr<SyncRunnable> sr = new SyncRunnable(runnable);
+    sr->DispatchToThread(CamerasSingleton::getThread());
+    ipc::PBackgroundChild* backgroundChild = runnable->GetBackgroundChild();
+    CamerasSingleton::getChild() = runnable->GetCamerasChild();
+    MOZ_ASSERT(backgroundChild);
   }
   if (trace) {
     CamerasChild* tmp = CamerasSingleton::getChild();
@@ -204,7 +224,10 @@ CamerasChild::NumberOfCapabilities(CaptureEngine aCapEngine,
       }
       return NS_ERROR_FAILURE;
     });
-  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  {
+    OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
+    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  }
   monitor.Wait();
   LOG(("Capture capability count: %d", mReplyInteger));
   return mReplyInteger;
@@ -227,7 +250,10 @@ CamerasChild::NumberOfCaptureDevices(CaptureEngine aCapEngine)
       }
       return NS_ERROR_FAILURE;
     });
-  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  {
+    OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
+    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  }
   monitor.Wait();
   LOG(("Capture Devices: %d", mReplyInteger));
   return mReplyInteger;
@@ -272,7 +298,10 @@ CamerasChild::GetCaptureCapability(CaptureEngine aCapEngine,
       }
       return NS_ERROR_FAILURE;
     });
-  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  {
+    OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
+    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  }
   monitor.Wait();
   capability = mReplyCapability;
   return 0;
@@ -327,7 +356,10 @@ CamerasChild::GetCaptureDevice(CaptureEngine aCapEngine,
       }
       return NS_ERROR_FAILURE;
     });
-  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  {
+    OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
+    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  }
   monitor.Wait();
   base::strlcpy(device_nameUTF8, mReplyDeviceName.get(), device_nameUTF8Length);
   base::strlcpy(unique_idUTF8, mReplyDeviceID.get(), unique_idUTF8Length);
@@ -374,7 +406,10 @@ CamerasChild::AllocateCaptureDevice(CaptureEngine aCapEngine,
       }
       return NS_ERROR_FAILURE;
     });
-  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  {
+    OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
+    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  }
   monitor.Wait();
   LOG(("Capture Device allocated: %d", mReplyInteger));
   return mReplyInteger;
@@ -410,7 +445,10 @@ CamerasChild::ReleaseCaptureDevice(CaptureEngine aCapEngine,
       }
       return NS_ERROR_FAILURE;
     });
-  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  {
+    OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
+    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  }
   return 0;
 }
 
@@ -473,7 +511,10 @@ CamerasChild::StartCapture(CaptureEngine aCapEngine,
       }
       return NS_ERROR_FAILURE;
     });
-  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  {
+    OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
+    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  }
   return 0;
 }
 
@@ -494,7 +535,10 @@ CamerasChild::StopCapture(CaptureEngine aCapEngine, const int capture_id)
       }
       return NS_ERROR_FAILURE;
     });
-  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  {
+    OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
+    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  }
   // XXX: the stopcapture can be delayed infinitely, what if we
   // end up reusing the capture_id?
   RemoveCallback(aCapEngine, capture_id);
@@ -592,10 +636,6 @@ CamerasChild::~CamerasChild()
   XShutdown();
 
   MOZ_COUNT_DTOR(CamerasChild);
-}
-
-CamerasChild* CreateCamerasChild() {
-  return new CamerasChild();
 }
 
 webrtc::ExternalRenderer* CamerasChild::Callback(CaptureEngine aCapEngine,

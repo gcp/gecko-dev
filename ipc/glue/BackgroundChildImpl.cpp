@@ -243,7 +243,7 @@ camera::PCamerasChild*
 BackgroundChildImpl::AllocPCamerasChild()
 {
   nsRefPtr<camera::CamerasChild> agent =
-      camera::CreateCamerasChild();
+    new camera::CamerasChild();
   return agent.forget().take();
 }
 

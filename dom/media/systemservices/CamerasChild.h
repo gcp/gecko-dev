@@ -22,6 +22,11 @@
 #include "webrtc/video_engine/include/vie_render.h"
 
 namespace mozilla {
+
+namespace ipc {
+class BackgroundChildImpl;
+}
+
 namespace camera {
 
 enum CaptureEngine : int {
@@ -66,9 +71,10 @@ int StopCapture(CaptureEngine aCapEngine, const int capture_id);
 
 class CamerasChild final : public PCamerasChild
 {
+  friend class mozilla::ipc::BackgroundChildImpl;
+
 public:
   NS_INLINE_DECL_REFCOUNTING(CamerasChild)
-  explicit CamerasChild();
 
   virtual bool RecvDeliverFrame(const int&, const int&, mozilla::ipc::Shmem&&,
                                 const int&, const uint32_t&, const int64_t&,
@@ -112,7 +118,8 @@ public:
 
 
 private:
-  virtual ~CamerasChild();
+  explicit CamerasChild();
+  ~CamerasChild();
   void XShutdown();
 
   nsTArray<CapturerElement> mCallbacks;
@@ -128,8 +135,6 @@ private:
   nsCString mReplyDeviceName;
   nsCString mReplyDeviceID;
 };
-
-CamerasChild* CreateCamerasChild();
 
 } // namespace camera
 } // namespace mozilla
