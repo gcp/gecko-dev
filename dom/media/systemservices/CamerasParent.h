@@ -115,6 +115,9 @@ private:
   // PBackground parent thread
   nsIThread* mPBackgroundThread;
 
+  // webrtc processing thread
+  nsCOMPtr<nsIThread> mWebRTCThread;
+
   // Shutdown handling
   bool mChildIsAlive;
 };

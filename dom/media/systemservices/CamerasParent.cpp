@@ -7,8 +7,10 @@
 #include "CamerasParent.h"
 #include "CamerasUtils.h"
 #include "MediaEngine.h"
+#include "MediaUtils.h"
 
 #include "mozilla/Assertions.h"
+#include "mozilla/unused.h"
 #include "nsThreadUtils.h"
 #include "prlog.h"
 
@@ -192,83 +194,6 @@ CamerasParent::RecvReleaseFrame(mozilla::ipc::Shmem&& s) {
   return true;
 }
 
-// Will send a failure reply over IPC unless we
-// set the success flag. Use it to cover all exit
-// paths on calls expecting IPC replies.
-class AutoIPCReplier
-{
-public:
-  AutoIPCReplier(CamerasParent *aCP)
-    : mCP(aCP), mSuccess(false) {};
-
-  void GoodFinish() {
-    mSuccess = true;
-  }
-
-  ~AutoIPCReplier() {
-    if (!mSuccess) {
-      bool shutup = mCP->SendReplyFailure();
-      if (!shutup) {
-        LOG(("Failure to send failure"));
-      }
-    }
-  }
-
-private:
-  CamerasParent *mCP;
-  bool mSuccess;
-};
-
-bool
-CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
-                                         const nsCString& unique_id)
-{
-  AutoIPCReplier ipc(this);
-
-  LOG((__PRETTY_FUNCTION__));
-  if (!EnsureInitialized(aCapEngine)) {
-    LOG(("Fails to initialize"));
-    return false;
-  }
-
-  bool success = true;
-  int numdev;
-
-  if (mEngines[aCapEngine].mPtrViECapture->AllocateCaptureDevice(
-      unique_id.get(), MediaEngineSource::kMaxUniqueIdLength, numdev)) {
-    return false;
-  }
-  LOG(("Allocated device nr %d", numdev));
-
-  ipc.GoodFinish();
-  success &= SendReplyAllocateCaptureDevice(numdev);
-  return success;
-}
-
-bool
-CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
-                                        const int &numdev)
-{
-  AutoIPCReplier ipc(this);
-  LOG((__PRETTY_FUNCTION__));
-  if (!EnsureInitialized(aCapEngine)) {
-    LOG(("Fails to initialize"));
-    return false;
-  }
-
-  LOG(("RecvReleaseCamera device nr %d", numdev));
-  if (mEngines[aCapEngine].mPtrViECapture->ReleaseCaptureDevice(numdev)) {
-    return false;
-  }
-
-  bool success = true;
-  ipc.GoodFinish();
-  success &= SendReplySuccess();
-
-  LOG(("Freed device nr %d", numdev));
-  return success;
-}
-
 bool
 CamerasParent::SetupEngine(CaptureEngine aCapEngine)
 {
@@ -388,61 +313,72 @@ CamerasParent::EnsureInitialized(int aEngine)
 bool
 CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine)
 {
-  AutoIPCReplier ipc(this);
-  bool success = true;
-
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("RecvNumberOfCaptureDevices fails to initialize"));
+    unused << SendReplyFailure();
     return false;
   }
 
-  int num = mEngines[aCapEngine].mPtrViECapture->NumberOfCaptureDevices();
-  ipc.GoodFinish();
-  success &= SendReplyNumberOfCaptureDevices(num);
+  nsRefPtr<nsIRunnable> webrtc_runnable =
+    media::NewRunnableFrom([=]() -> nsresult {
+      int num = this->mEngines[aCapEngine].mPtrViECapture->NumberOfCaptureDevices();
+      nsRefPtr<nsIRunnable> ipc_runnable =
+        media::NewRunnableFrom([=]() -> nsresult {
+          if (num < 0) {
+            LOG(("RecvNumberOfCaptureDevices couldn't find devices"));
+            unused << SendReplyFailure();
+            return NS_ERROR_FAILURE;
+          } else {
+            LOG(("RecvNumberOfCaptureDevices: %d", num));
+            unused << SendReplyNumberOfCaptureDevices(num);
+            return NS_OK;
+          }
+        });
+        this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
+      return NS_OK;
+    });
+  mWebRTCThread->Dispatch(webrtc_runnable, NS_DISPATCH_NORMAL);
 
-  if (num < 0) {
-    LOG(("RecvNumberOfCaptureDevices couldn't find devices"));
-    return false;
-  } else {
-    LOG(("RecvNumberOfCaptureDevices: %d %d", num, success));
-    return success;
-  }
+  return true;
 }
 
 bool
 CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
                                         const nsCString& unique_id)
 {
-  AutoIPCReplier ipc(this);
-  int numCaps = 0;
-
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("RecvNumberOfCapabilities fails to initialize"));
+    unused << SendReplyFailure();
     return false;
   }
 
   LOG(("Getting caps for %s", unique_id.get()));
-  int num =
-    mEngines[aCapEngine].mPtrViECapture->NumberOfCapabilities(
-      unique_id.get(),
-      MediaEngineSource::kMaxUniqueIdLength);
+  nsRefPtr<nsIRunnable> webrtc_runnable =
+    media::NewRunnableFrom([=]() -> nsresult {
+      int num =
+        mEngines[aCapEngine].mPtrViECapture->NumberOfCapabilities(
+         unique_id.get(),
+          MediaEngineSource::kMaxUniqueIdLength);
+      nsRefPtr<nsIRunnable> ipc_runnable =
+        media::NewRunnableFrom([=]() -> nsresult {
+          if (num < 0) {
+            LOG(("RecvNumberOfCapabilities couldn't find capabilities"));
+            unused << SendReplyFailure();
+            return NS_ERROR_FAILURE;
+          } else {
+            LOG(("RecvNumberOfCapabilities: %d", num));
+          }
+          unused << SendReplyNumberOfCapabilities(num);
+          return NS_OK;
+        });
+      this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
+      return NS_OK;
+    });
+  mWebRTCThread->Dispatch(webrtc_runnable, NS_DISPATCH_NORMAL);
 
-  numCaps = num;
-
-  if (num < 0) {
-    LOG(("RecvNumberOfCapabilities couldn't find capabilities"));
-    return false;
-  } else {
-    LOG(("RecvNumberOfCapabilities: %d", numCaps));
-  }
-
-  bool success = true;
-  ipc.GoodFinish();
-  success &= SendReplyNumberOfCapabilities(numCaps);
-
-  return success;
+  return true;
 }
 
 bool
@@ -450,78 +386,165 @@ CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
                                         const nsCString& unique_id,
                                         const int& num)
 {
-  AutoIPCReplier ipc(this);
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("Fails to initialize"));
+    unused << SendReplyFailure();
     return false;
   }
 
   LOG(("RecvGetCaptureCapability: %s %d", unique_id.get(), num));
 
-  webrtc::CaptureCapability webrtcCaps;
-  int error = mEngines[aCapEngine].mPtrViECapture->GetCaptureCapability(
-      unique_id.get(), MediaEngineSource::kMaxUniqueIdLength,num, webrtcCaps);
-  if (error) {
-    return false;
-  }
+  nsRefPtr<nsIRunnable> webrtc_runnable =
+    media::NewRunnableFrom([=]() -> nsresult {
+      webrtc::CaptureCapability webrtcCaps;
+      int error = mEngines[aCapEngine].mPtrViECapture->GetCaptureCapability(
+        unique_id.get(), MediaEngineSource::kMaxUniqueIdLength, num, webrtcCaps);
+      nsRefPtr<nsIRunnable> ipc_runnable =
+        media::NewRunnableFrom([=]() -> nsresult {
+          CaptureCapability capCap(webrtcCaps.width,
+                                   webrtcCaps.height,
+                                   webrtcCaps.maxFPS,
+                                   webrtcCaps.expectedCaptureDelay,
+                                   webrtcCaps.rawType,
+                                   webrtcCaps.codecType,
+                                   webrtcCaps.interlaced);
+          LOG(("Capability: %d %d %d %d %d %d",
+               webrtcCaps.width,
+               webrtcCaps.height,
+               webrtcCaps.maxFPS,
+               webrtcCaps.expectedCaptureDelay,
+               webrtcCaps.rawType,
+               webrtcCaps.codecType));
+          if (error) {
+            unused << SendReplyFailure();
+            return NS_ERROR_FAILURE;
+          }
+          unused << SendReplyGetCaptureCapability(capCap);
+          return NS_OK;
+        });
+      this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
+      return NS_OK;
+    });
+  mWebRTCThread->Dispatch(webrtc_runnable, NS_DISPATCH_NORMAL);
 
-  bool success = true;
-  CaptureCapability capCap(webrtcCaps.width,
-                           webrtcCaps.height,
-                           webrtcCaps.maxFPS,
-                           webrtcCaps.expectedCaptureDelay,
-                           webrtcCaps.rawType,
-                           webrtcCaps.codecType,
-                           webrtcCaps.interlaced);
-  LOG(("Capability: %d %d %d %d %d %d",
-       webrtcCaps.width,
-       webrtcCaps.height,
-       webrtcCaps.maxFPS,
-       webrtcCaps.expectedCaptureDelay,
-       webrtcCaps.rawType,
-       webrtcCaps.codecType));
-  ipc.GoodFinish();
-  success &= SendReplyGetCaptureCapability(capCap);
-  return success;
+  return true;
 }
 
 bool
 CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
                                     const int& i)
 {
-  AutoIPCReplier ipc(this);
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("Fails to initialize"));
+    unused << SendReplyFailure();
     return false;
   }
-
-  char deviceName[MediaEngineSource::kMaxDeviceNameLength];
-  char deviceUniqueId[MediaEngineSource::kMaxUniqueIdLength];
 
   LOG(("RecvGetCaptureDevice"));
-  int error =
-    mEngines[aCapEngine].mPtrViECapture->GetCaptureDevice(i,
-                                                          deviceName,
-                                                          sizeof(deviceName),
-                                                          deviceUniqueId,
-                                                          sizeof(deviceUniqueId));
-  if (error) {
-    LOG(("GetCaptureDevice failed: %d", error));
+  nsRefPtr<nsIRunnable> webrtc_runnable =
+    media::NewRunnableFrom([=]() -> nsresult {
+      char deviceName[MediaEngineSource::kMaxDeviceNameLength];
+      char deviceUniqueId[MediaEngineSource::kMaxUniqueIdLength];
+
+      int error =
+        mEngines[aCapEngine].mPtrViECapture->GetCaptureDevice(i,
+                                                              deviceName,
+                                                              sizeof(deviceName),
+                                                              deviceUniqueId,
+                                                              sizeof(deviceUniqueId));
+      nsRefPtr<nsIRunnable> ipc_runnable =
+        media::NewRunnableFrom([=]() -> nsresult {
+          if (error) {
+            LOG(("GetCaptureDevice failed: %d", error));
+            unused << SendReplyFailure();
+            return NS_ERROR_FAILURE;
+          }
+
+          LOG(("Returning %s name %s id", deviceName, deviceUniqueId));
+
+          nsCString name;
+          nsCString uniqueId;
+          name.Assign(deviceName);
+          uniqueId.Assign(deviceUniqueId);
+
+          unused << SendReplyGetCaptureDevice(name, uniqueId);
+          return NS_OK;
+        });
+      this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
+      return NS_OK;
+    });
+  mWebRTCThread->Dispatch(webrtc_runnable, NS_DISPATCH_NORMAL);
+
+  return true;
+}
+
+bool
+CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
+                                         const nsCString& unique_id)
+{
+  LOG((__PRETTY_FUNCTION__));
+  if (!EnsureInitialized(aCapEngine)) {
+    LOG(("Fails to initialize"));
+    unused << SendReplyFailure();
     return false;
   }
 
-  LOG(("Returning %s name %s id", deviceName, deviceUniqueId));
+  nsRefPtr<nsIRunnable> webrtc_runnable =
+    media::NewRunnableFrom([=]() -> nsresult {
+      int numdev;
+      int error = mEngines[aCapEngine].mPtrViECapture->AllocateCaptureDevice(
+        unique_id.get(), MediaEngineSource::kMaxUniqueIdLength, numdev);
+      nsRefPtr<nsIRunnable> ipc_runnable =
+        media::NewRunnableFrom([=]() -> nsresult {
+          if (error) {
+            unused << SendReplyFailure();
+            return NS_ERROR_FAILURE;
+          } else {
+            LOG(("Allocated device nr %d", numdev));
+            unused << SendReplyAllocateCaptureDevice(numdev);
+            return NS_OK;
+          }
+        });
+      this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
+      return NS_OK;
+    });
+  mWebRTCThread->Dispatch(webrtc_runnable, NS_DISPATCH_NORMAL);
 
-  nsCString name;
-  nsCString uniqueId;
-  name.Assign(deviceName);
-  uniqueId.Assign(deviceUniqueId);
+  return true;
+}
 
-  bool success = true;
-  ipc.GoodFinish();
-  success &= SendReplyGetCaptureDevice(name, uniqueId);
+bool
+CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
+                                        const int &numdev)
+{
+  LOG((__PRETTY_FUNCTION__));
+  if (!EnsureInitialized(aCapEngine)) {
+    LOG(("Fails to initialize"));
+    unused << SendReplyFailure();
+    return false;
+  }
+
+  nsRefPtr<nsIRunnable> webrtc_runnable =
+    media::NewRunnableFrom([=]() -> nsresult {
+      LOG(("RecvReleaseCamera device nr %d", numdev));
+      int error = mEngines[aCapEngine].mPtrViECapture->ReleaseCaptureDevice(numdev);
+      nsRefPtr<nsIRunnable> ipc_runnable =
+        media::NewRunnableFrom([=]() -> nsresult {
+          if (error) {
+            unused << SendReplyFailure();
+            return NS_ERROR_FAILURE;
+          } else {
+            unused << SendReplySuccess();
+            LOG(("Freed device nr %d", numdev));
+            return NS_OK;
+          }
+        });
+      this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
+      return NS_OK;
+    });
+  mWebRTCThread->Dispatch(webrtc_runnable, NS_DISPATCH_NORMAL);
 
   return true;
 }
@@ -531,82 +554,94 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
                                 const int& capnum,
                                 const CaptureCapability& ipcCaps)
 {
-  AutoIPCReplier ipc(this);
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("Failure to initialize"));
+    unused << SendReplyFailure();
     return false;
   }
 
-  auto cbh = mCallbacks.AppendElement(
-    new CallbackHelper(static_cast<CaptureEngine>(aCapEngine), capnum, this));
-  auto render = static_cast<webrtc::ExternalRenderer*>(*cbh);
+  nsRefPtr<nsIRunnable> webrtc_runnable =
+    media::NewRunnableFrom([=]() -> nsresult {
+      auto cbh = mCallbacks.AppendElement(
+        new CallbackHelper(static_cast<CaptureEngine>(aCapEngine), capnum, this));
+      auto render = static_cast<webrtc::ExternalRenderer*>(*cbh);
 
-  EngineHelper* helper = &mEngines[aCapEngine];
+      EngineHelper* helper = &mEngines[aCapEngine];
 
-  int error =
-    helper->mPtrViERender->AddRenderer(capnum, webrtc::kVideoI420, render);
-  if (error == -1) {
-    return false;
-  }
+      int error =
+        helper->mPtrViERender->AddRenderer(capnum, webrtc::kVideoI420, render);
 
-  error = helper->mPtrViERender->StartRender(capnum);
-  if (error == -1) {
-    return false;
-  }
+      if (!error) {
+        error = helper->mPtrViERender->StartRender(capnum);
+      }
 
-  webrtc::CaptureCapability capability;
-  capability.width = ipcCaps.width();
-  capability.height = ipcCaps.height();
-  capability.maxFPS = ipcCaps.maxFPS();
-  capability.expectedCaptureDelay = ipcCaps.expectedCaptureDelay();
-  capability.rawType = static_cast<webrtc::RawVideoType>(ipcCaps.rawType());
-  capability.codecType = static_cast<webrtc::VideoCodecType>(ipcCaps.codecType());
-  capability.interlaced = ipcCaps.interlaced();
+      webrtc::CaptureCapability capability;
+      capability.width = ipcCaps.width();
+      capability.height = ipcCaps.height();
+      capability.maxFPS = ipcCaps.maxFPS();
+      capability.expectedCaptureDelay = ipcCaps.expectedCaptureDelay();
+      capability.rawType = static_cast<webrtc::RawVideoType>(ipcCaps.rawType());
+      capability.codecType = static_cast<webrtc::VideoCodecType>(ipcCaps.codecType());
+      capability.interlaced = ipcCaps.interlaced();
 
-  if (helper->mPtrViECapture->StartCapture(capnum, capability) < 0) {
-    return false;
-  }
+      if (!error) {
+        error = helper->mPtrViECapture->StartCapture(capnum, capability);
+      }
 
-  helper->mEngineIsRunning = true;
+      if (!error) {
+        helper->mEngineIsRunning = true;
+      }
 
-  bool success = true;
-  ipc.GoodFinish();
-  success &= SendReplySuccess();
+      nsRefPtr<nsIRunnable> ipc_runnable =
+        media::NewRunnableFrom([=]() -> nsresult {
+          if (!error) {
+            unused << SendReplySuccess();
+            return NS_OK;
+          } else {
+            unused << SendReplyFailure();
+            return NS_ERROR_FAILURE;
+          }
+        });
+      this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
+      return NS_OK;
+    });
+  mWebRTCThread->Dispatch(webrtc_runnable, NS_DISPATCH_NORMAL);
 
-  return success;
+  return true;
 }
 
 bool
 CamerasParent::RecvStopCapture(const int& aCapEngine,
                                const int& capnum)
 {
-  AutoIPCReplier ipc(this);
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
     LOG(("Failure to initialize"));
+    unused << SendReplyFailure();
     return false;
   }
 
-  mEngines[aCapEngine].mPtrViECapture->StopCapture(capnum);
-  mEngines[aCapEngine].mPtrViERender->StopRender(capnum);
-  mEngines[aCapEngine].mPtrViERender->RemoveRenderer(capnum);
-  mEngines[aCapEngine].mEngineIsRunning = false;
+  nsRefPtr<nsIRunnable> webrtc_runnable =
+    media::NewRunnableFrom([=]() -> nsresult {
+      mEngines[aCapEngine].mPtrViECapture->StopCapture(capnum);
+      mEngines[aCapEngine].mPtrViERender->StopRender(capnum);
+      mEngines[aCapEngine].mPtrViERender->RemoveRenderer(capnum);
+      mEngines[aCapEngine].mEngineIsRunning = false;
 
-  for (unsigned int i = 0; i < mCallbacks.Length(); i++) {
-    if (mCallbacks[i]->mCapEngine == aCapEngine
-        && mCallbacks[i]->mCapturerId == capnum) {
-      delete mCallbacks[i];
-      mCallbacks.RemoveElementAt(i);
-      break;
-    }
-  }
+      for (unsigned int i = 0; i < mCallbacks.Length(); i++) {
+        if (mCallbacks[i]->mCapEngine == aCapEngine
+            && mCallbacks[i]->mCapturerId == capnum) {
+          delete mCallbacks[i];
+          mCallbacks.RemoveElementAt(i);
+          break;
+        }
+      }
+      return NS_OK;
+    });
+  mWebRTCThread->Dispatch(webrtc_runnable, NS_DISPATCH_NORMAL);
 
-  bool success = true;
-  ipc.GoodFinish();
-  success &= SendReplySuccess();
-
-  return true;
+  return SendReplySuccess();
 }
 
 void CamerasParent::DoShutdown()
@@ -651,6 +686,13 @@ CamerasParent::CamerasParent()
 
   mPBackgroundThread = NS_GetCurrentThread();
   MOZ_ASSERT(mPBackgroundThread != nullptr, "GetCurrentThread failed");
+
+  LOG(("Spinning up WebRTC Cameras Thread"));
+  nsresult rv = NS_NewNamedThread("WebRTC Cameras",
+                                  getter_AddRefs(mWebRTCThread));
+  if (NS_FAILED(rv)) {
+    LOG(("Error launching WebRTC Cameras Thread"));
+  }
 
   MOZ_COUNT_CTOR(CamerasParent);
 }
