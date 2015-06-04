@@ -36,26 +36,6 @@ namespace camera {
 // a pointer to the IPC object. Users can then do IPC calls on that object
 // after dispatching them to aforementioned thread.
 
-class CamerasThreadDestructor : public nsRunnable
-{
-public:
-  explicit CamerasThreadDestructor(nsIThread *aThread)
-    : mThread(aThread) {}
-
-  NS_IMETHOD Run() override
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    if (mThread) {
-      mThread->Shutdown();
-    }
-    return NS_OK;
-  }
-
-private:
-  ~CamerasThreadDestructor() {}
-  nsCOMPtr<nsIThread> mThread;
-};
-
 class CamerasSingleton {
 public:
   CamerasSingleton()
@@ -75,7 +55,7 @@ public:
 
     if (mCamerasChildThread) {
       nsCOMPtr<nsIRunnable> event =
-        new CamerasThreadDestructor(mCamerasChildThread);
+        new ThreadDestructor(mCamerasChildThread);
       // No event loop spinning in destructors.
       if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
         mCamerasChildThread->Shutdown();

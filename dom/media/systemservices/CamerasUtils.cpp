@@ -12,18 +12,6 @@
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "nsIIPCBackgroundChildCreateCallback.h"
 
-// NSPR_LOG_MODULES=CameraBroker:5
-PRLogModuleInfo *gCameraBrokerLog = nullptr;
-#undef LOG
-#undef LOG_ENABLED
-#if defined(PR_LOGGING)
-#define LOG(args) PR_LOG(gCameraBrokerLog, PR_LOG_DEBUG, args)
-#define LOG_ENABLED() PR_LOG_TEST(gCameraBrokerLog, 5)
-#else
-#define LOG(args)
-#define LOG_ENABLED() (false)
-#endif
-
 namespace mozilla {
 namespace camera {
 

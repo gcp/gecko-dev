@@ -270,13 +270,19 @@ CamerasParent::SetupEngine(CaptureEngine aCapEngine)
 void
 CamerasParent::CloseEngines()
 {
-  // Stop the callers
-  while (mCallbacks.Length()) {
-    auto capEngine = mCallbacks[0]->mCapEngine;
-    auto capNum = mCallbacks[0]->mCapturerId;
-    LOG(("Forcing shutdown of %d, %d", capEngine, capNum));
-    RecvStopCapture(capEngine, capNum);
-    RecvReleaseCaptureDevice(capEngine, capNum);
+  {
+    MutexAutoLock lock(mCallbackMutex);
+    // Stop the callers
+    while (mCallbacks.Length()) {
+      auto capEngine = mCallbacks[0]->mCapEngine;
+      auto capNum = mCallbacks[0]->mCapturerId;
+      LOG(("Forcing shutdown of %d, %d", capEngine, capNum));
+      {
+        MutexAutoUnlock unlock(mCallbackMutex);
+        RecvStopCapture(capEngine, capNum);
+        RecvReleaseCaptureDevice(capEngine, capNum);
+      }
+    }
   }
 
   for (int i = 0; i < CaptureEngine::MaxEngine; i++) {
@@ -564,6 +570,7 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
 
   nsRefPtr<nsIRunnable> webrtc_runnable =
     media::NewRunnableFrom([=]() -> nsresult {
+      MutexAutoLock lock(mCallbackMutex);
       auto cbh = mCallbacks.AppendElement(
         new CallbackHelper(static_cast<CaptureEngine>(aCapEngine), capnum, this));
       auto render = static_cast<webrtc::ExternalRenderer*>(*cbh);
@@ -630,6 +637,7 @@ CamerasParent::RecvStopCapture(const int& aCapEngine,
       mEngines[aCapEngine].mPtrViERender->RemoveRenderer(capnum);
       mEngines[aCapEngine].mEngineIsRunning = false;
 
+      MutexAutoLock lock(mCallbackMutex);
       for (unsigned int i = 0; i < mCallbacks.Length(); i++) {
         if (mCallbacks[i]->mCapEngine == aCapEngine
             && mCallbacks[i]->mCapturerId == capnum) {
@@ -664,6 +672,18 @@ void CamerasParent::DoShutdown()
   }
 
   mPBackgroundThread = nullptr;
+
+  if (mWebRTCThread) {
+    // We actually expect to be on the MediaManager thread in
+    // normal circumstances. Still don't want to spin the
+    // event loop in our destructor.
+    MOZ_ASSERT(!NS_IsMainThread());
+    nsCOMPtr<nsIRunnable> event = new ThreadDestructor(mWebRTCThread);
+    if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
+      mWebRTCThread->Shutdown();
+    }
+    mWebRTCThread = nullptr;
+  }
 }
 
 void
@@ -678,7 +698,8 @@ CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 CamerasParent::CamerasParent()
-  : mShmemInitialized(false),
+  : mCallbackMutex("CamerasParent.mCallbackMutex"),
+    mShmemInitialized(false),
     mChildIsAlive(true)
 {
   if (!gCamerasParentLog)

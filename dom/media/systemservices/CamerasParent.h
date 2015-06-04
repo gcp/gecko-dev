@@ -107,6 +107,8 @@ private:
 
   EngineHelper mEngines[CaptureEngine::MaxEngine];
   nsTArray<CallbackHelper*> mCallbacks;
+  // Protects the callback arrays
+  Mutex mCallbackMutex;
 
   // image buffer
   bool mShmemInitialized;

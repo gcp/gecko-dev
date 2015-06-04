@@ -7,10 +7,32 @@
 #ifndef mozilla_CameraUtils_h
 #define mozilla_CameraUtils_h
 
+#include "nsThreadUtils.h"
+#include "nsCOMPtr.h"
+
 namespace mozilla {
 namespace camera {
 
 nsresult SynchronouslyCreatePBackground();
+
+class ThreadDestructor : public nsRunnable
+{
+public:
+  explicit ThreadDestructor(nsIThread *aThread)
+    : mThread(aThread) {}
+
+  NS_IMETHOD Run() override
+  {
+    if (mThread) {
+      mThread->Shutdown();
+    }
+    return NS_OK;
+  }
+
+private:
+  ~ThreadDestructor() {}
+  nsCOMPtr<nsIThread> mThread;
+};
 
 }
 }
