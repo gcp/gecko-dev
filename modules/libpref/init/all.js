@@ -4417,6 +4417,11 @@ pref("dom.push.adaptive.upperLimit", 1740000); // 29 min
 // enable udp wakeup support
 pref("dom.push.udp.wakeupEnabled", false);
 
+// WebPush prefs:
+pref("dom.push.http2.reset_retry_count_after_ms", 60000);
+pref("dom.push.http2.maxRetries", 2);
+pref("dom.push.http2.retryInterval", 5000);
+
 // WebNetworkStats
 pref("dom.mozNetworkStats.enabled", false);
 
@@ -4430,23 +4435,14 @@ pref("dom.mozPermissionSettings.enabled", false);
 pref("dom.w3c_touch_events.enabled", 2);
 #endif
 
-#ifdef NIGHTLY_BUILD
-#if defined(XP_WIN) || defined(XP_LINUX) || defined(XP_MACOSX)
 // W3C draft pointer events
-pref("dom.w3c_pointer_events.enabled", true);
-// W3C touch-action css property (related to touch and pointer events)
-pref("layout.css.touch_action.enabled", true);
-#else
 pref("dom.w3c_pointer_events.enabled", false);
-pref("layout.css.touch_action.enabled", false);
-#endif
-#else
-pref("dom.w3c_pointer_events.enabled", false);
-pref("layout.css.touch_action.enabled", false);
-#endif
 
 // W3C draft ImageCapture API
 pref("dom.imagecapture.enabled", false);
+
+// W3C touch-action css property (related to touch and pointer events)
+pref("layout.css.touch_action.enabled", false);
 
 // Enables some assertions in nsStyleContext that are too expensive
 // for general use, but might be useful to enable for specific tests.
