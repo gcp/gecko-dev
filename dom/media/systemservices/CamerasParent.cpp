@@ -677,11 +677,11 @@ void CamerasParent::DoShutdown()
     // We actually expect to be on the MediaManager thread in
     // normal circumstances. Still don't want to spin the
     // event loop in our destructor.
-    MOZ_ASSERT(!NS_IsMainThread());
-    nsCOMPtr<nsIRunnable> event = new ThreadDestructor(mWebRTCThread);
-    if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
-      mWebRTCThread->Shutdown();
-    }
+    //MOZ_ASSERT(!NS_IsMainThread());
+    //nsCOMPtr<nsIRunnable> event = new ThreadDestructor(mWebRTCThread);
+    //if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
+    //  mWebRTCThread->Shutdown();
+    //}
     mWebRTCThread = nullptr;
   }
 }

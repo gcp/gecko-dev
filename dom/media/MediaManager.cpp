@@ -2274,7 +2274,6 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
           LOG(("Will leak thread: DispatchToMainthread of reply runnable failed in MediaManager shutdown"));
         }
       }
-
       nsRefPtr<nsRunnable> mReply;
       RefPtr<MediaEngine> mBackend;
     };

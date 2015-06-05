@@ -89,6 +89,7 @@ public:
                                          const nsCString& device_id) override;
   virtual bool RecvReplyFailure(void) override;
   virtual bool RecvReplySuccess(void) override;
+  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
   int NumberOfCaptureDevices(CaptureEngine aCapEngine);
   int NumberOfCapabilities(CaptureEngine aCapEngine,
@@ -127,6 +128,8 @@ private:
   nsTArray<CapturerElement> mCallbacks;
   // Protects the callback arrays
   Mutex mCallbackMutex;
+
+  bool mIPCIsAlive;
 
   // Hold to wait for an async response to our calls
   Monitor mReplyMonitor;
