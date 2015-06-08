@@ -33,6 +33,7 @@
 #include "mozilla/dom/TreeWalker.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TouchEvents.h"
+#include "Layers.h"
 #include "TouchCaret.h"
 #include "nsFrameSelection.h"
 
@@ -45,12 +46,12 @@ static const char* kSelectionCaretsLogModuleName = "SelectionCarets";
 // To enable all the SELECTIONCARETS_LOG print statements, set the environment
 // variable NSPR_LOG_MODULES=SelectionCarets:5
 #define SELECTIONCARETS_LOG(message, ...)                                      \
-  MOZ_LOG(gSelectionCaretsLog, PR_LOG_DEBUG,                                    \
+  MOZ_LOG(gSelectionCaretsLog, LogLevel::Debug,                                    \
          ("SelectionCarets (%p): %s:%d : " message "\n", this, __FUNCTION__,   \
           __LINE__, ##__VA_ARGS__));
 
 #define SELECTIONCARETS_LOG_STATIC(message, ...)                               \
-  MOZ_LOG(gSelectionCaretsLog, PR_LOG_DEBUG,                                    \
+  MOZ_LOG(gSelectionCaretsLog, LogLevel::Debug,                                    \
          ("SelectionCarets: %s:%d : " message "\n", __FUNCTION__, __LINE__,    \
           ##__VA_ARGS__));
 
@@ -116,7 +117,7 @@ SelectionCarets::Init()
   }
 
 #if defined(MOZ_WIDGET_GONK)
-  mUseAsyncPanZoom = gfxPrefs::AsyncPanZoomEnabled();
+  mUseAsyncPanZoom = mPresShell->AsyncPanZoomEnabled();
 #endif
 
   docShell->AddWeakReflowObserver(this);

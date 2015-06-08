@@ -1299,7 +1299,7 @@ IsNonDominatingInScopedSwitch(ParseContext<FullParseHandler>* pc, HandleAtom nam
                               Definition* dn)
 {
     MOZ_ASSERT(dn->isLexical());
-    StmtInfoPC* stmt = LexicalLookup(pc, name, nullptr, (StmtInfoPC*)nullptr);
+    StmtInfoPC* stmt = LexicalLookup(pc, name);
     if (stmt && stmt->type == STMT_SWITCH)
         return dn->pn_cookie.slot() < stmt->firstDominatingLexicalInCase;
     return false;
@@ -2914,7 +2914,7 @@ Parser<ParseHandler>::reportRedeclaration(Node pn, Definition::Kind redeclKind, 
     if (!AtomToPrintableString(context, name, &printable))
         return false;
 
-    StmtInfoPC* stmt = LexicalLookup(pc, name, nullptr, (StmtInfoPC*)nullptr);
+    StmtInfoPC* stmt = LexicalLookup(pc, name);
     if (stmt && stmt->type == STMT_CATCH) {
         report(ParseError, false, pn, JSMSG_REDECLARED_CATCH_IDENTIFIER, printable.ptr());
     } else {
@@ -3116,7 +3116,7 @@ PopStatementPC(TokenStream& ts, ParseContext<ParseHandler>* pc)
  */
 template <class ContextT>
 typename ContextT::StmtInfo*
-LexicalLookup(ContextT* ct, HandleAtom atom, int* slotp, typename ContextT::StmtInfo* stmt)
+LexicalLookup(ContextT* ct, HandleAtom atom, typename ContextT::StmtInfo* stmt)
 {
     RootedId id(ct->sc->context, AtomToId(atom));
 
@@ -3137,15 +3137,10 @@ LexicalLookup(ContextT* ct, HandleAtom atom, int* slotp, typename ContextT::Stmt
 
         StaticBlockObject& blockObj = stmt->staticBlock();
         Shape* shape = blockObj.lookup(ct->sc->context, id);
-        if (shape) {
-            if (slotp)
-                *slotp = blockObj.shapeToIndex(*shape);
+        if (shape)
             return stmt;
-        }
     }
 
-    if (slotp)
-        *slotp = -1;
     return stmt;
 }
 
@@ -3154,7 +3149,7 @@ static inline bool
 OuterLet(ParseContext<ParseHandler>* pc, StmtInfoPC* stmt, HandleAtom atom)
 {
     while (stmt->downScope) {
-        stmt = LexicalLookup(pc, atom, nullptr, stmt->downScope);
+        stmt = LexicalLookup(pc, atom, stmt->downScope);
         if (!stmt)
             return false;
         if (stmt->type == STMT_BLOCK)
@@ -3179,7 +3174,7 @@ Parser<ParseHandler>::bindVarOrGlobalConst(BindData<ParseHandler>* data,
     if (!parser->checkStrictBinding(name, pn))
         return false;
 
-    StmtInfoPC* stmt = LexicalLookup(pc, name, nullptr, (StmtInfoPC*)nullptr);
+    StmtInfoPC* stmt = LexicalLookup(pc, name);
 
     if (stmt && stmt->type == STMT_WITH) {
         parser->handler.setFlag(pn, PND_DEOPTIMIZED);
@@ -3291,7 +3286,7 @@ Parser<ParseHandler>::noteNameUse(HandlePropertyName name, Node pn)
     if (pc->useAsmOrInsideUseAsm())
         return true;
 
-    StmtInfoPC* stmt = LexicalLookup(pc, name, nullptr, (StmtInfoPC*)nullptr);
+    StmtInfoPC* stmt = LexicalLookup(pc, name);
 
     DefinitionList::Range defs = pc->decls().lookupMulti(name);
 
@@ -6933,7 +6928,7 @@ LegacyCompExprTransplanter::transplant(ParseNode* pn)
 
             RootedAtom atom(parser->context, pn->pn_atom);
 #ifdef DEBUG
-            StmtInfoPC* stmt = LexicalLookup(pc, atom, nullptr, (StmtInfoPC*)nullptr);
+            StmtInfoPC* stmt = LexicalLookup(pc, atom);
             MOZ_ASSERT(!stmt || stmt != pc->topStmt);
 #endif
             if (isGenexp && !dn->isOp(JSOP_CALLEE)) {
@@ -7836,18 +7831,35 @@ Parser<ParseHandler>::argumentList(YieldHandling yieldHandling, Node listNode, b
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::checkAndMarkSuperScope()
+Parser<ParseHandler>::checkAllowedNestedSyntax(SharedContext::AllowedSyntax allowed,
+                                               SharedContext** allowingContext)
 {
     for (GenericParseContext* gpc = pc; gpc; gpc = gpc->parent) {
         SharedContext* sc = gpc->sc;
-        if (sc->allowSuperProperty()) {
-            if (sc->isFunctionBox())
-                sc->asFunctionBox()->setNeedsHomeObject();
-            return true;
-        } else if (sc->isFunctionBox() && !sc->asFunctionBox()->function()->isArrow()) {
-            // super is not legal in normal functions.
-            break;
-        }
+
+        // Arrow functions don't help decide whether we should allow nested
+        // syntax, as they don't store any of the necessary state for themselves.
+        if (sc->isFunctionBox() && sc->asFunctionBox()->function()->isArrow())
+            continue;
+
+        if (!sc->allowSyntax(allowed))
+            return false;
+        if (allowingContext)
+            *allowingContext = sc;
+        return true;
+    }
+    return false;
+}
+
+template <typename ParseHandler>
+bool
+Parser<ParseHandler>::checkAndMarkSuperScope()
+{
+    SharedContext* foundContext = nullptr;
+    if (checkAllowedNestedSyntax(SharedContext::AllowedSyntax::SuperProperty, &foundContext)) {
+        if (foundContext->isFunctionBox())
+            foundContext->asFunctionBox()->setNeedsHomeObject();
+        return true;
     }
     return false;
 }
@@ -7868,27 +7880,36 @@ Parser<ParseHandler>::memberExpr(YieldHandling yieldHandling, TokenKind tt, bool
 
     /* Check for new expression first. */
     if (tt == TOK_NEW) {
-        lhs = handler.newList(PNK_NEW, JSOP_NEW);
-        if (!lhs)
+        uint32_t newBegin = pos().begin;
+        // Make sure this wasn't a |new.target| in disguise.
+        Node newTarget;
+        if (!tryNewTarget(newTarget))
             return null();
-
-        if (!tokenStream.getToken(&tt, TokenStream::Operand))
-            return null();
-        Node ctorExpr = memberExpr(yieldHandling, tt, false, PredictInvoked);
-        if (!ctorExpr)
-            return null();
-
-        handler.addList(lhs, ctorExpr);
-
-        bool matched;
-        if (!tokenStream.matchToken(&matched, TOK_LP))
-            return null();
-        if (matched) {
-            bool isSpread = false;
-            if (!argumentList(yieldHandling, lhs, &isSpread))
+        if (newTarget) {
+            lhs = newTarget;
+        } else {
+            lhs = handler.newList(PNK_NEW, newBegin, JSOP_NEW);
+            if (!lhs)
                 return null();
-            if (isSpread)
-                handler.setOp(lhs, JSOP_SPREADNEW);
+
+            // Gotten by tryNewTarget
+            tt = tokenStream.currentToken().type;
+            Node ctorExpr = memberExpr(yieldHandling, tt, false, PredictInvoked);
+            if (!ctorExpr)
+                return null();
+
+            handler.addList(lhs, ctorExpr);
+
+            bool matched;
+            if (!tokenStream.matchToken(&matched, TOK_LP))
+                return null();
+            if (matched) {
+                bool isSpread = false;
+                if (!argumentList(yieldHandling, lhs, &isSpread))
+                    return null();
+                if (isSpread)
+                    handler.setOp(lhs, JSOP_SPREADNEW);
+            }
         }
     } else if (tt == TOK_SUPER) {
         lhs = null();
@@ -8606,6 +8627,42 @@ Parser<ParseHandler>::methodDefinition(YieldHandling yieldHandling, PropListType
 
     MOZ_ASSERT(listType == ObjectLiteral);
     return handler.addObjectMethodDefinition(propList, propname, fn, op);
+}
+
+template <typename ParseHandler>
+bool
+Parser<ParseHandler>::tryNewTarget(Node &newTarget)
+{
+    MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_NEW));
+
+    uint32_t begin = pos().begin;
+    newTarget = null();
+
+    // |new| expects to look for an operand, so we will honor that.
+    TokenKind next;
+    if (!tokenStream.getToken(&next, TokenStream::Operand))
+        return false;
+
+    // Don't unget the token, since lookahead cannot handle someone calling
+    // getToken() with a different modifier. Callers should inspect currentToken().
+    if (next != TOK_DOT)
+        return true;
+
+    if (!tokenStream.getToken(&next))
+        return false;
+    if (next != TOK_NAME || tokenStream.currentName() != context->names().target) {
+        report(ParseError, false, null(), JSMSG_UNEXPECTED_TOKEN,
+               "target", TokenKindToDesc(next));
+        return false;
+    }
+
+    if (!checkAllowedNestedSyntax(SharedContext::AllowedSyntax::NewTarget)) {
+        reportWithOffset(ParseError, false, begin, JSMSG_BAD_NEWTARGET);
+        return false;
+    }
+
+    newTarget = handler.newNewTarget(TokenPos(begin, pos().end));
+    return !!newTarget;
 }
 
 template <typename ParseHandler>

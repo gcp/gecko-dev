@@ -55,6 +55,7 @@ struct ScrollableLayerGuid;
 }
 namespace gfx {
 class DrawTarget;
+class SourceSurface;
 }
 namespace widget {
 class TextEventDispatcher;
@@ -115,8 +116,8 @@ typedef void* nsNativeWidget;
 #define NS_NATIVE_PLUGIN_ID            105
 
 #define NS_IWIDGET_IID \
-{ 0x316E4600, 0x15DB, 0x47AE, \
-  { 0xBF, 0xE4, 0x5B, 0xCD, 0xFF, 0x80, 0x80, 0x83 } };
+{ 0x53376F57, 0xF081, 0x4949, \
+  { 0xB5, 0x5E, 0x87, 0xEF, 0x6A, 0xE9, 0xE3, 0x5A } };
 
 /*
  * Window shadow styles
@@ -1574,6 +1575,19 @@ class nsIWidget : public nsISupports {
     NS_IMETHOD HideWindowChrome(bool aShouldHide) = 0;
 
     /**
+     * Ask the widget to start the transition for entering or exiting
+     * DOM Fullscreen.
+     *
+     * XXX This method is currently not actually implemented by any
+     * widget. The only function of this method is to notify cocoa
+     * window that it should not use the native fullscreen mode. This
+     * method is reserved for bug 1160014 where a transition will be
+     * added for DOM fullscreen. Hence, this function is likely to
+     * be further changed then.
+     */
+    virtual void PrepareForDOMFullscreenTransition() = 0;
+
+    /**
      * Put the toplevel window into or out of fullscreen mode.
      * If aTargetScreen is given, attempt to go fullscreen on that screen,
      * if possible.  (If not, it behaves as if aTargetScreen is null.)
@@ -1806,6 +1820,11 @@ class nsIWidget : public nsISupports {
      */
     virtual void SetConfirmedTargetAPZC(uint64_t aInputBlockId,
                                         const nsTArray<mozilla::layers::ScrollableLayerGuid>& aTargets) const = 0;
+
+    /**
+     * Returns true if APZ is in use, false otherwise.
+     */
+    virtual bool AsyncPanZoomEnabled() const = 0;
 
     /**
      * Enables the dropping of files to a widget (XXX this is temporary)
@@ -2084,6 +2103,23 @@ class nsIWidget : public nsISupports {
      * sequence has been cleared.
      */
     virtual nsresult ClearNativeTouchSequence(nsIObserver* aObserver);
+
+    /*
+     * Snapshot the contents of the widget by reading pixels back from the
+     * Operating System. Unlike RenderDocument(), this does not read from our
+     * own backbuffers, so that we can test if there is a difference in how
+     * our buffers are being presented.
+     *
+     * This is only supported for widgets using OMTC.
+     */
+    mozilla::TemporaryRef<mozilla::gfx::SourceSurface> SnapshotWidgetOnScreen();
+
+    /*
+     * Implementation of SnapshotWidgetOnScreen. This is invoked by the
+     * compositor for SnapshotWidgetOnScreen(), and should not be called
+     * otherwise.
+     */
+    virtual bool CaptureWidgetOnScreen(mozilla::RefPtr<mozilla::gfx::DrawTarget> aDT) = 0;
 
 private:
   class LongTapInfo

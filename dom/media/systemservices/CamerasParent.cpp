@@ -18,8 +18,8 @@
 #undef LOG_ENABLED
 
 PRLogModuleInfo *gCamerasParentLog;
-#define LOG(args) PR_LOG(gCamerasParentLog, PR_LOG_DEBUG, args)
-#define LOG_ENABLED() PR_LOG_TEST(gCamerasParentLog, 5)
+#define LOG(args) MOZ_LOG(gCamerasParentLog, mozilla::LogLevel::Debug, args)
+#define LOG_ENABLED() MOZ_LOG_TEST(gCamerasParentLog, 5)
 
 namespace mozilla {
 namespace camera {

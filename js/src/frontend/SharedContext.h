@@ -230,7 +230,27 @@ class SharedContext
         return atom == context->names().dotGenerator || atom == context->names().dotGenRVal;
     }
 
-    virtual bool allowSuperProperty() const = 0;
+    enum class AllowedSyntax {
+        NewTarget,
+        SuperProperty
+    };
+    virtual bool allowSyntax(AllowedSyntax allowed) const = 0;
+
+  protected:
+    static bool FunctionAllowsSyntax(JSFunction* func, AllowedSyntax allowed)
+    {
+        MOZ_ASSERT(!func->isArrow());
+
+        switch (allowed) {
+          case AllowedSyntax::NewTarget:
+            // Any function supports new.target
+            return true;
+          case AllowedSyntax::SuperProperty:
+            return func->allowSuperProperty();
+          default:;
+        }
+        MOZ_CRASH("Unknown AllowedSyntax query");
+    }
 };
 
 class GlobalSharedContext : public SharedContext
@@ -249,13 +269,13 @@ class GlobalSharedContext : public SharedContext
     ObjectBox* toObjectBox() { return nullptr; }
     HandleObject evalStaticScope() const { return staticEvalScope_; }
 
-    bool allowSuperProperty() const {
+    bool allowSyntax(AllowedSyntax allowed) const {
         StaticScopeIter<CanGC> it(context, staticEvalScope_);
         for (; !it.done(); it++) {
             if (it.type() == StaticScopeIter<CanGC>::Function &&
                 !it.fun().isArrow())
             {
-                return it.fun().allowSuperProperty();
+                return FunctionAllowsSyntax(&it.fun(), allowed);
             }
         }
         return false;
@@ -320,7 +340,7 @@ class FunctionBox : public ObjectBox, public SharedContext
     void setArgumentsHasLocalBinding()     { funCxFlags.argumentsHasLocalBinding = true; }
     void setDefinitelyNeedsArgsObj()       { MOZ_ASSERT(funCxFlags.argumentsHasLocalBinding);
                                              funCxFlags.definitelyNeedsArgsObj   = true; }
-    void setNeedsHomeObject()              { MOZ_ASSERT(allowSuperProperty());
+    void setNeedsHomeObject()              { MOZ_ASSERT(function()->allowSuperProperty());
                                              funCxFlags.needsHomeObject          = true; }
 
     bool hasDefaults() const {
@@ -352,8 +372,8 @@ class FunctionBox : public ObjectBox, public SharedContext
                isGenerator();
     }
 
-    bool allowSuperProperty() const {
-        return function()->allowSuperProperty();
+    bool allowSyntax(AllowedSyntax allowed) const {
+        return FunctionAllowsSyntax(function(), allowed);
     }
 };
 
@@ -370,6 +390,7 @@ SharedContext::asGlobalSharedContext()
     MOZ_ASSERT(!isFunctionBox());
     return static_cast<GlobalSharedContext*>(this);
 }
+
 
 // In generators, we treat all locals as aliased so that they get stored on the
 // heap.  This way there is less information to copy off the stack when
@@ -544,21 +565,17 @@ FinishPopStatement(ContextT* ct)
 
 /*
  * Find a lexically scoped variable (one declared by let, catch, or an array
- * comprehension) named by atom, looking in sc's compile-time scopes.
+ * comprehension) named by atom, looking in ct's compile-time scopes.
  *
  * If a WITH statement is reached along the scope stack, return its statement
- * info record, so callers can tell that atom is ambiguous. If slotp is not
- * null, then if atom is found, set *slotp to its stack slot, otherwise to -1.
- * This means that if slotp is not null, all the block objects on the lexical
- * scope chain must have had their depth slots computed by the code generator,
- * so the caller must be under EmitTree.
+ * info record, so callers can tell that atom is ambiguous.
  *
  * In any event, directly return the statement info record in which atom was
  * found. Otherwise return null.
  */
 template <class ContextT>
 typename ContextT::StmtInfo*
-LexicalLookup(ContextT* ct, HandleAtom atom, int* slotp, typename ContextT::StmtInfo* stmt);
+LexicalLookup(ContextT* ct, HandleAtom atom, typename ContextT::StmtInfo* stmt = nullptr);
 
 } // namespace frontend
 

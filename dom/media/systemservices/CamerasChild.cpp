@@ -22,8 +22,8 @@
 #undef LOG
 #undef LOG_ENABLED
 PRLogModuleInfo *gCamerasChildLog;
-#define LOG(args) PR_LOG(gCamerasChildLog, PR_LOG_DEBUG, args)
-#define LOG_ENABLED() PR_LOG_TEST(gCamerasChildLog, 5)
+#define LOG(args) MOZ_LOG(gCamerasChildLog, mozilla::LogLevel::Debug, args)
+#define LOG_ENABLED() MOZ_LOG_TEST(gCamerasChildLog, mozilla::LogLevel::Debug)
 
 namespace mozilla {
 namespace camera {
