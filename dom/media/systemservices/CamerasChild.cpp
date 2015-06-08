@@ -51,16 +51,6 @@ public:
 
   ~CamerasSingleton() {
     mCameras = nullptr;
-    MOZ_ASSERT(NS_IsMainThread());
-
-    if (mCamerasChildThread) {
-      //nsCOMPtr<nsIRunnable> event = new ThreadDestructor(mCamerasChildThread);
-      // No event loop spinning in destructors.
-      //if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
-      //  mCamerasChildThread->Shutdown();
-      //}
-      mCamerasChildThread = nullptr;
-    }
     LOG(("~CamerasSingleton: %p", this));
   }
 
@@ -596,36 +586,58 @@ CamerasChild::StopCapture(CaptureEngine aCapEngine, const int capture_id)
   }
 }
 
+void
+Shutdown(void)
+{
+  {
+    OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
+    if (!CamerasSingleton::getChild()) {
+      // We don't want to cause everything to get fired up if we're
+      // really already shut down.
+      LOG(("Shutdown when already shut down"));
+      return;
+    }
+  }
+  Cameras(true)->Shutdown();
+}
+
 class ShutdownRunnable : public nsRunnable {
 public:
   ShutdownRunnable() {};
 
   NS_IMETHOD Run() {
     LOG(("Closing BackgroundChild"));
-    //ipc::BackgroundChild::CloseForCurrentThread();
+    ipc::BackgroundChild::CloseForCurrentThread();
     return NS_OK;
   }
 };
 
 void
-CamerasChild::XShutdown()
+CamerasChild::Shutdown()
 {
   {
     MonitorAutoLock monitor(mReplyMonitor);
     mIPCIsAlive = false;
     monitor.NotifyAll();
   }
-  //OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
-  //if (CamerasSingleton::getThread()) {
-  //  LOG(("PBackground Thread exists, dispatching"));
-  //  nsRefPtr<ShutdownRunnable> runnable = new ShutdownRunnable();
-  //  CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
-  //} else {
-  //  LOG(("XShutdown called without PBackground thread"));
-  //}
-  //LOG(("Erasing sCameras & thread (original thread)"));
-  //CamerasSingleton::getChild() = nullptr;
-  //CamerasSingleton::getThread() = nullptr;
+
+  OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
+  if (CamerasSingleton::getThread()) {
+    LOG(("PBackground thread exists, dispatching close"));
+    nsRefPtr<ShutdownRunnable> runnable = new ShutdownRunnable();
+    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
+    LOG(("PBackground thread exists, shutting down thread"));
+    nsCOMPtr<nsIRunnable> event =
+      new ThreadDestructor(CamerasSingleton::getThread());
+    if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
+      CamerasSingleton::getThread()->Shutdown();
+    }
+  } else {
+    LOG(("Shutdown called without PBackground thread"));
+  }
+  LOG(("Erasing sCameras & thread (original thread)"));
+  CamerasSingleton::getChild() = nullptr;
+  CamerasSingleton::getThread() = nullptr;
 }
 
 bool
@@ -696,7 +708,7 @@ CamerasChild::~CamerasChild()
 {
   LOG(("~CamerasChild: %p", this));
 
-  XShutdown();
+  Shutdown();
 
   MOZ_COUNT_DTOR(CamerasChild);
 }
