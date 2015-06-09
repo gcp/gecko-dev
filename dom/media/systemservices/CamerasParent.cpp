@@ -551,8 +551,12 @@ CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
       this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
+#ifndef XP_MACOSX
   mWebRTCThread->Dispatch(webrtc_runnable, NS_DISPATCH_NORMAL);
-
+#else
+  // Mac OS X hangs on shutdown if we don't do this.
+  NS_DispatchToMainThread(webrtc_runnable);
+#endif
   return true;
 }
 
@@ -615,7 +619,6 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
       return NS_OK;
     });
   mWebRTCThread->Dispatch(webrtc_runnable, NS_DISPATCH_NORMAL);
-
   return true;
 }
 
@@ -677,11 +680,11 @@ void CamerasParent::DoShutdown()
     // We actually expect to be on the MediaManager thread in
     // normal circumstances. Still don't want to spin the
     // event loop in our destructor.
-    //MOZ_ASSERT(!NS_IsMainThread());
-    //nsCOMPtr<nsIRunnable> event = new ThreadDestructor(mWebRTCThread);
-    //if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
-    //  mWebRTCThread->Shutdown();
-    //}
+    MOZ_ASSERT(!NS_IsMainThread());
+    nsCOMPtr<nsIRunnable> event = new ThreadDestructor(mWebRTCThread);
+    if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
+      mWebRTCThread->Shutdown();
+    }
     mWebRTCThread = nullptr;
   }
 }
