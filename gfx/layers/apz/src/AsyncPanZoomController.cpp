@@ -1695,6 +1695,7 @@ nsEventStatus AsyncPanZoomController::OnPanEnd(const PanGestureInput& aEvent) {
 
   mX.EndTouch(aEvent.mTime);
   mY.EndTouch(aEvent.mTime);
+  SetState(NOTHING);
   RequestContentRepaint();
 
   return nsEventStatus_eConsumeNoDefault;
@@ -1735,8 +1736,8 @@ nsEventStatus AsyncPanZoomController::OnLongPress(const TapGestureInput& aEvent)
   if (controller) {
     CSSPoint geckoScreenPoint;
     if (ConvertToGecko(aEvent.mPoint, &geckoScreenPoint)) {
-      if (CurrentTouchBlock()->IsDuringFastMotion()) {
-        APZC_LOG("%p dropping long-press because of fast motion\n", this);
+      if (CurrentTouchBlock()->IsDuringFastFling()) {
+        APZC_LOG("%p dropping long-press because of fast fling\n", this);
         return nsEventStatus_eIgnore;
       }
       uint64_t blockId = GetInputQueue()->InjectNewTouchBlock(this);
@@ -2470,9 +2471,10 @@ bool AsyncPanZoomController::SnapBackIfOverscrolled() {
   return false;
 }
 
-bool AsyncPanZoomController::IsMovingFast() const {
+bool AsyncPanZoomController::IsFlingingFast() const {
   ReentrantMonitorAutoEnter lock(mMonitor);
-  if (GetVelocityVector().Length() > gfxPrefs::APZFlingStopOnTapThreshold()) {
+  if (mState == FLING &&
+      GetVelocityVector().Length() > gfxPrefs::APZFlingStopOnTapThreshold()) {
     APZC_LOG("%p is moving fast\n", this);
     return true;
   }

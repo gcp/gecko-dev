@@ -2731,7 +2731,15 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
         NS_ENSURE_SUCCESS(rv, rv);
     }
     else {
-        openURI = mURI;
+        // In the case of intercepted channels, we need to construct the cache
+        // entry key based on the original URI, so that in case the intercepted
+        // channel is redirected, the cache entry key before and after the
+        // redirect is the same.
+        if (PossiblyIntercepted()) {
+            openURI = mOriginalURI;
+        } else {
+            openURI = mURI;
+        }
     }
 
     uint32_t appId = info->AppId();
@@ -2809,6 +2817,11 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
                 new InterceptedChannelChrome(this, controller, entry);
         intercepted->NotifyController();
     } else {
+        if (mInterceptCache == INTERCEPTED) {
+            DebugOnly<bool> exists;
+            MOZ_ASSERT(NS_SUCCEEDED(cacheStorage->Exists(openURI, extension, &exists)) && exists,
+                       "The entry must exist in the cache after we create it here");
+        }
         rv = cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, this);
         NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -4988,12 +5001,17 @@ nsHttpChannel::BeginConnect()
         mLoadFlags |= LOAD_FROM_CACHE;
         mLoadFlags &= ~VALIDATE_ALWAYS;
         nsCOMPtr<nsIPackagedAppService> pas =
-          do_GetService("@mozilla.org/network/packaged-app-service;1", &rv);
+            do_GetService("@mozilla.org/network/packaged-app-service;1", &rv);
         if (NS_WARN_IF(NS_FAILED(rv))) {
-          return rv;
+            AsyncAbort(rv);
+            return rv;
         }
 
-        return pas->RequestURI(mURI, GetLoadContextInfo(this), this);
+        rv = pas->RequestURI(mURI, GetLoadContextInfo(this), this);
+        if (NS_FAILED(rv)) {
+            AsyncAbort(rv);
+        }
+        return rv;
     }
 
     // when proxying only use the pipeline bit if ProxyPipelining() allows it.

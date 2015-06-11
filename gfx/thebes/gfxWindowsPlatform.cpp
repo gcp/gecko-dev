@@ -1718,12 +1718,14 @@ bool DoesD3D11DeviceWork(ID3D11Device *device)
 #if defined(MOZ_CRASHREPORTER)
       CrashReporter::AppendAppNotesToCrashReport(NS_LITERAL_CSTRING("DisplayLink: could not parse version\n"));
 #endif
+      gANGLESupportsD3D11 = false;
       return false;
     }
     if (displayLinkModuleVersion <= V(8,6,1,36484)) {
 #if defined(MOZ_CRASHREPORTER)
       CrashReporter::AppendAppNotesToCrashReport(NS_LITERAL_CSTRING("DisplayLink: too old version\n"));
 #endif
+      gANGLESupportsD3D11 = false;
       return false;
     }
   }
@@ -1829,6 +1831,23 @@ bool DoesD3D11TextureSharingWork(ID3D11Device *device)
 
   result = DoesD3D11TextureSharingWorkInternal(device, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
   return result;
+}
+
+bool DoesD3D11AlphaTextureSharingWork(ID3D11Device *device)
+{
+  nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
+  if (gfxInfo) {
+    // Disable texture sharing if we're blocking d2d since that's the only other time we use it
+    // and it might be broken.
+    int32_t status;
+    if (NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DIRECT2D, &status))) {
+      if (status != nsIGfxInfo::FEATURE_STATUS_OK) {
+        return false;
+      }
+    }
+  }
+
+  return DoesD3D11TextureSharingWorkInternal(device, DXGI_FORMAT_A8_UNORM, D3D11_BIND_SHADER_RESOURCE);
 }
 
 void
@@ -1961,7 +1980,7 @@ gfxWindowsPlatform::InitD3D11Devices()
 
       if (FAILED(hr)) {
         // This should always succeed... in theory.
-        gfxCriticalError() << "Failed to initialize WARP D3D11 device!" << hr;
+        gfxCriticalError() << "Failed to initialize WARP D3D11 device! " << hexa(hr);
         return;
       }
 
@@ -2020,7 +2039,7 @@ gfxWindowsPlatform::InitD3D11Devices()
 
     mD3D11ImageBridgeDevice->SetExceptionMode(0);
 
-    if (!DoesD3D11TextureSharingWorkInternal(mD3D11ImageBridgeDevice, DXGI_FORMAT_A8_UNORM, D3D11_BIND_SHADER_RESOURCE)) {
+    if (!DoesD3D11AlphaTextureSharingWork(mD3D11ImageBridgeDevice)) {
       mD3D11ImageBridgeDevice = nullptr;
     }
   }

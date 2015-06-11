@@ -194,21 +194,38 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
 
     if (IsWebGL2()) {
         switch (pname) {
-            case LOCAL_GL_MAX_SAMPLES:
-            case LOCAL_GL_MAX_UNIFORM_BLOCK_SIZE:
-            case LOCAL_GL_MAX_VERTEX_UNIFORM_COMPONENTS: {
-                GLint val;
-                gl->fGetIntegerv(pname, &val);
-                return JS::NumberValue(uint32_t(val));
-            }
+        case LOCAL_GL_MAX_SAMPLES:
+        case LOCAL_GL_MAX_UNIFORM_BLOCK_SIZE:
+        case LOCAL_GL_MAX_VERTEX_UNIFORM_COMPONENTS: {
+            GLint val;
+            gl->fGetIntegerv(pname, &val);
+            return JS::NumberValue(uint32_t(val));
+        }
 
-            case LOCAL_GL_TEXTURE_BINDING_3D: {
-                return WebGLObjectAsJSValue(cx, mBound3DTextures[mActiveTexture].get(), rv);
-            }
+        case LOCAL_GL_TEXTURE_BINDING_3D:
+            return WebGLObjectAsJSValue(cx, mBound3DTextures[mActiveTexture].get(), rv);
 
-            // DRAW_FRAMEBUFFER_BINDING is the same as FRAMEBUFFER_BINDING.
-            case LOCAL_GL_READ_FRAMEBUFFER_BINDING:
-                return WebGLObjectAsJSValue(cx, mBoundReadFramebuffer.get(), rv);
+        // DRAW_FRAMEBUFFER_BINDING is the same as FRAMEBUFFER_BINDING.
+        case LOCAL_GL_READ_FRAMEBUFFER_BINDING:
+            return WebGLObjectAsJSValue(cx, mBoundReadFramebuffer.get(), rv);
+
+        case LOCAL_GL_PIXEL_PACK_BUFFER_BINDING:
+            return WebGLObjectAsJSValue(cx, mBoundPixelPackBuffer.get(), rv);
+
+        case LOCAL_GL_PIXEL_UNPACK_BUFFER_BINDING:
+            return WebGLObjectAsJSValue(cx, mBoundPixelUnpackBuffer.get(), rv);
+
+        case LOCAL_GL_UNIFORM_BUFFER_BINDING:
+            return WebGLObjectAsJSValue(cx, mBoundUniformBuffer.get(), rv);
+
+        case LOCAL_GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
+            return WebGLObjectAsJSValue(cx, mBoundTransformFeedbackBuffer.get(), rv);
+
+        case LOCAL_GL_COPY_READ_BUFFER_BINDING:
+            return WebGLObjectAsJSValue(cx, mBoundCopyReadBuffer.get(), rv);
+
+        case LOCAL_GL_COPY_WRITE_BUFFER_BINDING:
+            return WebGLObjectAsJSValue(cx, mBoundCopyWriteBuffer.get(), rv);
         }
     }
 
@@ -409,15 +426,17 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
 
         // unsigned int. here we may have to return very large values like 2^32-1 that can't be represented as
         // javascript integer values. We just return them as doubles and javascript doesn't care.
-        case LOCAL_GL_STENCIL_BACK_VALUE_MASK:
-        case LOCAL_GL_STENCIL_BACK_WRITEMASK:
-        case LOCAL_GL_STENCIL_VALUE_MASK:
+        case LOCAL_GL_STENCIL_BACK_VALUE_MASK: {
+            return JS::DoubleValue(mStencilValueMaskBack); // pass as FP value to allow large values such as 2^32-1.
+        }
+        case LOCAL_GL_STENCIL_BACK_WRITEMASK: {
+            return JS::DoubleValue(mStencilWriteMaskBack);
+        }
+        case LOCAL_GL_STENCIL_VALUE_MASK: {
+            return JS::DoubleValue(mStencilValueMaskFront);
+        }
         case LOCAL_GL_STENCIL_WRITEMASK: {
-            GLint i = 0; // the GL api (glGetIntegerv) only does signed ints
-            gl->fGetIntegerv(pname, &i);
-            GLuint i_unsigned(i); // this is where -1 becomes 2^32-1
-            double i_double(i_unsigned); // pass as FP value to allow large values such as 2^32-1.
-            return JS::DoubleValue(i_double);
+            return JS::DoubleValue(mStencilWriteMaskFront);
         }
 
         // float
@@ -531,13 +550,6 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
 
         case LOCAL_GL_ARRAY_BUFFER_BINDING: {
             return WebGLObjectAsJSValue(cx, mBoundArrayBuffer.get(), rv);
-        }
-
-        case LOCAL_GL_TRANSFORM_FEEDBACK_BUFFER_BINDING: {
-            if (!IsWebGL2()) {
-                break;
-            }
-            return WebGLObjectAsJSValue(cx, mBoundTransformFeedbackBuffer.get(), rv);
         }
 
         case LOCAL_GL_ELEMENT_ARRAY_BUFFER_BINDING: {

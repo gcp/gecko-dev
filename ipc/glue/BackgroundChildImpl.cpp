@@ -6,6 +6,7 @@
 
 #include "ActorsChild.h" // IndexedDB
 #include "BroadcastChannelChild.h"
+#include "ServiceWorkerManagerChild.h"
 #include "FileDescriptorSetChild.h"
 #include "CamerasChild.h"
 #include "mozilla/media/MediaChild.h"
@@ -275,6 +276,28 @@ BackgroundChildImpl::DeallocPCamerasChild(camera::PCamerasChild *aActor)
   nsRefPtr<camera::CamerasChild> child =
       dont_AddRef(static_cast<camera::CamerasChild*>(aActor));
   MOZ_ASSERT(aActor);
+  return true;
+}
+
+// -----------------------------------------------------------------------------
+// ServiceWorkerManager
+// -----------------------------------------------------------------------------
+
+dom::PServiceWorkerManagerChild*
+BackgroundChildImpl::AllocPServiceWorkerManagerChild()
+{
+  nsRefPtr<dom::workers::ServiceWorkerManagerChild> agent =
+    new dom::workers::ServiceWorkerManagerChild();
+  return agent.forget().take();
+}
+
+bool
+BackgroundChildImpl::DeallocPServiceWorkerManagerChild(
+                                             PServiceWorkerManagerChild* aActor)
+{
+  nsRefPtr<dom::workers::ServiceWorkerManagerChild> child =
+    dont_AddRef(static_cast<dom::workers::ServiceWorkerManagerChild*>(aActor));
+  MOZ_ASSERT(child);
   return true;
 }
 

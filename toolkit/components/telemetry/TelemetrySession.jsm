@@ -20,6 +20,7 @@ Cu.import("resource://gre/modules/DeferredTask.jsm", this);
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
+Cu.import("resource://gre/modules/TelemetrySend.jsm", this);
 Cu.import("resource://gre/modules/TelemetryUtils.jsm", this);
 
 const Utils = TelemetryUtils;
@@ -438,11 +439,8 @@ let TelemetryScheduler = {
   _sentDailyPingToday: function(nowDate) {
     // This is today's date and also the previous midnight (0:00).
     const todayDate = Utils.truncateToDays(nowDate);
-    const nearestMidnight = Utils.getNearestMidnight(nowDate, SCHEDULER_MIDNIGHT_TOLERANCE_MS);
-    // If we are close to midnight, we check against that, otherwise against the last midnight.
-    const checkDate = nearestMidnight || todayDate;
-    // We consider a ping sent for today if it occured after midnight, or prior within the tolerance.
-    return (this._lastDailyPingTime >= (checkDate.getTime() - SCHEDULER_MIDNIGHT_TOLERANCE_MS));
+    // We consider a ping sent for today if it occured after or at 00:00 today.
+    return (this._lastDailyPingTime >= todayDate.getTime());
   },
 
   /**
@@ -451,32 +449,16 @@ let TelemetryScheduler = {
    * @return {Boolean} True if we can send the daily ping, false otherwise.
    */
   _isDailyPingDue: function(nowDate) {
-    const sentPingToday = this._sentDailyPingToday(nowDate);
-
     // The daily ping is not due if we already sent one today.
-    if (sentPingToday) {
+    if (this._sentDailyPingToday(nowDate)) {
       this._log.trace("_isDailyPingDue - already sent one today");
       return false;
-    }
-
-    const nearestMidnight = Utils.getNearestMidnight(nowDate, SCHEDULER_MIDNIGHT_TOLERANCE_MS);
-    if (!sentPingToday && !nearestMidnight) {
-      // Computer must have gone to sleep, the daily ping is overdue.
-      this._log.trace("_isDailyPingDue - daily ping is overdue... computer went to sleep?");
-      return true;
     }
 
     // Avoid overly short sessions.
     const timeSinceLastDaily = nowDate.getTime() - this._lastDailyPingTime;
     if (timeSinceLastDaily < MIN_SUBSESSION_LENGTH_MS) {
       this._log.trace("_isDailyPingDue - delaying daily to keep minimum session length");
-      return false;
-    }
-
-    // To fight jank, we allow daily pings to be collected on user idle before midnight
-    // within the tolerance interval.
-    if (!this._isUserIdle && (nowDate.getTime() < nearestMidnight.getTime())) {
-      this._log.trace("_isDailyPingDue - waiting for user idle period");
       return false;
     }
 
@@ -705,13 +687,11 @@ this.TelemetrySession = Object.freeze({
     return Impl.requestChildPayloads();
   },
   /**
-   * Save histograms to a file.
+   * Save the session state to a pending file.
    * Used only for testing purposes.
-   *
-   * @param {nsIFile} aFile The file to load from.
    */
-  testSaveHistograms: function(aFile) {
-    return Impl.testSaveHistograms(aFile);
+  testSavePendingPing: function() {
+    return Impl.testSavePendingPing();
   },
   /**
    * Collect and store information about startup.
@@ -923,9 +903,8 @@ let Impl = {
       hasPingBeenSent = Telemetry.getHistogramById("TELEMETRY_SUCCESS").snapshot().sum > 0;
     } catch(e) {
     }
-    if (!forSavedSession || hasPingBeenSent) {
-      ret.savedPings = TelemetryStorage.pingsLoaded;
-    }
+
+    ret.savedPings = TelemetryStorage.pendingPingCount;
 
     ret.activeTicks = -1;
     let sr = TelemetryController.getSessionRecorder();
@@ -942,8 +921,8 @@ let Impl = {
       ret.activeTicks = activeTicks;
     }
 
-    ret.pingsOverdue = TelemetryStorage.pingsOverdue;
-    ret.pingsDiscarded = TelemetryStorage.pingsDiscarded;
+    ret.pingsOverdue = TelemetrySend.overduePingsCount;
+    ret.pingsDiscarded = TelemetrySend.discardedPingsCount;
 
     return ret;
   },
@@ -1669,15 +1648,15 @@ let Impl = {
   }),
 
 
-  testSaveHistograms: function testSaveHistograms(file) {
-    this._log.trace("testSaveHistograms - Path: " + file.path);
+  testSavePendingPing: function testSaveHistograms() {
+    this._log.trace("testSaveHistograms");
     let payload = this.getSessionPayload(REASON_SAVED_SESSION, false);
     let options = {
       addClientId: true,
       addEnvironment: true,
       overwrite: true,
     };
-    return TelemetryController.savePing(getPingType(payload), payload, file.path, options);
+    return TelemetryController.addPendingPing(getPingType(payload), payload, options);
   },
 
   /**
@@ -1798,9 +1777,6 @@ let Impl = {
         // bug 1127907 lands.
         Services.obs.notifyObservers(null, "gather-telemetry", null);
       }).bind(this), Ci.nsIThread.DISPATCH_NORMAL);
-      // TODO: This is just a fallback for now. Remove this when we have ping send
-      // scheduling properly factored out and driven independently of this module.
-      TelemetryController.sendPersistedPings();
       break;
 
 #ifdef MOZ_WIDGET_ANDROID

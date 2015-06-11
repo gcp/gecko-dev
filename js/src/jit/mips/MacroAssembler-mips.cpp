@@ -11,11 +11,11 @@
 
 #include "jit/Bailouts.h"
 #include "jit/BaselineFrame.h"
-#include "jit/BaselineRegisters.h"
 #include "jit/JitFrames.h"
 #include "jit/MacroAssembler.h"
 #include "jit/mips/Simulator-mips.h"
 #include "jit/MoveEmitter.h"
+#include "jit/SharedICRegisters.h"
 
 #include "jit/MacroAssembler-inl.h"
 
@@ -1671,6 +1671,12 @@ MacroAssemblerMIPSCompat::or32(Imm32 imm, const Address& dest)
     load32(dest, SecondScratchReg);
     ma_or(SecondScratchReg, imm);
     store32(SecondScratchReg, dest);
+}
+
+void
+MacroAssemblerMIPSCompat::or32(Register src, Register dest)
+{
+    ma_or(dest, src);
 }
 
 void

@@ -87,8 +87,7 @@ var gPlayedTests = [
 // anything for testing clone-specific bugs.
 var cloneKey = Math.floor(Math.random()*100000000);
 var gCloneTests = gSmallTests.concat([
-  // Actual duration is ~200ms, we have Content-Duration lie about it.
-  { name:"bug520908.ogv", type:"video/ogg", duration:9000 },
+  { name:"bug520908.ogv", type:"video/ogg", duration:0.2 },
   // short-video is more like 1s, so if you load this twice you'll get an unexpected duration
   { name:"dynamic_resource.sjs?key=" + cloneKey + "&res1=320x240.ogv&res2=short-video.ogv",
     type:"video/ogg", duration:0.266 },
@@ -229,7 +228,7 @@ var gPlayTests = [
   { name:"gizmo.mp4", type:"video/mp4", duration:5.56 },
   // Test playback of a MP4 file with a non-zero start time (and audio starting
   // a second later).
-  { name:"bipbop-lateaudio.mp4", type:"video/mp4", duration:2.401 },
+  { name:"bipbop-lateaudio.mp4", type:"video/mp4" },
 
   { name:"small-shot.m4a", type:"audio/mp4", duration:0.29 },
   { name:"small-shot.mp3", type:"audio/mpeg", duration:0.27 },
