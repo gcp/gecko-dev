@@ -344,9 +344,7 @@ CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine)
         this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE,
-                                          NewRunnableMethod(webrtc_runnable.forget().take(),
-                                                            &nsIRunnable::Run));
+  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
 
   return true;
 }
@@ -384,10 +382,7 @@ CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
       this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE,
-                                          NewRunnableMethod(webrtc_runnable.forget().take(),
-                                                            &nsIRunnable::Run));
-
+  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return true;
 }
 
@@ -436,10 +431,7 @@ CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
       this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE,
-                                          NewRunnableMethod(webrtc_runnable.forget().take(),
-                                                            &nsIRunnable::Run));
-
+  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return true;
 }
 
@@ -488,10 +480,7 @@ CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
       this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE,
-                                          NewRunnableMethod(webrtc_runnable.forget().take(),
-                                                            &nsIRunnable::Run));
-
+  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return true;
 }
 
@@ -525,9 +514,7 @@ CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
       this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE,
-                                          NewRunnableMethod(webrtc_runnable.forget().take(),
-                                                            &nsIRunnable::Run));
+  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return true;
 }
 
@@ -561,9 +548,7 @@ CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
       return NS_OK;
     });
 #ifndef XP_MACOSX
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE,
-                                          NewRunnableMethod(webrtc_runnable.forget().take(),
-                                                            &nsIRunnable::Run));
+  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
 #else
   // Mac OS X hangs on shutdown if we don't do this.
   NS_DispatchToMainThread(webrtc_runnable);
@@ -629,9 +614,7 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
       this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE,
-                                          NewRunnableMethod(webrtc_runnable.forget().take(),
-                                                            &nsIRunnable::Run));
+  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return true;
 }
 
@@ -664,10 +647,8 @@ CamerasParent::RecvStopCapture(const int& aCapEngine,
       }
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE,
-                                          NewRunnableMethod(webrtc_runnable.forget().take(),
-                                                            &nsIRunnable::Run));
 
+  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return SendReplySuccess();
 }
 

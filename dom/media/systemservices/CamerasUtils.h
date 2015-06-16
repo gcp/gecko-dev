@@ -10,6 +10,8 @@
 #include "nsThreadUtils.h"
 #include "nsCOMPtr.h"
 
+#include "base/thread.h"
+
 namespace mozilla {
 namespace camera {
 
@@ -32,6 +34,21 @@ public:
 private:
   ~ThreadDestructor() {}
   nsCOMPtr<nsIThread> mThread;
+};
+
+class RunnableTask : public Task
+{
+public:
+  explicit RunnableTask(nsRefPtr<nsIRunnable> aRunnable)
+    : mRunnable(aRunnable) {}
+
+  void Run() override {
+    mRunnable->Run();
+  }
+
+private:
+  ~RunnableTask() {}
+  nsRefPtr<nsIRunnable> mRunnable;
 };
 
 }
