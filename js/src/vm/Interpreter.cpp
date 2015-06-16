@@ -396,12 +396,13 @@ struct AutoStopwatch final
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
 
         JSRuntime* runtime = JS_GetRuntime(cx_);
-        if (!runtime->stopwatch.isActive())
+        if (!runtime->stopwatch.isMonitoringJank())
             return;
 
         JSCompartment* compartment = cx_->compartment();
         if (compartment->scheduledForDestruction)
             return;
+
         iteration_ = runtime->stopwatch.iteration;
 
         PerformanceGroup *group = compartment->performanceMonitoring.getGroup(cx);
@@ -444,7 +445,7 @@ struct AutoStopwatch final
 
         MOZ_ASSERT(!compartment->scheduledForDestruction);
 
-        if (!runtime->stopwatch.isActive()) {
+        if (!runtime->stopwatch.isMonitoringJank()) {
             // Monitoring has been stopped while we were
             // executing the code. Drop everything.
             return;
@@ -4587,10 +4588,8 @@ js::SpreadCallOperation(JSContext* cx, HandleScript script, jsbytecode* pc, Hand
     if (!GetElements(cx, aobj, length, args.array()))
         return false;
 
-    if (constructing) {
-        MOZ_ASSERT(newTarget.isObject());
+    if (constructing)
         args.newTarget().set(newTarget);
-    }
 
     switch (op) {
       case JSOP_SPREADNEW:

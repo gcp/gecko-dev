@@ -1453,29 +1453,46 @@ DrawTargetD2D1::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
     D2D1_RECT_F samplingBounds;
     Matrix mat = pat->mMatrix;
 
-    bool useSamplingRect = false;
-    if (!pat->mSamplingRect.IsEmpty() &&
-        (pat->mSurface->GetType() == SurfaceType::D2D1_1_IMAGE)) {
-      samplingBounds = D2DRect(pat->mSamplingRect);
-      mat.PreTranslate(pat->mSamplingRect.x, pat->mSamplingRect.y);
-    } else if (!pat->mSamplingRect.IsEmpty()) {
-      // We will do a partial upload of the sampling restricted area from GetImageForSurface.
-      samplingBounds = D2D1::RectF(0, 0, pat->mSamplingRect.width, pat->mSamplingRect.height);
-    } else {
-      samplingBounds = D2D1::RectF(0, 0,
-                                   Float(pat->mSurface->GetSize().width),
-                                   Float(pat->mSurface->GetSize().height));
-    }
-
     MOZ_ASSERT(pat->mSurface->IsValid());
 
-    RefPtr<ID2D1ImageBrush> imageBrush;
     RefPtr<ID2D1Image> image = GetImageForSurface(pat->mSurface, mat, pat->mExtendMode, !pat->mSamplingRect.IsEmpty() ? &pat->mSamplingRect : nullptr);
 
     if (!image) {
       return CreateTransparentBlackBrush();
     }
 
+    bool useSamplingRect = false;
+    if (pat->mSamplingRect.IsEmpty()) {
+      RefPtr<ID2D1Bitmap> bitmap;
+      image->QueryInterface((ID2D1Bitmap**)byRef(bitmap));
+      if (bitmap) {
+        RefPtr<ID2D1BitmapBrush> bitmapBrush;
+        mDC->CreateBitmapBrush(bitmap,
+                               D2D1::BitmapBrushProperties(D2DExtend(pat->mExtendMode),
+                                                           D2DExtend(pat->mExtendMode),
+                                                           D2DFilter(pat->mFilter)),
+                               D2D1::BrushProperties(aAlpha, D2DMatrix(mat)),
+                               byRef(bitmapBrush));
+        if (!bitmapBrush) {
+          gfxWarning() << "Couldn't create bitmap brush!";
+          return CreateTransparentBlackBrush();
+        }
+        return bitmapBrush.forget();
+      }
+    }
+
+    RefPtr<ID2D1ImageBrush> imageBrush;
+    if (pat->mSamplingRect.IsEmpty()) {
+      samplingBounds = D2D1::RectF(0, 0,
+                                   Float(pat->mSurface->GetSize().width),
+                                   Float(pat->mSurface->GetSize().height));
+    } else if (pat->mSurface->GetType() == SurfaceType::D2D1_1_IMAGE) {
+      samplingBounds = D2DRect(pat->mSamplingRect);
+      mat.PreTranslate(pat->mSamplingRect.x, pat->mSamplingRect.y);
+    } else {
+      // We will do a partial upload of the sampling restricted area from GetImageForSurface.
+      samplingBounds = D2D1::RectF(0, 0, pat->mSamplingRect.width, pat->mSamplingRect.height);
+    }
     mDC->CreateImageBrush(image,
                           D2D1::ImageBrushProperties(samplingBounds,
                                                      D2DExtend(pat->mExtendMode),
@@ -1536,21 +1553,21 @@ DrawTargetD2D1::OptimizeSourceSurface(SourceSurface* aSurface) const
 
   RefPtr<DataSourceSurface> data = aSurface->GetDataSurface();
 
-  DataSourceSurface::MappedSurface map;
-  if (!data->Map(DataSourceSurface::MapType::READ, &map)) {
-    return nullptr;
-  }
-
   RefPtr<ID2D1Bitmap1> bitmap;
-  HRESULT hr = mDC->CreateBitmap(D2DIntSize(data->GetSize()), map.mData, map.mStride,
-                                 D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE, D2DPixelFormat(data->GetFormat())),
-                                 byRef(bitmap));
+  {
+    DataSourceSurface::ScopedMap map(data, DataSourceSurface::READ);
+    if (MOZ2D_WARN_IF(!map.IsMapped())) {
+      return nullptr;
+    }
 
-  if (FAILED(hr)) {
-    gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(data->GetSize()))) << "[D2D1.1] 4CreateBitmap failure " << data->GetSize() << " Code: " << hexa(hr);
+    HRESULT hr = mDC->CreateBitmap(D2DIntSize(data->GetSize()), map.GetData(), map.GetStride(),
+                                   D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE, D2DPixelFormat(data->GetFormat())),
+                                   byRef(bitmap));
+
+    if (FAILED(hr)) {
+      gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(data->GetSize()))) << "[D2D1.1] 4CreateBitmap failure " << data->GetSize() << " Code: " << hexa(hr);
+    }
   }
-
-  data->Unmap();
 
   if (!bitmap) {
     return data.forget();

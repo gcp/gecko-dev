@@ -37,7 +37,7 @@ ContainerParser::ContainerParser(const nsACString& aType)
 }
 
 bool
-ContainerParser::IsInitSegmentPresent(MediaLargeByteBuffer* aData)
+ContainerParser::IsInitSegmentPresent(MediaByteBuffer* aData)
 {
 MSE_DEBUG(ContainerParser, "aLength=%u [%x%x%x%x]",
             aData->Length(),
@@ -49,7 +49,7 @@ return false;
 }
 
 bool
-ContainerParser::IsMediaSegmentPresent(MediaLargeByteBuffer* aData)
+ContainerParser::IsMediaSegmentPresent(MediaByteBuffer* aData)
 {
   MSE_DEBUG(ContainerParser, "aLength=%u [%x%x%x%x]",
             aData->Length(),
@@ -61,7 +61,7 @@ ContainerParser::IsMediaSegmentPresent(MediaLargeByteBuffer* aData)
 }
 
 bool
-ContainerParser::ParseStartAndEndTimestamps(MediaLargeByteBuffer* aData,
+ContainerParser::ParseStartAndEndTimestamps(MediaByteBuffer* aData,
                                             int64_t& aStart, int64_t& aEnd)
 {
   return false;
@@ -86,10 +86,28 @@ ContainerParser::HasCompleteInitData()
   return mHasInitData && !!mInitData->Length();
 }
 
-MediaLargeByteBuffer*
+MediaByteBuffer*
 ContainerParser::InitData()
 {
   return mInitData;
+}
+
+MediaByteRange
+ContainerParser::InitSegmentRange()
+{
+  return mCompleteInitSegmentRange;
+}
+
+MediaByteRange
+ContainerParser::MediaHeaderRange()
+{
+  return mCompleteMediaHeaderRange;
+}
+
+MediaByteRange
+ContainerParser::MediaSegmentRange()
+{
+  return mCompleteMediaSegmentRange;
 }
 
 class WebMContainerParser : public ContainerParser {
@@ -103,7 +121,7 @@ public:
   static const unsigned NS_PER_USEC = 1000;
   static const unsigned USEC_PER_SEC = 1000000;
 
-  bool IsInitSegmentPresent(MediaLargeByteBuffer* aData)
+  bool IsInitSegmentPresent(MediaByteBuffer* aData) override
   {
     ContainerParser::IsInitSegmentPresent(aData);
     // XXX: This is overly primitive, needs to collect data as it's appended
@@ -126,7 +144,7 @@ public:
     return false;
   }
 
-  bool IsMediaSegmentPresent(MediaLargeByteBuffer* aData)
+  bool IsMediaSegmentPresent(MediaByteBuffer* aData) override
   {
     ContainerParser::IsMediaSegmentPresent(aData);
     // XXX: This is overly primitive, needs to collect data as it's appended
@@ -147,15 +165,15 @@ public:
     return false;
   }
 
-  bool ParseStartAndEndTimestamps(MediaLargeByteBuffer* aData,
-                                  int64_t& aStart, int64_t& aEnd)
+  bool ParseStartAndEndTimestamps(MediaByteBuffer* aData,
+                                  int64_t& aStart, int64_t& aEnd) override
   {
     bool initSegment = IsInitSegmentPresent(aData);
     if (initSegment) {
       mOffset = 0;
       mParser = WebMBufferedParser(0);
       mOverlappedMapping.Clear();
-      mInitData = new MediaLargeByteBuffer();
+      mInitData = new MediaByteBuffer();
       mResource = new SourceBufferResource(NS_LITERAL_CSTRING("video/webm"));
     }
 
@@ -180,6 +198,7 @@ public:
           // Super unlikely OOM
           return false;
         }
+        mCompleteInitSegmentRange = MediaByteRange(0, mParser.mInitEndOffset);
         char* buffer = reinterpret_cast<char*>(mInitData->Elements());
         mResource->ReadFromCache(buffer, 0, mParser.mInitEndOffset);
         MSE_DEBUG(WebMContainerParser, "Stashed init of %u bytes.",
@@ -219,7 +238,7 @@ public:
     return true;
   }
 
-  int64_t GetRoundingError()
+  int64_t GetRoundingError() override
   {
     int64_t error = mParser.GetTimecodeScale() / NS_PER_USEC;
     return error * 2;
@@ -239,7 +258,7 @@ public:
     , mMonitor("MP4ContainerParser Index Monitor")
   {}
 
-  bool IsInitSegmentPresent(MediaLargeByteBuffer* aData)
+  bool IsInitSegmentPresent(MediaByteBuffer* aData) override
   {
     ContainerParser::IsInitSegmentPresent(aData);
     // Each MP4 atom has a chunk size and chunk type. The root chunk in an MP4
@@ -259,7 +278,7 @@ public:
            (*aData)[7] == 'p';
   }
 
-  bool IsMediaSegmentPresent(MediaLargeByteBuffer* aData)
+  bool IsMediaSegmentPresent(MediaByteBuffer* aData) override
   {
     ContainerParser::IsMediaSegmentPresent(aData);
     if (aData->Length() < 8) {
@@ -279,8 +298,8 @@ public:
             (*aData)[7] == 'x');
   }
 
-  bool ParseStartAndEndTimestamps(MediaLargeByteBuffer* aData,
-                                  int64_t& aStart, int64_t& aEnd)
+  bool ParseStartAndEndTimestamps(MediaByteBuffer* aData,
+                                  int64_t& aStart, int64_t& aEnd) override
   {
     MonitorAutoLock mon(mMonitor); // We're not actually racing against anything,
                                    // but mParser requires us to hold a monitor.
@@ -293,7 +312,7 @@ public:
       // manually. This allows the ContainerParser to be shared across different
       // timestampOffsets.
       mParser = new mp4_demuxer::MoofParser(mStream, 0, /* aIsAudio = */ false, &mMonitor);
-      mInitData = new MediaLargeByteBuffer();
+      mInitData = new MediaByteBuffer();
     } else if (!mStream || !mParser) {
       return false;
     }
@@ -306,17 +325,17 @@ public:
     mParser->RebuildFragmentedIndex(byteRanges);
 
     if (initSegment || !HasCompleteInitData()) {
-      const MediaByteRange& range = mParser->mInitRange;
-      uint32_t length = range.mEnd - range.mStart;
-      if (length) {
-        if (!mInitData->SetLength(length, fallible)) {
+      MediaByteRange& range = mParser->mInitRange;
+      if (range.Length()) {
+        mCompleteInitSegmentRange = range;
+        if (!mInitData->SetLength(range.Length(), fallible)) {
           // Super unlikely OOM
           return false;
         }
         char* buffer = reinterpret_cast<char*>(mInitData->Elements());
-        mResource->ReadFromCache(buffer, range.mStart, length);
+        mResource->ReadFromCache(buffer, range.mStart, range.Length());
         MSE_DEBUG(MP4ContainerParser ,"Stashed init of %u bytes.",
-                  length);
+                  range.Length());
       } else {
         MSE_DEBUG(MP4ContainerParser, "Incomplete init found.");
       }
@@ -326,6 +345,8 @@ public:
     mp4_demuxer::Interval<mp4_demuxer::Microseconds> compositionRange =
       mParser->GetCompositionRange(byteRanges);
 
+    mCompleteMediaHeaderRange = mParser->FirstCompleteMediaHeader();
+    mCompleteMediaSegmentRange = mParser->FirstCompleteMediaSegment();
     ErrorResult rv;
     mResource->EvictData(mParser->mOffset, mParser->mOffset, rv);
     if (NS_WARN_IF(rv.Failed())) {
@@ -345,7 +366,7 @@ public:
 
   // Gaps of up to 35ms (marginally longer than a single frame at 30fps) are considered
   // to be sequential frames.
-  int64_t GetRoundingError()
+  int64_t GetRoundingError() override
   {
     return 35000;
   }

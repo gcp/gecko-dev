@@ -149,6 +149,7 @@ function fakeNow(...args) {
     Cu.import("resource://gre/modules/TelemetryEnvironment.jsm"),
     Cu.import("resource://gre/modules/TelemetryController.jsm"),
     Cu.import("resource://gre/modules/TelemetryStorage.jsm"),
+    Cu.import("resource://gre/modules/TelemetrySend.jsm"),
   ];
 
   for (let m of modules) {
@@ -160,14 +161,14 @@ function fakeNow(...args) {
 
 // Fake the timeout functions for TelemetryController sending.
 function fakePingSendTimer(set, clear) {
-  let ping = Cu.import("resource://gre/modules/TelemetryController.jsm");
-  ping.Policy.setPingSendTimeout = set;
-  ping.Policy.clearPingSendTimeout = clear;
+  let module = Cu.import("resource://gre/modules/TelemetrySend.jsm");
+  module.Policy.setPingSendTimeout = set;
+  module.Policy.clearPingSendTimeout = clear;
 }
 
 function fakeMidnightPingFuzzingDelay(delayMs) {
-  let ping = Cu.import("resource://gre/modules/TelemetryController.jsm");
-  ping.Policy.midnightPingFuzzingDelay = () => delayMs;
+  let module = Cu.import("resource://gre/modules/TelemetrySend.jsm");
+  module.Policy.midnightPingFuzzingDelay = () => delayMs;
 }
 
 // Return a date that is |offset| ms in the future from |date|.
@@ -185,12 +186,14 @@ function promiseRejects(promise) {
   return promise.then(() => false, () => true);
 }
 
-// Set logging preferences for all the tests.
-Services.prefs.setCharPref("toolkit.telemetry.log.level", "Trace");
-TelemetryController.initLogging();
+if (runningInParent) {
+  // Set logging preferences for all the tests.
+  Services.prefs.setCharPref("toolkit.telemetry.log.level", "Trace");
+  // Telemetry archiving should be on.
+  Services.prefs.setBoolPref("toolkit.telemetry.archive.enabled", true);
+}
 
-// Telemetry archiving should be on.
-Services.prefs.setBoolPref("toolkit.telemetry.archive.enabled", true);
+TelemetryController.initLogging();
 
 // Avoid timers interrupting test behavior.
 fakeSchedulerTimer(() => {}, () => {});

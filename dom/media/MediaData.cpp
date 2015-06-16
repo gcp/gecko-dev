@@ -490,9 +490,10 @@ MediaRawData::MediaRawData()
   , mData(nullptr)
   , mSize(0)
   , mCrypto(mCryptoInternal)
-  , mBuffer(new MediaLargeByteBuffer(RAW_DATA_DEFAULT_SIZE))
+  , mBuffer(new MediaByteBuffer())
   , mPadding(0)
 {
+  unused << mBuffer->SetCapacity(RAW_DATA_DEFAULT_SIZE, fallible);
 }
 
 MediaRawData::MediaRawData(const uint8_t* aData, size_t aSize)
@@ -500,7 +501,7 @@ MediaRawData::MediaRawData(const uint8_t* aData, size_t aSize)
   , mData(nullptr)
   , mSize(0)
   , mCrypto(mCryptoInternal)
-  , mBuffer(new MediaLargeByteBuffer(RAW_DATA_DEFAULT_SIZE))
+  , mBuffer(new MediaByteBuffer())
   , mPadding(0)
 {
   if (!EnsureCapacity(aSize)) {
@@ -639,7 +640,8 @@ MediaRawDataWriter::Prepend(const uint8_t* aData, size_t aSize)
   }
 
   // We ensure sufficient capacity above so this shouldn't fail.
-  MOZ_ALWAYS_TRUE(mBuffer->InsertElementsAt(mTarget->mPadding, aData, aSize));
+  MOZ_ALWAYS_TRUE(mBuffer->InsertElementsAt(mTarget->mPadding, aData, aSize,
+                                            fallible));
   mTarget->mSize += aSize;
   mSize = mTarget->mSize;
   return true;

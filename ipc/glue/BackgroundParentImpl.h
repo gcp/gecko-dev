@@ -86,11 +86,11 @@ protected:
   virtual bool
   DeallocPBroadcastChannelParent(PBroadcastChannelParent* aActor) override;
 
-  virtual PMediaParent*
-  AllocPMediaParent() override;
+  virtual PServiceWorkerManagerParent*
+  AllocPServiceWorkerManagerParent() override;
 
   virtual bool
-  DeallocPMediaParent(PMediaParent* aActor) override;
+  DeallocPServiceWorkerManagerParent(PServiceWorkerManagerParent* aActor) override;
 
   virtual PCamerasParent*
   AllocPCamerasParent() override;
@@ -98,13 +98,11 @@ protected:
   virtual bool
   DeallocPCamerasParent(PCamerasParent* aActor) override;
 
-  virtual bool
-  RecvRegisterServiceWorker(const ServiceWorkerRegistrationData& aData)
-                            override;
+  virtual PMediaParent*
+  AllocPMediaParent() override;
 
   virtual bool
-  RecvUnregisterServiceWorker(const PrincipalInfo& aPrincipalInfo,
-                              const nsString& aScope) override;
+  DeallocPMediaParent(PMediaParent* aActor) override;
 
   virtual bool
   RecvShutdownServiceWorkerRegistrar() override;

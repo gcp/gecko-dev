@@ -808,8 +808,8 @@ class HasChildTracer : public JS::CallbackTracer
     RootedValue child_;
     bool found_;
 
-    void trace(void** thingp, JS::TraceKind kind) {
-        if (*thingp == child_.toGCThing())
+    void onChild(const JS::GCCellPtr& thing) override {
+        if (thing.asCell() == child_.toGCThing())
             found_ = true;
     }
 
@@ -1121,6 +1121,8 @@ DumpHeap(JSContext* cx, unsigned argc, Value* vp)
 
     if (i != args.length()) {
         JS_ReportError(cx, "bad arguments passed to dumpHeap");
+        if (dumpFile)
+            fclose(dumpFile);
         return false;
     }
 

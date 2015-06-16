@@ -13,6 +13,7 @@ Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
+Cu.import("resource://gre/modules/DelayedInit.jsm");
 Cu.import('resource://gre/modules/Payment.jsm');
 Cu.import("resource://gre/modules/NotificationDB.jsm");
 Cu.import("resource://gre/modules/SpatialNavigation.jsm");
@@ -147,7 +148,7 @@ let lazilyLoadedObserverScripts = [
   ["MemoryObserver", ["memory-pressure", "Memory:Dump"], "chrome://browser/content/MemoryObserver.js"],
   ["ConsoleAPI", ["console-api-log-event"], "chrome://browser/content/ConsoleAPI.js"],
   ["FindHelper", ["FindInPage:Opened", "FindInPage:Closed", "Tab:Selected"], "chrome://browser/content/FindHelper.js"],
-  ["PermissionsHelper", ["Permissions:Get", "Permissions:Clear"], "chrome://browser/content/PermissionsHelper.js"],
+  ["PermissionsHelper", ["Permissions:Check", "Permissions:Get", "Permissions:Clear"], "chrome://browser/content/PermissionsHelper.js"],
   ["FeedHandler", ["Feeds:Subscribe"], "chrome://browser/content/FeedHandler.js"],
   ["Feedback", ["Feedback:Show"], "chrome://browser/content/Feedback.js"],
   ["SelectionHandler", ["TextSelection:Get"], "chrome://browser/content/SelectionHandler.js"],
@@ -375,41 +376,6 @@ var BrowserApp = {
     dump("zerdatime " + Date.now() + " - browser chrome startup finished.");
 
     this.deck = document.getElementById("browsers");
-    this.deck.addEventListener("DOMContentLoaded", function BrowserApp_delayedStartup() {
-      try {
-        BrowserApp.deck.removeEventListener("DOMContentLoaded", BrowserApp_delayedStartup, false);
-        Services.obs.notifyObservers(window, "browser-delayed-startup-finished", "");
-        Messaging.sendRequest({ type: "Gecko:DelayedStartup" });
-
-        // Queue up some other performance-impacting initializations
-        Services.tm.mainThread.dispatch(function() {
-          // Spin up some services which impact performance.
-          Cc["@mozilla.org/login-manager;1"].getService(Ci.nsILoginManager);
-          Services.search.init();
-
-          // Spin up some features which impact performance.
-          CastingApps.init();
-          DownloadNotifications.init();
-
-          if (AppConstants.MOZ_SAFE_BROWSING) {
-            // Bug 778855 - Perf regression if we do this here. To be addressed in bug 779008.
-            SafeBrowsing.init();
-          };
-
-          // Delay this a minute because there's no rush
-          setTimeout(() => {
-            BrowserApp.gmpInstallManager = new GMPInstallManager();
-            BrowserApp.gmpInstallManager.simpleCheckAndInstall().then(null, () => {});
-          }, 1000 * 60);
-        }, Ci.nsIThread.DISPATCH_NORMAL);
-
-        if (AppConstants.NIGHTLY_BUILD) {
-          WebcompatReporter.init();
-          Telemetry.addData("TRACKING_PROTECTION_ENABLED",
-            Services.prefs.getBoolPref("privacy.trackingprotection.enabled"));
-        }
-      } catch(ex) { console.log(ex); }
-    }, false);
 
     BrowserEventHandler.init();
     ViewportHandler.init();
@@ -457,7 +423,7 @@ var BrowserApp = {
 
     window.addEventListener("fullscreen", function() {
       Messaging.sendRequest({
-        type: window.fullScreen ? "ToggleChrome:Show" : "ToggleChrome:Hide"
+        type: window.fullScreen ? "ToggleChrome:Hide" : "ToggleChrome:Show"
       });
     }, false);
 
@@ -553,6 +519,40 @@ var BrowserApp = {
 
     // Notify Java that Gecko has loaded.
     Messaging.sendRequest({ type: "Gecko:Ready" });
+
+    this.deck.addEventListener("DOMContentLoaded", function BrowserApp_delayedStartup() {
+      BrowserApp.deck.removeEventListener("DOMContentLoaded", BrowserApp_delayedStartup, false);
+
+      function InitLater(fn, object, name) {
+        return DelayedInit.schedule(fn, object, name, 15000 /* 15s max wait */);
+      }
+
+      InitLater(() => Services.obs.notifyObservers(window, "browser-delayed-startup-finished", ""));
+      InitLater(() => Messaging.sendRequest({ type: "Gecko:DelayedStartup" }));
+
+      if (AppConstants.NIGHTLY_BUILD) {
+        InitLater(() => Telemetry.addData("TRACKING_PROTECTION_ENABLED",
+            Services.prefs.getBoolPref("privacy.trackingprotection.enabled")));
+        InitLater(() => WebcompatReporter.init());
+      }
+
+      InitLater(() => CastingApps.init(), window, "CastingApps");
+      InitLater(() => Services.search.init(), Services, "search");
+      InitLater(() => DownloadNotifications.init(), window, "DownloadNotifications");
+
+      if (AppConstants.MOZ_SAFE_BROWSING) {
+        // Bug 778855 - Perf regression if we do this here. To be addressed in bug 779008.
+        InitLater(() => SafeBrowsing.init(), window, "SafeBrowsing");
+      }
+
+      InitLater(() => Cc["@mozilla.org/login-manager;1"].getService(Ci.nsILoginManager));
+
+      InitLater(() => {
+          BrowserApp.gmpInstallManager = new GMPInstallManager();
+          BrowserApp.gmpInstallManager.simpleCheckAndInstall().then(null, () => {});
+      }, BrowserApp, "gmpInstallManager");
+
+    }, false);
   },
 
   get _startupStatus() {
@@ -1856,7 +1856,9 @@ var BrowserApp = {
 
       case "Viewport:FixedMarginsChanged":
         gViewportMargins = JSON.parse(aData);
-        this.selectedTab.updateViewportSize(gScreenWidth);
+        if (this.selectedTab) {
+          this.selectedTab.updateViewportSize(gScreenWidth);
+        }
         break;
 
       case "nsPref:changed":
@@ -4545,7 +4547,7 @@ Tab.prototype = {
     // or pageshow event, but we'll still want to update the reader view button to account for this change.
     // This mirrors the desktop logic in TabsProgressListener.
     if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT) {
-      this.browser.messageManager.sendAsyncMessage("Reader:PushState", {isArticle: gBrowser.selectedBrowser.isArticle});
+      this.browser.messageManager.sendAsyncMessage("Reader:PushState", {isArticle: this.browser.isArticle});
     }
 
     // Reset state of click-to-play plugin notifications.
@@ -5851,7 +5853,7 @@ var FormAssistant = {
 
   // We only want to show autocomplete suggestions for certain elements
   _isAutoComplete: function _isAutoComplete(aElement) {
-    if (!(aElement instanceof HTMLInputElement) || aElement.readOnly ||
+    if (!(aElement instanceof HTMLInputElement) || aElement.readOnly || aElement.disabled ||
         (aElement.getAttribute("type") == "password") ||
         (aElement.hasAttribute("autocomplete") &&
          aElement.getAttribute("autocomplete").toLowerCase() == "off"))
@@ -6187,19 +6189,21 @@ let HealthReportStatusListener = {
 };
 
 var XPInstallObserver = {
-  init: function xpi_init() {
-    Services.obs.addObserver(XPInstallObserver, "addon-install-blocked", false);
-    Services.obs.addObserver(XPInstallObserver, "addon-install-started", false);
+  init: function() {
+    Services.obs.addObserver(this, "addon-install-blocked", false);
+    Services.obs.addObserver(this, "addon-install-started", false);
+    Services.obs.addObserver(this, "xpi-signature-changed", false);
+    Services.obs.addObserver(this, "browser-delayed-startup-finished", false);
 
-    AddonManager.addInstallListener(XPInstallObserver);
+    AddonManager.addInstallListener(this);
   },
 
-  observe: function xpi_observer(aSubject, aTopic, aData) {
+  observe: function(aSubject, aTopic, aData) {
     switch (aTopic) {
       case "addon-install-started":
         NativeWindow.toast.show(Strings.browser.GetStringFromName("alertAddonsDownloading"), "short");
         break;
-      case "addon-install-blocked":
+      case "addon-install-blocked": {
         let installInfo = aSubject.QueryInterface(Ci.amIWebInstallInfo);
         let tab = BrowserApp.getTabForBrowser(installInfo.browser);
         if (!tab)
@@ -6266,7 +6270,41 @@ var XPInstallObserver = {
         }
         NativeWindow.doorhanger.show(message, aTopic, buttons, tab.id);
         break;
+      }
+      case "xpi-signature-changed": {
+        if (JSON.parse(aData).disabled.length) {
+          this._notifyUnsignedAddonsDisabled();
+        }
+        break;
+      }
+      case "browser-delayed-startup-finished": {
+        let disabledAddons = AddonManager.getStartupChanges(AddonManager.STARTUP_CHANGE_DISABLED);
+        for (let id of disabledAddons) {
+          if (AddonManager.getAddonByID(id).signedState <= AddonManager.SIGNEDSTATE_MISSING) {
+            this._notifyUnsignedAddonsDisabled();
+            break;
+          }
+        }
+        break;
+      }
     }
+  },
+
+  _notifyUnsignedAddonsDisabled: function() {
+    new Prompt({
+      window: window,
+      title: Strings.browser.GetStringFromName("unsignedAddonsDisabled.title"),
+      message: Strings.browser.GetStringFromName("unsignedAddonsDisabled.message"),
+      buttons: [
+        Strings.browser.GetStringFromName("unsignedAddonsDisabled.viewAddons"),
+        Strings.browser.GetStringFromName("unsignedAddonsDisabled.dismiss")
+      ]
+    }).show((data) => {
+      if (data.button === 0) {
+        // TODO: Open about:addons to show only unsigned add-ons?
+        BrowserApp.addTab("about:addons", { parentId: BrowserApp.selectedTab.id });
+      }
+    });
   },
 
   onInstallEnded: function(aInstall, aAddon) {
@@ -6300,6 +6338,20 @@ var XPInstallObserver = {
   },
 
   onInstallFailed: function(aInstall) {
+    this._showErrorMessage(aInstall);
+  },
+
+  onDownloadProgress: function(aInstall) {},
+
+  onDownloadFailed: function(aInstall) {
+    this._showErrorMessage(aInstall);
+  },
+
+  onDownloadCancelled: function(aInstall) {
+    this._showErrorMessage(aInstall);
+  },
+
+  _showErrorMessage: function(aInstall) {
     // Don't create a notification for distribution add-ons.
     if (Distribution.pendingAddonInstalls.has(aInstall)) {
       Cu.reportError("Error installing distribution add-on: " + aInstall.addon.id);
@@ -6307,39 +6359,44 @@ var XPInstallObserver = {
       return;
     }
 
-    NativeWindow.toast.show(Strings.browser.GetStringFromName("alertAddonsFail"), "short");
-  },
-
-  onDownloadProgress: function xpidm_onDownloadProgress(aInstall) {},
-
-  onDownloadFailed: function(aInstall) {
-    this.onInstallFailed(aInstall);
-  },
-
-  onDownloadCancelled: function(aInstall) {
     let host = (aInstall.originatingURI instanceof Ci.nsIStandardURL) && aInstall.originatingURI.host;
-    if (!host)
+    if (!host) {
       host = (aInstall.sourceURI instanceof Ci.nsIStandardURL) && aInstall.sourceURI.host;
+    }
 
     let error = (host || aInstall.error == 0) ? "addonError" : "addonLocalError";
-    if (aInstall.error != 0)
+    if (aInstall.error < 0) {
       error += aInstall.error;
-    else if (aInstall.addon && aInstall.addon.blocklistState == Ci.nsIBlocklistService.STATE_BLOCKED)
+    } else if (aInstall.addon && aInstall.addon.blocklistState == Ci.nsIBlocklistService.STATE_BLOCKED) {
       error += "Blocklisted";
-    else if (aInstall.addon && (!aInstall.addon.isCompatible || !aInstall.addon.isPlatformCompatible))
+    } else {
       error += "Incompatible";
-    else
-      return; // No need to show anything in this case.
+    }
 
     let msg = Strings.browser.GetStringFromName(error);
     // TODO: formatStringFromName
     msg = msg.replace("#1", aInstall.name);
-    if (host)
+    if (host) {
       msg = msg.replace("#2", host);
+    }
     msg = msg.replace("#3", Strings.brand.GetStringFromName("brandShortName"));
     msg = msg.replace("#4", Services.appinfo.version);
 
-    NativeWindow.toast.show(msg, "short");
+    if (aInstall.error == AddonManager.ERROR_SIGNEDSTATE_REQUIRED) {
+      new Prompt({
+        window: window,
+        title: Strings.browser.GetStringFromName("addonError.titleBlocked"),
+        message: msg,
+        buttons: [Strings.browser.GetStringFromName("addonError.learnMore")]
+      }).show((data) => {
+        if (data.button === 0) {
+          let url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "unsigned-addons";
+          BrowserApp.addTab(url, { parentId: BrowserApp.selectedTab.id });
+        }
+      });
+    } else {
+      Services.prompt.alert(null, Strings.browser.GetStringFromName("addonError.titleError"), msg);
+    }
   },
 
   showRestartPrompt: function() {
@@ -7007,6 +7064,7 @@ var IdentityHandler = {
       locationObj.host = location.host;
       locationObj.hostname = location.hostname;
       locationObj.port = location.port;
+      locationObj.origin = location.origin;
     } catch (ex) {
       // Can sometimes throw if the URL being visited has no host/hostname,
       // e.g. about:blank. The _state for these pages means we won't need these
@@ -7018,6 +7076,7 @@ var IdentityHandler = {
     let mixedMode = this.getMixedMode(aState);
     let trackingMode = this.getTrackingMode(aState);
     let result = {
+      origin: locationObj.origin,
       mode: {
         identity: identityMode,
         mixed: mixedMode,
@@ -7031,8 +7090,7 @@ var IdentityHandler = {
       return result;
     }
 
-    // Ideally we'd just make this a Java string
-    result.encrypted = Strings.browser.GetStringFromName("identity.encrypted2");
+    result.encrypted = true;
     result.host = this.getEffectiveHost();
 
     let iData = this.getIdentityData();

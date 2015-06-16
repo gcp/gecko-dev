@@ -474,6 +474,9 @@ pref("security.mixed_content.block_active_content", true);
 // Enable pinning
 pref("security.cert_pinning.enforcement_level", 1);
 
+// Only fetch OCSP for EV certificates
+pref("security.OCSP.enabled", 2);
+
 // Override some named colors to avoid inverse OS themes
 pref("ui.-moz-dialog", "#efebe7");
 pref("ui.-moz-dialogtext", "#101010");
@@ -915,4 +918,9 @@ pref("caret.manages-android-actionbar", true);
 pref("consoleservice.logcat", false);
 #else
 pref("consoleservice.logcat", true);
+#endif
+
+// Enable Service Workers for Android on non-release builds
+#ifndef RELEASE_BUILD
+pref("dom.serviceWorkers.enabled", true);
 #endif
