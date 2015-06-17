@@ -86,6 +86,10 @@ public:
     : mParent(aParent), mCapEngine(engine), mCapId(cap_id), mSize(size),
       mTimeStamp(time_stamp), mNtpTime(ntp_time), mRenderTime(render_time) {
     mBuffer = (unsigned char*)malloc(size);
+    // There is an extra copy here. We can't copy into Shmem yet
+    // because we have no idea if the next frame will arrive before
+    // us copying the data into the Shmem will have finished. We need
+    // multiple Shmem to avoid this.
     memcpy(mBuffer, buffer, size);
   };
 
@@ -177,7 +181,6 @@ CallbackHelper::DeliverFrame(unsigned char* buffer,
                              int64_t render_time,
                              void *handle)
 {
-  //LOG((__PRETTY_FUNCTION__));
   nsRefPtr<DeliverFrameRunnable> runnable =
     new DeliverFrameRunnable(mParent, mCapEngine, mCapturerId,
                              buffer, size, time_stamp, ntp_time, render_time);
@@ -276,7 +279,7 @@ CamerasParent::CloseEngines()
     while (mCallbacks.Length()) {
       auto capEngine = mCallbacks[0]->mCapEngine;
       auto capNum = mCallbacks[0]->mCapturerId;
-      LOG(("Forcing shutdown of %d, %d", capEngine, capNum));
+      LOG(("Forcing shutdown of engne %d, capturer %d", capEngine, capNum));
       {
         MutexAutoUnlock unlock(mCallbackMutex);
         RecvStopCapture(capEngine, capNum);
@@ -550,7 +553,7 @@ CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
 #ifndef XP_MACOSX
   mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
 #else
-  // Mac OS X hangs on shutdown if we don't do this.
+  // Mac OS X hangs on shutdown if we don't do this on the main thread.
   NS_DispatchToMainThread(webrtc_runnable);
 #endif
   return true;

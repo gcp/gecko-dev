@@ -603,13 +603,23 @@ Shutdown(void)
 
 class ShutdownRunnable : public nsRunnable {
 public:
-  ShutdownRunnable() {};
+  ShutdownRunnable(nsRefPtr<nsIRunnable> aReplyEvent,
+                   nsRefPtr<nsIThread> aReplyThread)
+    : mReplyEvent(aReplyEvent), mReplyThread(aReplyThread) {};
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     LOG(("Closing BackgroundChild"));
     ipc::BackgroundChild::CloseForCurrentThread();
+
+    LOG(("PBackground thread exists, shutting down thread"));
+    mReplyThread->Dispatch(mReplyEvent, NS_DISPATCH_NORMAL);
+
     return NS_OK;
   }
+
+private:
+  nsRefPtr<nsIRunnable> mReplyEvent;
+  nsRefPtr<nsIThread> mReplyThread;
 };
 
 void
@@ -624,18 +634,17 @@ CamerasChild::Shutdown()
   OffTheBooksMutexAutoLock lock(CamerasSingleton::getMutex());
   if (CamerasSingleton::getThread()) {
     LOG(("PBackground thread exists, dispatching close"));
-    nsRefPtr<ShutdownRunnable> runnable = new ShutdownRunnable();
-    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
-    LOG(("PBackground thread exists, shutting down thread"));
-    nsCOMPtr<nsIRunnable> event =
+    // Dispatch closing the IPC thread back to us when the
+    // BackgroundChild is closed.
+    nsRefPtr<nsIRunnable> event =
       new ThreadDestructor(CamerasSingleton::getThread());
-    if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
-      CamerasSingleton::getThread()->Shutdown();
-    }
+    nsRefPtr<ShutdownRunnable> runnable =
+      new ShutdownRunnable(event, NS_GetCurrentThread());
+    CamerasSingleton::getThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
   } else {
     LOG(("Shutdown called without PBackground thread"));
   }
-  LOG(("Erasing sCameras & thread (original thread)"));
+  LOG(("Erasing sCameras & thread refs (original thread)"));
   CamerasSingleton::getChild() = nullptr;
   CamerasSingleton::getThread() = nullptr;
 }
@@ -649,7 +658,6 @@ CamerasChild::RecvDeliverFrame(const int& capEngine,
                                const int64_t& ntp_time,
                                const int64_t& render_time)
 {
-  //LOG((__PRETTY_FUNCTION__));
   MutexAutoLock lock(mCallbackMutex);
   CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
   if (Callback(capEng, capId)) {
