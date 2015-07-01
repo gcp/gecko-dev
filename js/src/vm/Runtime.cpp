@@ -161,7 +161,7 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
 #endif
     gc(thisFromCtor()),
     gcInitialized(false),
-#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
+#ifdef JS_SIMULATOR
     simulator_(nullptr),
 #endif
     scriptAndCountsVector(nullptr),
@@ -320,7 +320,7 @@ JSRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes)
 
     dateTimeInfo.updateTimeZoneAdjustment();
 
-#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
+#ifdef JS_SIMULATOR
     simulator_ = js::jit::Simulator::Create();
     if (!simulator_)
         return false;
@@ -441,7 +441,7 @@ JSRuntime::~JSRuntime()
     gc.storeBuffer.disable();
     gc.nursery.disable();
 
-#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
+#ifdef JS_SIMULATOR
     js::jit::Simulator::Destroy(simulator_);
 #endif
 
@@ -597,7 +597,7 @@ JSRuntime::resetJitStackLimit()
     // Note that, for now, we use the untrusted limit for ion. This is fine,
     // because it's the most conservative limit, and if we hit it, we'll bail
     // out of ion into the interpeter, which will do a proper recursion check.
-#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
+#ifdef JS_SIMULATOR
     jitStackLimit_ = jit::Simulator::StackLimit();
 #else
     jitStackLimit_ = mainThread.nativeStackLimit[StackForUntrustedScript];
@@ -955,7 +955,7 @@ js::PerformanceGroupHolder::getGroup(JSContext* cx)
         group_ = ptr->value();
         MOZ_ASSERT(group_);
     } else {
-        group_ = runtime_->new_<PerformanceGroup>(key);
+        group_ = runtime_->new_<PerformanceGroup>(cx, key);
         runtime_->stopwatch.groups_.add(ptr, key, group_);
     }
 
@@ -968,6 +968,15 @@ PerformanceData*
 js::GetPerformanceData(JSRuntime* rt)
 {
     return &rt->stopwatch.performance;
+}
+
+js::PerformanceGroup::PerformanceGroup(JSContext* cx, void* key)
+  : uid(cx->runtime()->stopwatch.uniqueId())
+  , stopwatch_(nullptr)
+  , iteration_(0)
+  , key_(key)
+  , refCount_(0)
+{
 }
 
 void

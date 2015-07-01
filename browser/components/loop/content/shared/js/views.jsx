@@ -391,14 +391,14 @@ loop.shared.views = (function(_, l10n) {
 
       // Suppress OT GuM custom dialog, see bug 1018875
       this.listenTo(this.publisher, "accessDialogOpened accessDenied",
-                    function(event) {
-                      event.preventDefault();
+                    function(ev) {
+                      ev.preventDefault();
                     });
 
-      this.listenTo(this.publisher, "streamCreated", function(event) {
+      this.listenTo(this.publisher, "streamCreated", function(ev) {
         this.setState({
-          audio: {enabled: event.stream.hasAudio},
-          video: {enabled: event.stream.hasVideo}
+          audio: {enabled: ev.stream.hasAudio},
+          video: {enabled: ev.stream.hasVideo}
         });
       }.bind(this));
 
@@ -633,6 +633,15 @@ loop.shared.views = (function(_, l10n) {
       };
     },
 
+    componentWillReceiveProps: function(nextProps) {
+      // Only change the state if the prop has changed, and if it is also
+      // different from the state.
+      if (this.props.checked !== nextProps.checked &&
+          this.state.checked !== nextProps.checked) {
+        this.setState({ checked: nextProps.checked });
+      }
+    },
+
     getInitialState: function() {
       return {
         checked: this.props.checked,
@@ -690,6 +699,110 @@ loop.shared.views = (function(_, l10n) {
   });
 
   /**
+   * Renders a loading spinner for when video content is not yet available.
+   */
+  var LoadingView = React.createClass({
+    mixins: [React.addons.PureRenderMixin],
+
+    render: function() {
+        return (
+          <div className="loading-background">
+            <div className="loading-stream"/>
+          </div>
+        );
+    }
+  });
+
+  /**
+   * Renders a url that's part of context on the display.
+   *
+   * @property {Boolean} allowClick         Set to true to allow the url to be clicked. If this
+   *                                        is specified, then 'dispatcher' is also required.
+   * @property {String}  description        The description for the context url.
+   * @property {loop.Dispatcher} dispatcher
+   * @property {Boolean} showContextTitle   Whether or not to show the "Let's talk about" title.
+   * @property {String}  thumbnail          The thumbnail url (expected to be a data url) to
+   *                                        display. If not specified, a fallback url will be
+   *                                        shown.
+   * @property {String}  url                The url to be displayed. If not present or invalid,
+   *                                        then this view won't be displayed.
+   * @property {Boolean} useDesktopPaths    Whether or not to use the desktop paths for for the
+   *                                        fallback url.
+   */
+  var ContextUrlView = React.createClass({
+    mixins: [React.addons.PureRenderMixin],
+
+    PropTypes: {
+      allowClick: React.PropTypes.bool.isRequired,
+      description: React.PropTypes.string.isRequired,
+      dispatcher: React.PropTypes.instanceOf(loop.Dispatcher),
+      showContextTitle: React.PropTypes.bool.isRequired,
+      thumbnail: React.PropTypes.string,
+      url: React.PropTypes.string,
+      useDesktopPaths: React.PropTypes.bool.isRequired
+    },
+
+    /**
+     * Dispatches an action to record when the link is clicked.
+     */
+    handleLinkClick: function() {
+      if (!this.props.allowClick) {
+        return;
+      }
+
+      this.props.dispatcher.dispatch(new sharedActions.RecordClick({
+        linkInfo: "Shared URL"
+      }));
+    },
+
+    /**
+     * Renders the context title ("Let's talk about") if necessary.
+     */
+    renderContextTitle: function() {
+      if (!this.props.showContextTitle) {
+        return null;
+      }
+
+      return <p>{l10n.get("context_inroom_label")}</p>;
+    },
+
+    render: function() {
+      var hostname;
+
+      try {
+        hostname = new URL(this.props.url).hostname;
+      } catch (ex) {
+        return null;
+      }
+
+      var thumbnail = this.props.thumbnail;
+
+      if (!thumbnail) {
+        thumbnail = this.props.useDesktopPaths ?
+          "loop/shared/img/icons-16x16.svg#globe" :
+          "shared/img/icons-16x16.svg#globe";
+      }
+
+      return (
+        <div className="context-content">
+          {this.renderContextTitle()}
+          <div className="context-wrapper">
+            <img className="context-preview" src={thumbnail} />
+            <span className="context-description">
+              {this.props.description}
+              <a className="context-url"
+                 onClick={this.handleLinkClick}
+                 href={this.props.allowClick ? this.props.url : null}
+                 rel="noreferrer"
+                 target="_blank">{hostname}</a>
+            </span>
+          </div>
+        </div>
+      );
+    }
+  });
+
+  /**
    * Renders a media element for display. This also handles displaying an avatar
    * instead of the video, and attaching a video stream to the video element.
    */
@@ -700,6 +813,7 @@ loop.shared.views = (function(_, l10n) {
 
     PropTypes: {
       displayAvatar: React.PropTypes.bool.isRequired,
+      isLoading: React.PropTypes.bool.isRequired,
       posterUrl: React.PropTypes.string,
       // Expecting "local" or "remote".
       mediaType: React.PropTypes.string.isRequired,
@@ -753,7 +867,8 @@ loop.shared.views = (function(_, l10n) {
         // src is for Chrome.
         attrName = "src";
       } else {
-        console.error("Error attaching stream to element - no supported attribute found");
+        console.error("Error attaching stream to element - no supported" +
+                      "attribute found");
         return;
       }
 
@@ -765,6 +880,10 @@ loop.shared.views = (function(_, l10n) {
     },
 
     render: function() {
+      if (this.props.isLoading) {
+        return <LoadingView />;
+      }
+
       if (this.props.displayAvatar) {
         return <AvatarView />;
       }
@@ -800,10 +919,12 @@ loop.shared.views = (function(_, l10n) {
     Button: Button,
     ButtonGroup: ButtonGroup,
     Checkbox: Checkbox,
+    ContextUrlView: ContextUrlView,
     ConversationView: ConversationView,
     ConversationToolbar: ConversationToolbar,
     MediaControlButton: MediaControlButton,
     MediaView: MediaView,
+    LoadingView: LoadingView,
     ScreenShareControlButton: ScreenShareControlButton,
     NotificationListView: NotificationListView
   };

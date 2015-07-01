@@ -169,6 +169,7 @@ loop.shared.actions = (function() {
      * Used to notify that the session has a data channel available.
      */
     DataChannelsAvailable: Action.define("dataChannelsAvailable", {
+      available: Boolean
     }),
 
     /**
@@ -289,8 +290,7 @@ loop.shared.actions = (function() {
     /**
      * Used to notify that a shared screen is being received (or not).
      *
-     * XXX this is going to need to be split into two actions so when
-     * can display a spinner when the screen share is pending (bug 1171933)
+     * XXX this should be split into multiple actions to make the code clearer.
      */
     ReceivingScreenShare: Action.define("receivingScreenShare", {
       receiving: Boolean

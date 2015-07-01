@@ -5,14 +5,17 @@
 
 #include <ostream>
 #include "platform.h"
+#include "mozilla/HashFunctions.h"
+
+#ifndef SPS_STANDALONE
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
-#include "mozilla/HashFunctions.h"
 
 // JS
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "js/TrackedOptimizationInfo.h"
+#endif
 
 // Self
 #include "ProfileEntry.h"
@@ -53,8 +56,8 @@ ProfileEntry::ProfileEntry(char aTagName, void *aTagPtr)
   , mTagName(aTagName)
 { }
 
-ProfileEntry::ProfileEntry(char aTagName, float aTagFloat)
-  : mTagFloat(aTagFloat)
+ProfileEntry::ProfileEntry(char aTagName, double aTagDouble)
+  : mTagDouble(aTagDouble)
   , mTagName(aTagName)
 { }
 
@@ -205,6 +208,7 @@ public:
   }
 };
 
+#ifndef SPS_STANDALONE
 class StreamOptimizationTypeInfoOp : public JS::ForEachTrackedOptimizationTypeInfoOp
 {
   JSONWriter& mWriter;
@@ -306,15 +310,20 @@ public:
     mDepth++;
   }
 };
+#endif
 
 uint32_t UniqueJSONStrings::GetOrAddIndex(const char* aStr)
 {
   uint32_t index;
-  if (mStringToIndexMap.Get(aStr, &index)) {
-    return index;
+  StringKey key(aStr);
+
+  auto it = mStringToIndexMap.find(key);
+
+  if (it != mStringToIndexMap.end()) {
+    return it->second;
   }
-  index = mStringToIndexMap.Count();
-  mStringToIndexMap.Put(aStr, index);
+  index = mStringToIndexMap.size();
+  mStringToIndexMap[key] = index;
   mStringTableWriter.StringElement(aStr);
   return index;
 }
@@ -345,9 +354,7 @@ void UniqueStacks::Stack::AppendFrame(const OnStackFrameKey& aFrame)
   // Compute the prefix hash and index before mutating mStack.
   uint32_t prefixHash = mStack.Hash();
   uint32_t prefix = mUniqueStacks.GetOrAddStackIndex(mStack);
-  mStack.mPrefixHash = Some(prefixHash);
-  mStack.mPrefix = Some(prefix);
-  mStack.mFrame = mUniqueStacks.GetOrAddFrameIndex(aFrame);
+  mStack.UpdateHash(prefixHash, prefix, mUniqueStacks.GetOrAddFrameIndex(aFrame));
 }
 
 uint32_t UniqueStacks::Stack::GetOrAddIndex() const
@@ -358,8 +365,8 @@ uint32_t UniqueStacks::Stack::GetOrAddIndex() const
 uint32_t UniqueStacks::FrameKey::Hash() const
 {
   uint32_t hash = 0;
-  if (!mLocation.IsEmpty()) {
-    hash = mozilla::HashString(mLocation.get());
+  if (!mLocation.empty()) {
+    hash = mozilla::HashString(mLocation.c_str());
   }
   if (mLine.isSome()) {
     hash = mozilla::AddToHash(hash, *mLine);
@@ -397,6 +404,22 @@ UniqueStacks::UniqueStacks(JSRuntime* aRuntime)
   mStackTableWriter.StartBareList();
 }
 
+#ifdef SPS_STANDALONE
+uint32_t UniqueStacks::GetOrAddStackIndex(const StackKey& aStack)
+{
+  uint32_t index;
+  auto it = mStackToIndexMap.find(aStack);
+
+  if (it != mStackToIndexMap.end()) {
+    return it->second;
+  }
+
+  index = mStackToIndexMap.size();
+  mStackToIndexMap[aStack] = index;
+  StreamStack(aStack);
+  return index;
+}
+#else
 uint32_t UniqueStacks::GetOrAddStackIndex(const StackKey& aStack)
 {
   uint32_t index;
@@ -410,7 +433,26 @@ uint32_t UniqueStacks::GetOrAddStackIndex(const StackKey& aStack)
   StreamStack(aStack);
   return index;
 }
+#endif
 
+#ifdef SPS_STANDALONE
+uint32_t UniqueStacks::GetOrAddFrameIndex(const OnStackFrameKey& aFrame)
+{
+  uint32_t index;
+  auto it = mFrameToIndexMap.find(aFrame);
+  if (it != mFrameToIndexMap.end()) {
+    MOZ_ASSERT(it->second < mFrameCount);
+    return it->second;
+  }
+
+  // A manual count is used instead of mFrameToIndexMap.Count() due to
+  // forwarding of canonical JIT frames above.
+  index = mFrameCount++;
+  mFrameToIndexMap[aFrame] = index;
+  StreamFrame(aFrame);
+  return index;
+}
+#else
 uint32_t UniqueStacks::GetOrAddFrameIndex(const OnStackFrameKey& aFrame)
 {
   uint32_t index;
@@ -437,11 +479,15 @@ uint32_t UniqueStacks::GetOrAddFrameIndex(const OnStackFrameKey& aFrame)
   StreamFrame(aFrame);
   return index;
 }
+#endif
 
 uint32_t UniqueStacks::LookupJITFrameDepth(void* aAddr)
 {
   uint32_t depth;
-  if (mJITFrameDepthMap.Get(aAddr, &depth)) {
+
+  auto it = mJITFrameDepthMap.find(aAddr);
+  if (it != mJITFrameDepthMap.end()) {
+    depth = it->second;
     MOZ_ASSERT(depth > 0);
     return depth;
   }
@@ -450,7 +496,7 @@ uint32_t UniqueStacks::LookupJITFrameDepth(void* aAddr)
 
 void UniqueStacks::AddJITFrameDepth(void* aAddr, unsigned depth)
 {
-  mJITFrameDepthMap.Put(aAddr, depth);
+  mJITFrameDepthMap[aAddr] = depth;
 }
 
 void UniqueStacks::SpliceFrameTableElements(SpliceableJSONWriter& aWriter)
@@ -488,8 +534,12 @@ void UniqueStacks::StreamFrame(const OnStackFrameKey& aFrame)
   //   [location, implementation, optimizations, line, category]
 
   mFrameTableWriter.StartArrayElement();
+#ifndef SPS_STANDALONE
   if (!aFrame.mJITFrameHandle) {
-    mUniqueStrings.WriteElement(mFrameTableWriter, aFrame.mLocation.get());
+#else
+  {
+#endif
+    mUniqueStrings.WriteElement(mFrameTableWriter, aFrame.mLocation.c_str());
     if (aFrame.mLine.isSome()) {
       mFrameTableWriter.NullElement(); // implementation
       mFrameTableWriter.NullElement(); // optimizations
@@ -501,7 +551,9 @@ void UniqueStacks::StreamFrame(const OnStackFrameKey& aFrame)
       }
       mFrameTableWriter.IntElement(*aFrame.mCategory);
     }
-  } else {
+  }
+#ifndef SPS_STANDALONE
+  else {
     const JS::ForEachProfiledFrameOp::FrameHandle& jitFrame = *aFrame.mJITFrameHandle;
 
     mUniqueStrings.WriteElement(mFrameTableWriter, jitFrame.label());
@@ -557,18 +609,19 @@ void UniqueStacks::StreamFrame(const OnStackFrameKey& aFrame)
       mFrameTableWriter.EndObject();
     }
   }
+#endif
   mFrameTableWriter.EndArray();
 }
 
 struct ProfileSample
 {
   uint32_t mStack;
-  Maybe<float> mTime;
-  Maybe<float> mResponsiveness;
-  Maybe<float> mRSS;
-  Maybe<float> mUSS;
+  Maybe<double> mTime;
+  Maybe<double> mResponsiveness;
+  Maybe<double> mRSS;
+  Maybe<double> mUSS;
   Maybe<int> mFrameNumber;
-  Maybe<float> mPower;
+  Maybe<double> mPower;
 };
 
 static void WriteSample(SpliceableJSONWriter& aWriter, ProfileSample& aSample)
@@ -632,13 +685,13 @@ static void WriteSample(SpliceableJSONWriter& aWriter, ProfileSample& aSample)
 }
 
 void ProfileBuffer::StreamSamplesToJSON(SpliceableJSONWriter& aWriter, int aThreadId,
-                                        float aSinceTime, JSRuntime* aRuntime,
+                                        double aSinceTime, JSRuntime* aRuntime,
                                         UniqueStacks& aUniqueStacks)
 {
   Maybe<ProfileSample> sample;
   int readPos = mReadPos;
   int currentThreadID = -1;
-  Maybe<float> currentTime;
+  Maybe<double> currentTime;
   UniquePtr<char[]> tagBuff = MakeUnique<char[]>(DYNAMIC_MAX_STRING);
 
   while (readPos != mWritePos) {
@@ -650,7 +703,7 @@ void ProfileBuffer::StreamSamplesToJSON(SpliceableJSONWriter& aWriter, int aThre
       if (readAheadPos != mWritePos) {
         ProfileEntry readAheadEntry = mEntries[readAheadPos];
         if (readAheadEntry.mTagName == 't') {
-          currentTime = Some(readAheadEntry.mTagFloat);
+          currentTime = Some(readAheadEntry.mTagDouble);
         }
       }
     }
@@ -658,22 +711,22 @@ void ProfileBuffer::StreamSamplesToJSON(SpliceableJSONWriter& aWriter, int aThre
       switch (entry.mTagName) {
       case 'r':
         if (sample.isSome()) {
-          sample->mResponsiveness = Some(entry.mTagFloat);
+          sample->mResponsiveness = Some(entry.mTagDouble);
         }
         break;
       case 'p':
         if (sample.isSome()) {
-          sample->mPower = Some(entry.mTagFloat);
+          sample->mPower = Some(entry.mTagDouble);
         }
         break;
       case 'R':
         if (sample.isSome()) {
-          sample->mRSS = Some(entry.mTagFloat);
+          sample->mRSS = Some(entry.mTagDouble);
         }
         break;
       case 'U':
         if (sample.isSome()) {
-          sample->mUSS = Some(entry.mTagFloat);
+          sample->mUSS = Some(entry.mTagDouble);
          }
         break;
       case 'f':
@@ -743,6 +796,7 @@ void ProfileBuffer::StreamSamplesToJSON(SpliceableJSONWriter& aWriter, int aThre
                 incBy++;
               }
               stack.AppendFrame(frameKey);
+#ifndef SPS_STANDALONE
             } else if (frame.mTagName == 'J') {
               // A JIT frame may expand to multiple frames due to inlining.
               void* pc = frame.mTagPtr;
@@ -757,6 +811,7 @@ void ProfileBuffer::StreamSamplesToJSON(SpliceableJSONWriter& aWriter, int aThre
                   stack.AppendFrame(inlineFrameKey);
                 }
               }
+#endif
             }
             framePos = (framePos + incBy) % mEntrySize;
           }
@@ -774,7 +829,7 @@ void ProfileBuffer::StreamSamplesToJSON(SpliceableJSONWriter& aWriter, int aThre
 }
 
 void ProfileBuffer::StreamMarkersToJSON(SpliceableJSONWriter& aWriter, int aThreadId,
-                                        float aSinceTime, UniqueStacks& aUniqueStacks)
+                                        double aSinceTime, UniqueStacks& aUniqueStacks)
 {
   int readPos = mReadPos;
   int currentThreadID = -1;
@@ -829,7 +884,7 @@ void ProfileBuffer::DuplicateLastSample(int aThreadId)
         return;
       case 't':
         // Copy with new time
-        addTag(ProfileEntry('t', static_cast<float>((mozilla::TimeStamp::Now() - sStartTime).ToMilliseconds())));
+        addTag(ProfileEntry('t', (mozilla::TimeStamp::Now() - sStartTime).ToMilliseconds()));
         break;
       case 'm':
         // Don't copy markers
@@ -854,12 +909,14 @@ ThreadProfile::ThreadProfile(ThreadInfo* aInfo, ProfileBuffer* aBuffer)
   : mThreadInfo(aInfo)
   , mBuffer(aBuffer)
   , mPseudoStack(aInfo->Stack())
-  , mMutex("ThreadProfile::mMutex")
+  , mMutex(OS::CreateMutex("ThreadProfile::mMutex"))
   , mThreadId(int(aInfo->ThreadId()))
   , mIsMainThread(aInfo->IsMainThread())
   , mPlatformData(aInfo->GetPlatformData())
   , mStackTop(aInfo->StackTop())
+#ifndef SPS_STANDALONE
   , mRespInfo(this)
+#endif
 #ifdef XP_LINUX
   , mRssMemory(0)
   , mUssMemory(0)
@@ -887,11 +944,15 @@ void ThreadProfile::addStoredMarker(ProfilerMarker *aStoredMarker) {
   mBuffer->addStoredMarker(aStoredMarker);
 }
 
-void ThreadProfile::StreamJSON(SpliceableJSONWriter& aWriter, float aSinceTime)
+void ThreadProfile::StreamJSON(SpliceableJSONWriter& aWriter, double aSinceTime)
 {
   // mUniqueStacks may already be emplaced from FlushSamplesAndMarkers.
   if (!mUniqueStacks.isSome()) {
+#ifndef SPS_STANDALONE
     mUniqueStacks.emplace(mPseudoStack->mRuntime);
+#else
+    mUniqueStacks.emplace(nullptr);
+#endif
   }
 
   aWriter.Start(SpliceableJSONWriter::SingleLineStyle);
@@ -944,9 +1005,10 @@ void ThreadProfile::StreamJSON(SpliceableJSONWriter& aWriter, float aSinceTime)
   mUniqueStacks.reset();
 }
 
-void ThreadProfile::StreamSamplesAndMarkers(SpliceableJSONWriter& aWriter, float aSinceTime,
+void ThreadProfile::StreamSamplesAndMarkers(SpliceableJSONWriter& aWriter, double aSinceTime,
                                             UniqueStacks& aUniqueStacks)
 {
+#ifndef SPS_STANDALONE
   // Thread meta data
   if (XRE_GetProcessType() == GeckoProcessType_Plugin) {
     // TODO Add the proper plugin name
@@ -958,6 +1020,10 @@ void ThreadProfile::StreamSamplesAndMarkers(SpliceableJSONWriter& aWriter, float
   } else {
     aWriter.StringProperty("name", Name());
   }
+#else
+  aWriter.StringProperty("name", Name());
+#endif
+
   aWriter.IntProperty("tid", static_cast<int>(mThreadId));
 
   aWriter.StartObjectProperty("samples");
@@ -984,7 +1050,12 @@ void ThreadProfile::StreamSamplesAndMarkers(SpliceableJSONWriter& aWriter, float
         mSavedStreamedSamples.reset();
       }
       mBuffer->StreamSamplesToJSON(aWriter, mThreadId, aSinceTime,
-                                   mPseudoStack->mRuntime, aUniqueStacks);
+#ifndef SPS_STANDALONE
+                                   mPseudoStack->mRuntime,
+#else
+                                   nullptr,
+#endif
+                                   aUniqueStacks);
     }
     aWriter.EndArray();
   }
@@ -1026,14 +1097,23 @@ void ThreadProfile::FlushSamplesAndMarkers()
   //
   // Note that the UniqueStacks instance is persisted so that the frame-index
   // mapping is stable across JS shutdown.
+#ifndef SPS_STANDALONE
   mUniqueStacks.emplace(mPseudoStack->mRuntime);
+#else
+  mUniqueStacks.emplace(nullptr);
+#endif
 
   {
     SpliceableChunkedJSONWriter b;
     b.StartBareList();
     {
       mBuffer->StreamSamplesToJSON(b, mThreadId, /* aSinceTime = */ 0,
-                                   mPseudoStack->mRuntime, *mUniqueStacks);
+#ifndef SPS_STANDALONE
+                                   mPseudoStack->mRuntime,
+#else
+                                   nullptr,
+#endif
+                                   *mUniqueStacks);
     }
     b.EndBareList();
     mSavedStreamedSamples = b.WriteFunc()->CopyData();
@@ -1061,17 +1141,17 @@ PseudoStack* ThreadProfile::GetPseudoStack()
 
 void ThreadProfile::BeginUnwind()
 {
-  mMutex.Lock();
+  mMutex->Lock();
 }
 
 void ThreadProfile::EndUnwind()
 {
-  mMutex.Unlock();
+  mMutex->Unlock();
 }
 
-mozilla::Mutex* ThreadProfile::GetMutex()
+Mutex& ThreadProfile::GetMutex()
 {
-  return &mMutex;
+  return *mMutex.get();
 }
 
 void ThreadProfile::DuplicateLastSample()

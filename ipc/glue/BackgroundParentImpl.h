@@ -98,12 +98,6 @@ protected:
   virtual bool
   DeallocPCamerasParent(PCamerasParent* aActor) override;
 
-  virtual PMediaParent*
-  AllocPMediaParent() override;
-
-  virtual bool
-  DeallocPMediaParent(PMediaParent* aActor) override;
-
   virtual bool
   RecvShutdownServiceWorkerRegistrar() override;
 
@@ -135,6 +129,20 @@ protected:
                             const nsCString& aFilter) override;
   virtual bool
   DeallocPUDPSocketParent(PUDPSocketParent*) override;
+
+  virtual PMessagePortParent*
+  AllocPMessagePortParent(const nsID& aUUID,
+                          const nsID& aDestinationUUID,
+                          const uint32_t& aSequenceID) override;
+
+  virtual bool
+  RecvPMessagePortConstructor(PMessagePortParent* aActor,
+                              const nsID& aUUID,
+                              const nsID& aDestinationUUID,
+                              const uint32_t& aSequenceID) override;
+
+  virtual bool
+  DeallocPMessagePortParent(PMessagePortParent* aActor) override;
 };
 
 } // namespace ipc

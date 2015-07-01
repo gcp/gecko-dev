@@ -655,6 +655,7 @@ nsresult
 GfxInfoBase::Init()
 {
   InitGfxDriverInfoShutdownObserver();
+  gfxPrefs::GetSingleton();
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os) {
@@ -1160,6 +1161,20 @@ GfxInfoBase::RemoveCollector(GfxInfoCollectorBase* collector)
     delete sCollectors;
     sCollectors = nullptr;
   }
+}
+
+NS_IMETHODIMP
+GfxInfoBase::GetMonitors(JSContext* aCx, JS::MutableHandleValue aResult)
+{
+  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
+
+  nsresult rv = FindMonitors(aCx, array);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  aResult.setObject(*array);
+  return NS_OK;
 }
 
 GfxInfoCollectorBase::GfxInfoCollectorBase()

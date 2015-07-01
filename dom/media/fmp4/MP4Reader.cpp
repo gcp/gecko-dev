@@ -604,7 +604,7 @@ MP4Reader::ShouldSkip(bool aSkipToNextKeyframe, int64_t aTimeThreshold)
       (nextKeyframe = GetNextKeyframeTime()) == -1) {
     return aSkipToNextKeyframe;
   }
-  return nextKeyframe < aTimeThreshold;
+  return nextKeyframe < aTimeThreshold && nextKeyframe >= 0;
 }
 
 nsRefPtr<MediaDecoderReader::VideoDataPromise>
@@ -1081,7 +1081,7 @@ MP4Reader::GetBuffered()
     return buffered;
   }
   UpdateIndex();
-  MOZ_ASSERT(mStartTime != -1, "Need to finish metadata decode first");
+  NS_ENSURE_TRUE(mStartTime >= 0, media::TimeIntervals());
 
   AutoPinned<MediaResource> resource(mDecoder->GetResource());
   nsTArray<MediaByteRange> ranges;

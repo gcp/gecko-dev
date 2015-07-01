@@ -130,7 +130,8 @@ using namespace mozilla::dom;
 #define BEFOREUNLOAD_DISABLED_PREFNAME "dom.disable_beforeunload"
 
 //-----------------------------------------------------
-// PR LOGGING
+// LOGGING
+#include "LayoutLogging.h"
 #include "mozilla/Logging.h"
 
 #ifdef NS_PRINTING
@@ -2334,6 +2335,20 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument,
       styleSet->PrependStyleSheet(nsStyleSet::eAgentSheet, sheet);
     }
 
+    if (nsLayoutUtils::ShouldUseNoScriptSheet(aDocument)) {
+      sheet = nsLayoutStylesheetCache::NoScriptSheet();
+      if (sheet) {
+        styleSet->PrependStyleSheet(nsStyleSet::eAgentSheet, sheet);
+      }
+    }
+
+    if (nsLayoutUtils::ShouldUseNoFramesSheet(aDocument)) {
+      sheet = nsLayoutStylesheetCache::NoFramesSheet();
+      if (sheet) {
+        styleSet->PrependStyleSheet(nsStyleSet::eAgentSheet, sheet);
+      }
+    }
+
     sheet = nsLayoutStylesheetCache::HTMLSheet();
     if (sheet) {
       styleSet->PrependStyleSheet(nsStyleSet::eAgentSheet, sheet);
@@ -2503,7 +2518,8 @@ nsDocumentViewer::FindContainerView()
             NS_WARNING("Subdocument container has non-subdocument frame");
           }
         } else {
-          NS_WARNING("Subdocument container has no frame");
+          // XXX Silenced by default in bug 117528
+          LAYOUT_WARNING("Subdocument container has no frame");
         }
       }
     }

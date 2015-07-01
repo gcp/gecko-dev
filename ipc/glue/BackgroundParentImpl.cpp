@@ -12,6 +12,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/PBlobParent.h"
+#include "mozilla/dom/MessagePortParent.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/cache/ActorUtils.h"
 #include "mozilla/dom/indexedDB/ActorsParent.h"
@@ -40,6 +41,8 @@ using mozilla::ipc::AssertIsOnBackgroundThread;
 using mozilla::dom::cache::PCacheParent;
 using mozilla::dom::cache::PCacheStorageParent;
 using mozilla::dom::cache::PCacheStreamControlParent;
+using mozilla::dom::MessagePortParent;
+using mozilla::dom::PMessagePortParent;
 using mozilla::dom::UDPSocketParent;
 
 namespace {
@@ -512,18 +515,6 @@ BackgroundParentImpl::DeallocPServiceWorkerManagerParent(
   return true;
 }
 
-media::PMediaParent*
-BackgroundParentImpl::AllocPMediaParent()
-{
-  return media::AllocPMediaParent();
-}
-
-bool
-BackgroundParentImpl::DeallocPMediaParent(media::PMediaParent *aActor)
-{
-  return media::DeallocPMediaParent(aActor);
-}
-
 bool
 BackgroundParentImpl::RecvShutdownServiceWorkerRegistrar()
 {
@@ -581,6 +572,41 @@ bool
 BackgroundParentImpl::DeallocPCacheStreamControlParent(PCacheStreamControlParent* aActor)
 {
   dom::cache::DeallocPCacheStreamControlParent(aActor);
+  return true;
+}
+
+PMessagePortParent*
+BackgroundParentImpl::AllocPMessagePortParent(const nsID& aUUID,
+                                              const nsID& aDestinationUUID,
+                                              const uint32_t& aSequenceID)
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+
+  return new MessagePortParent(aUUID);
+}
+
+bool
+BackgroundParentImpl::RecvPMessagePortConstructor(PMessagePortParent* aActor,
+                                                  const nsID& aUUID,
+                                                  const nsID& aDestinationUUID,
+                                                  const uint32_t& aSequenceID)
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+
+  MessagePortParent* mp = static_cast<MessagePortParent*>(aActor);
+  return mp->Entangle(aDestinationUUID, aSequenceID);
+}
+
+bool
+BackgroundParentImpl::DeallocPMessagePortParent(PMessagePortParent* aActor)
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aActor);
+
+  delete static_cast<MessagePortParent*>(aActor);
   return true;
 }
 
