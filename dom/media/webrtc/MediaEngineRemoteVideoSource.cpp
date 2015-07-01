@@ -43,8 +43,8 @@ MediaEngineRemoteVideoSource::Init() {
     return;
   }
 
-  CopyUTF8toUTF16(deviceName, mDeviceName);
-  CopyUTF8toUTF16(uniqueId, mUniqueId);
+  SetName(NS_ConvertUTF8toUTF16(deviceName));
+  SetUUID(uniqueId);
 
   mInitDone = true;
 
@@ -101,7 +101,7 @@ MediaEngineRemoteVideoSource::Allocate(const dom::MediaTrackConstraints& aConstr
     }
 
     if (mozilla::camera::AllocateCaptureDevice(mCapEngine,
-                                               NS_ConvertUTF16toUTF8(mUniqueId).get(),
+                                               GetUUID().get(),
                                                kMaxUniqueIdLength, mCaptureIndex)) {
       return NS_ERROR_FAILURE;
     }
@@ -311,10 +311,7 @@ MediaEngineRemoteVideoSource::DeliverFrame(unsigned char* buffer,
 size_t
 MediaEngineRemoteVideoSource::NumCapabilities()
 {
-  NS_ConvertUTF16toUTF8 uniqueId(mUniqueId); // TODO: optimize this?
-
-  int num = mozilla::camera::NumberOfCapabilities(mCapEngine,
-                                                  uniqueId.get());
+  int num = mozilla::camera::NumberOfCapabilities(mCapEngine, GetUUID().get());
   if (num > 0) {
     return num;
   }
@@ -367,9 +364,8 @@ MediaEngineRemoteVideoSource::GetCapability(size_t aIndex,
   if (!mHardcodedCapabilities.IsEmpty()) {
     MediaEngineCameraVideoSource::GetCapability(aIndex, aOut);
   }
-  NS_ConvertUTF16toUTF8 uniqueId(mUniqueId); // TODO: optimize this?
   mozilla::camera::GetCaptureCapability(mCapEngine,
-                                        uniqueId.get(),
+                                        GetUUID().get(),
                                         aIndex,
                                         aOut);
 }
@@ -388,11 +384,9 @@ void MediaEngineRemoteVideoSource::Refresh(int aIndex) {
     return;
   }
 
-  CopyUTF8toUTF16(deviceName, mDeviceName);
+  SetName(NS_ConvertUTF8toUTF16(deviceName));
 #ifdef DEBUG
-  nsString temp;
-  CopyUTF8toUTF16(uniqueId, temp);
-  MOZ_ASSERT(temp.Equals(mUniqueId));
+  MOZ_ASSERT(GetUUID().Equals(uniqueId));
 #endif
 }
 
