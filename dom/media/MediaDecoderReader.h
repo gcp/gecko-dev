@@ -81,6 +81,12 @@ public:
   // destroyed.
   explicit MediaDecoderReader(AbstractMediaDecoder* aDecoder, MediaTaskQueue* aBorrowedTaskQueue = nullptr);
 
+  // Does any spinup that needs to happen on this task queue. This runs on a
+  // different thread than Init, and there should not be ordering dependencies
+  // between the two (even though in practice, Init will always run first right
+  // now thanks to the tail dispatcher).
+  void InitializationTask();
+
   // Initializes the reader, returns NS_OK on success, or NS_ERROR_FAILURE
   // on failure.
   virtual nsresult Init(MediaDecoderReader* aCloneDonor) = 0;
@@ -213,7 +219,8 @@ public:
   // called.
   virtual media::TimeIntervals GetBuffered();
 
-  virtual int64_t ComputeStartTime(const VideoData* aVideo, const AudioData* aAudio);
+  // MediaSourceReader opts out of the start-time-guessing mechanism.
+  virtual bool ForceZeroStartTime() const { return false; }
 
   // The MediaDecoderStateMachine uses various heuristics that assume that
   // raw media data is arriving sequentially from a network channel. This
@@ -317,6 +324,9 @@ protected:
   // Stores presentation info required for playback.
   MediaInfo mInfo;
 
+  // Duration, mirrored from the state machine task queue.
+  Mirror<media::NullableTimeUnit> mDuration;
+
   // Whether we should accept media that we know we can't play
   // directly, because they have a number of channel higher than
   // what we support.
@@ -325,7 +335,13 @@ protected:
   // The start time of the media, in microseconds. This is the presentation
   // time of the first frame decoded from the media. This is initialized to -1,
   // and then set to a value >= by MediaDecoderStateMachine::SetStartTime(),
-  // after which point it never changes.
+  // after which point it never changes (though SetStartTime may be called
+  // multiple times with the same value).
+  //
+  // This is an ugly breach of abstractions - it's currently necessary for the
+  // readers to return the correct value of GetBuffered. We should refactor
+  // things such that all GetBuffered calls go through the MDSM, which would
+  // offset the range accordingly.
   int64_t mStartTime;
 
   // This is a quick-and-dirty way for DecodeAudioData implementations to

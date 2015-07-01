@@ -77,12 +77,12 @@ public:
     , mNullTransport(nullptr) {
     MOZ_ASSERT(aVoiceEnginePtr);
     mDeviceName.Assign(NS_ConvertUTF8toUTF16(name));
-    mDeviceUUID.Assign(NS_ConvertUTF8toUTF16(uuid));
+    mDeviceUUID.Assign(uuid);
     Init();
   }
 
   virtual void GetName(nsAString& aName) override;
-  virtual void GetUUID(nsAString& aUUID) override;
+  virtual void GetUUID(nsACString& aUUID) override;
 
   virtual nsresult Allocate(const dom::MediaTrackConstraints& aConstraints,
                             const MediaEnginePrefs& aPrefs) override;
@@ -147,7 +147,7 @@ private:
   bool mStarted;
 
   nsString mDeviceName;
-  nsString mDeviceUUID;
+  nsCString mDeviceUUID;
 
   bool mEchoOn, mAgcOn, mNoiseOn;
   webrtc::EcModes  mEchoCancel;

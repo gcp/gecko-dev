@@ -351,7 +351,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                 allowThirdPartyFixup: true,
                 disallowInheritPrincipal: !mayInheritPrincipal,
                 allowPinnedTabHostChange: true,
-                postData: postData
+                postData: postData,
+                allowPopups: url.startsWith("javascript:"),
               });
               // Ensure the start of the URL is visible for UX reasons:
               this.selectionStart = this.selectionEnd = 0;
@@ -2302,8 +2303,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       </field>
       <property name="isTrackingContentBlocked" readonly="true">
         <getter><![CDATA[
-          return this.notification.options.state &
-            Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT;
+          return !!(this.notification.options.state &
+            Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT);
         ]]></getter>
       </property>
       <constructor><![CDATA[
@@ -3071,6 +3072,17 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
           let viewsLeft = this._viewsLeft;
           if (viewsLeft) {
+            let notification = this._panel.firstElementChild.notification;
+            if (this._notificationType == "passwords" && notification && notification.options &&
+                notification.options.origin) {
+              let fxAOrigin = new URL(Services.prefs.getCharPref("identity.fxaccounts.remote.signup.uri")).origin
+              if (notification.options.origin == fxAOrigin) {
+                // Somewhat gross hack - we don't want to show the sync promo while
+                // the user may be logging into Sync.
+                return;
+              }
+            }
+
             if (Services.prefs.prefHasUserValue("services.sync.username") &&
                this._notificationType != "addons-sync-disabled") {
               // If the user has already setup Sync, don't show the notification.

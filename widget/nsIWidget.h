@@ -18,6 +18,7 @@
 #include "nsITheme.h"
 #include "nsITimer.h"
 #include "nsXULAppAPI.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/RefPtr.h"
@@ -25,6 +26,7 @@
 #include "mozilla/gfx/Point.h"
 #include "nsDataHashtable.h"
 #include "nsIObserver.h"
+#include "FrameMetrics.h"
 #include "Units.h"
 
 // forward declarations
@@ -107,6 +109,7 @@ typedef void* nsNativeWidget;
 #define NS_NATIVE_TSF_CATEGORY_MGR     101
 #define NS_NATIVE_TSF_DISPLAY_ATTR_MGR 102
 #define NS_NATIVE_ICOREWINDOW          103 // winrt specific
+#define NS_NATIVE_CHILD_WINDOW         104
 #endif
 #if defined(MOZ_WIDGET_GTK)
 // set/get nsPluginNativeWindowGtk, e10s specific
@@ -423,6 +426,7 @@ struct InputContext {
   InputContext()
     : mNativeIMEContext(nullptr)
     , mOrigin(XRE_IsParentProcess() ? ORIGIN_MAIN : ORIGIN_CONTENT)
+    , mMayBeIMEUnaware(false)
   {}
 
   bool IsPasswordEditor() const
@@ -446,7 +450,6 @@ struct InputContext {
      be nullptr. */
   void* mNativeIMEContext;
 
-
   /**
    * mOrigin indicates whether this focus event refers to main or remote content.
    */
@@ -458,6 +461,11 @@ struct InputContext {
     ORIGIN_CONTENT
   };
   Origin mOrigin;
+
+  /* True if the webapp may be unaware of IME events such as input event or
+   * composiion events. This enables a key-events-only mode on Android for
+   * compatibility with webapps relying on key listeners. */
+  bool mMayBeIMEUnaware;
 
   bool IsOriginMainProcess() const
   {
@@ -813,10 +821,12 @@ class nsIWidget : public nsISupports {
   public:
     typedef mozilla::layers::Composer2D Composer2D;
     typedef mozilla::layers::CompositorChild CompositorChild;
+    typedef mozilla::layers::FrameMetrics FrameMetrics;
     typedef mozilla::layers::LayerManager LayerManager;
     typedef mozilla::layers::LayerManagerComposite LayerManagerComposite;
     typedef mozilla::layers::LayersBackend LayersBackend;
     typedef mozilla::layers::PLayerTransactionChild PLayerTransactionChild;
+    typedef mozilla::layers::ZoomConstraints ZoomConstraints;
     typedef mozilla::widget::IMEMessage IMEMessage;
     typedef mozilla::widget::IMENotification IMENotification;
     typedef mozilla::widget::IMEState IMEState;
@@ -1516,7 +1526,8 @@ class nsIWidget : public nsISupports {
      * widgets are currently included in the visible layer tree. It calls this
      * helper to hide widgets it knows nothing about.
      */
-    static void UpdateRegisteredPluginWindowVisibility(nsTArray<uintptr_t>& aVisibleList);
+    static void UpdateRegisteredPluginWindowVisibility(uintptr_t aOwnerWidget,
+                                                       nsTArray<uintptr_t>& aVisibleList);
 
     /**
      * Set the shadow style of the window.
@@ -2432,6 +2443,10 @@ public:
      * determine how widget coordinates will be rounded.
      */
     virtual int32_t RoundsWidgetCoordinatesTo() { return 1; }
+
+    virtual void UpdateZoomConstraints(const uint32_t& aPresShellId,
+                                       const FrameMetrics::ViewID& aViewId,
+                                       const mozilla::Maybe<ZoomConstraints>& aConstraints) {};
 
     /**
      * GetTextEventDispatcher() returns TextEventDispatcher belonging to the

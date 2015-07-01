@@ -505,9 +505,16 @@ pref("dom.disable_window_move_resize",            false);
 // prevent JS from monkeying with window focus, etc
 pref("dom.disable_window_flip",                   true);
 
-// Disable touch events on Desktop Firefox by default until they are properly
-// supported (bug 736048)
+// Disable touch events on Desktop Firefox by default
+// until they are properly supported (bug 736048)
 pref("dom.w3c_touch_events.enabled",        0);
+
+#ifdef NIGHTLY_BUILD
+// W3C draft pointer events
+pref("dom.w3c_pointer_events.enabled", true);
+// W3C touch-action css property (related to touch and pointer events)
+pref("layout.css.touch_action.enabled", true);
+#endif
 
 // popups.policy 1=allow,2=reject
 pref("privacy.popups.policy",               1);
@@ -981,13 +988,9 @@ pref("browser.safebrowsing.debug", false);
 
 pref("browser.safebrowsing.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2&key=%GOOGLE_API_KEY%");
 pref("browser.safebrowsing.gethashURL", "https://safebrowsing.google.com/safebrowsing/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
-pref("browser.safebrowsing.reportURL", "https://safebrowsing.google.com/safebrowsing/report?");
-pref("browser.safebrowsing.reportGenericURL", "http://%LOCALE%.phish-generic.mozilla.com/?hl=%LOCALE%");
-pref("browser.safebrowsing.reportErrorURL", "http://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%");
-pref("browser.safebrowsing.reportPhishURL", "http://%LOCALE%.phish-report.mozilla.com/?hl=%LOCALE%");
-pref("browser.safebrowsing.reportMalwareURL", "http://%LOCALE%.malware-report.mozilla.com/?hl=%LOCALE%");
-pref("browser.safebrowsing.reportMalwareErrorURL", "http://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%");
-
+pref("browser.safebrowsing.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%&url=");
+pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozilla.com/?hl=%LOCALE%&url=");
+pref("browser.safebrowsing.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.malware.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 
 pref("browser.safebrowsing.appRepURL", "https://sb-ssl.google.com/safebrowsing/clientreport/download?key=%GOOGLE_API_KEY%");
@@ -1204,6 +1207,7 @@ pref("security.sandbox.windows.log", false);
 // 3 - the strongest settings we seem to be able to use without breaking
 //     everything, but will probably cause some functionality restrictions
 pref("dom.ipc.plugins.sandbox-level.default", 0);
+pref("dom.ipc.plugins.sandbox-level.flash", 0);
 
 #if defined(MOZ_CONTENT_SANDBOX)
 // This controls the strength of the Windows content process sandbox for testing
@@ -1378,6 +1382,7 @@ pref("devtools.webide.enabled", true);
 pref("devtools.toolbox.footer.height", 250);
 pref("devtools.toolbox.sidebar.width", 500);
 pref("devtools.toolbox.host", "bottom");
+pref("devtools.toolbox.previousHost", "side");
 pref("devtools.toolbox.selectedTool", "webconsole");
 pref("devtools.toolbox.toolbarSpec", '["splitconsole", "paintflashing toggle","tilt toggle","scratchpad","resize toggle","eyedropper","screenshot --fullpage", "rulers"]');
 pref("devtools.toolbox.sideEnabled", true);
@@ -1405,8 +1410,8 @@ pref("devtools.inspector.activeSidebar", "ruleview");
 // Enable the markup preview
 pref("devtools.inspector.markupPreview", false);
 pref("devtools.inspector.remote", false);
-// Expand pseudo-elements by default in the rule-view
-pref("devtools.inspector.show_pseudo_elements", true);
+// Collapse pseudo-elements by default in the rule-view
+pref("devtools.inspector.show_pseudo_elements", false);
 // The default size for image preview tooltips in the rule-view/computed-view/markup-view
 pref("devtools.inspector.imagePreviewTooltipSize", 300);
 // Enable user agent style inspection in rule-view
@@ -1437,9 +1442,10 @@ pref("devtools.debugger.pretty-print-enabled", true);
 pref("devtools.debugger.auto-pretty-print", false);
 pref("devtools.debugger.auto-black-box", true);
 pref("devtools.debugger.tracer", false);
+pref("devtools.debugger.workers", false);
 
 // The default Debugger UI settings
-pref("devtools.debugger.ui.panes-sources-width", 200);
+pref("devtools.debugger.ui.panes-workers-and-sources-width", 200);
 pref("devtools.debugger.ui.panes-instruments-width", 300);
 pref("devtools.debugger.ui.panes-visible-on-startup", false);
 pref("devtools.debugger.ui.variables-sorting-enabled", true);
@@ -1465,7 +1471,7 @@ pref("devtools.performance.ui.show-idle-blocks", true);
 pref("devtools.performance.ui.enable-memory", false);
 pref("devtools.performance.ui.enable-allocations", false);
 pref("devtools.performance.ui.enable-framerate", true);
-pref("devtools.performance.ui.show-jit-optimizations", false);
+pref("devtools.performance.ui.enable-jit-optimizations", false);
 
 // Enable experimental options in the UI only in Nightly
 #if defined(NIGHTLY_BUILD)
@@ -1491,12 +1497,14 @@ pref("devtools.netmonitor.filters", "[\"all\"]");
 
 // The default Network monitor HAR export setting
 pref("devtools.netmonitor.har.defaultLogDir", "");
-pref("devtools.netmonitor.har.defaultFileName", "archive");
+pref("devtools.netmonitor.har.defaultFileName", "Archive %y-%m-%d %H-%M-%S");
 pref("devtools.netmonitor.har.jsonp", false);
 pref("devtools.netmonitor.har.jsonpCallback", "");
 pref("devtools.netmonitor.har.includeResponseBodies", true);
 pref("devtools.netmonitor.har.compress", false);
 pref("devtools.netmonitor.har.forceExport", false);
+pref("devtools.netmonitor.har.pageLoadedTimeout", 1500);
+pref("devtools.netmonitor.har.enableAutoExportToFile", false);
 
 // Enable the Tilt inspector
 pref("devtools.tilt.enabled", true);
@@ -1831,6 +1839,9 @@ pref("identity.fxaccounts.remote.profile.uri", "https://profile.accounts.firefox
 
 // The remote URL of the FxA OAuth Server
 pref("identity.fxaccounts.remote.oauth.uri", "https://oauth.accounts.firefox.com/v1");
+
+// Whether we display profile images in the UI or not.
+pref("identity.fxaccounts.profile_image.enabled", true);
 
 // Migrate any existing Firefox Account data from the default profile to the
 // Developer Edition profile.

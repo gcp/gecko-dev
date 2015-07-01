@@ -212,6 +212,9 @@ public:
 
   virtual bool IsHidden() final override;
 
+  // In order to create overlayImageContainer to support DOMHwMediaStream.
+  VideoFrameContainer* GetOverlayImageVideoFrameContainer();
+
   // Called by the media decoder and the video frame to get the
   // ImageContainer containing the video data.
   virtual VideoFrameContainer* GetVideoFrameContainer() final override;
@@ -894,6 +897,13 @@ protected:
   };
 
   /**
+   * The guts of Load(). Load() acts as a wrapper around this which sets
+   * mIsDoingExplicitLoad to true so that when script calls 'load()'
+   * preload-none will be automatically upgraded to preload-metadata.
+   */
+  void DoLoad();
+
+  /**
    * Suspends the load of mLoadingSrc, so that it can be resumed later
    * by ResumeLoad(). This is called when we have a media with a 'preload'
    * attribute value of 'none', during the resource selection algorithm.
@@ -1282,6 +1292,10 @@ protected:
 
   // True if we're running the "load()" method.
   bool mIsRunningLoadMethod;
+
+  // True if we're running or waiting to run queued tasks due to an explicit
+  // call to "load()".
+  bool mIsDoingExplicitLoad;
 
   // True if we're loading the resource from the child source elements.
   bool mIsLoadingFromSourceChildren;

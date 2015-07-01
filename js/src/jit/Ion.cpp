@@ -464,8 +464,10 @@ jit::FinishOffThreadBuilder(JSContext* cx, IonBuilder* builder)
     // Clean the references to the pending IonBuilder, if we just finished it.
     if (builder->script()->hasIonScript() && builder->script()->pendingIonBuilder() == builder)
         builder->script()->setPendingIonBuilder(cx, nullptr);
+
+    // If the builder is still in one of the helper thread list, then remove it.
     if (builder->isInList())
-        builder->remove();
+        builder->removeFrom(HelperThreadState().ionLazyLinkList());
 
     // Clear the recompiling flag of the old ionScript, since we continue to
     // use the old ionScript if recompiling fails.
@@ -579,7 +581,7 @@ jit::LazyLinkTopActivation(JSContext* cx)
     OnIonCompilationInfo info(builder->alloc().lifoAlloc());
 
     // Remove from pending.
-    builder->remove();
+    builder->removeFrom(HelperThreadState().ionLazyLinkList());
 
     {
         AutoEnterAnalysis enterTypes(cx);
@@ -1408,7 +1410,50 @@ OptimizeMIR(MIRGenerator* mir)
         if (mir->shouldCancel("Alias analysis"))
             return false;
 
-        if (!mir->compilingAsmJS()) {
+        // We only eliminate dead resume point operands in the first pass
+        // because it is currently unsound to do so after GVN.
+        //
+        // Consider the following example, where def1 dominates, and is
+        // congruent with def4, and use3 dominates, and is congruent with,
+        // use6.
+        //
+        // def1
+        // nop2
+        //   resumepoint def1
+        // use3 def1
+        // def4
+        // nop5
+        //   resumepoint def4
+        // use6 def4
+        // use7 use3 use6
+        //
+        // Assume that use3, use6, and use7 can cause OSI and are
+        // non-effectful. That is, use3 will resume at nop2, and use6 and use7
+        // will resume at nop5.
+        //
+        // After GVN, since def1 =~ def4, we have:
+        //
+        // def4 - replaced with def1 and pruned
+        // use6 - replaced with use3 and pruned
+        // use7 - renumbered to use5
+        //
+        // def1
+        // nop2
+        //   resumepoint def1
+        // use3 def1
+        // nop4
+        //   resumepoint def1
+        // use5 use3 use3
+        //
+        // nop4's resumepoint's operand of def1 is considered dead, because it
+        // is dominated by the last use of def1, use3.
+        //
+        // However, if use5 causes OSI, we will resume at nop4's resume
+        // point. The baseline frame at that point expects the now-pruned def4
+        // to exist. However, since it was replaced with def1 by GVN, and def1
+        // is dead at the point of nop4, the baseline frame incorrectly gets
+        // an optimized out value.
+        if (!mir->compilingAsmJS() && doRepeatOptimizations == 1) {
             // Eliminating dead resume point operands requires basic block
             // instructions to be numbered. Reuse the numbering computed during
             // alias analysis.
@@ -1653,14 +1698,18 @@ GenerateLIR(MIRGenerator* mir)
     {
         AutoTraceLog log(logger, TraceLogger_RegisterAllocation);
 
-        switch (mir->optimizationInfo().registerAllocator()) {
-          case RegisterAllocator_Backtracking: {
+        IonRegisterAllocator allocator = mir->optimizationInfo().registerAllocator();
+
+        switch (allocator) {
+          case RegisterAllocator_Backtracking:
+          case RegisterAllocator_Testbed: {
 #ifdef DEBUG
             if (!integrity.record())
                 return nullptr;
 #endif
 
-            BacktrackingAllocator regalloc(mir, &lirgen, *lir);
+            BacktrackingAllocator regalloc(mir, &lirgen, *lir,
+                                           allocator == RegisterAllocator_Testbed);
             if (!regalloc.go())
                 return nullptr;
 

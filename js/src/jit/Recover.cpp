@@ -24,6 +24,7 @@
 #include "jit/MIRGraph.h"
 #include "jit/VMFunctions.h"
 #include "vm/Interpreter.h"
+#include "vm/String.h"
 
 #include "vm/Interpreter-inl.h"
 #include "vm/NativeObject-inl.h"
@@ -1375,15 +1376,33 @@ RObjectState::recover(JSContext* cx, SnapshotIterator& iter) const
     if (object->is<UnboxedPlainObject>()) {
         const UnboxedLayout& layout = object->as<UnboxedPlainObject>().layout();
 
+        RootedId id(cx);
+        RootedValue receiver(cx, ObjectValue(*object));
         const UnboxedLayout::PropertyVector& properties = layout.properties();
         for (size_t i = 0; i < properties.length(); i++) {
             val = iter.read();
+
             // This is the default placeholder value of MObjectState, when no
             // properties are defined yet.
             if (val.isUndefined())
                 continue;
 
-            MOZ_ALWAYS_TRUE(object->as<UnboxedPlainObject>().setValue(cx, properties[i], val));
+            // In order to simplify the code, we do not have a
+            // MStoreUnboxedBoolean, but we reuse the MStoreUnboxedScalar code.
+            // This has a nasty side-effect of add a MTruncate which coerce the
+            // boolean into an Int32. The following code check that if the
+            // property was expected to be a boolean, then we coerce it here.
+            if (properties[i].type == JSVAL_TYPE_BOOLEAN)
+                val.setBoolean(val.toInt32() != 0);
+
+            id = NameToId(properties[i].name);
+            ObjectOpResult result;
+
+            // SetProperty can only fail due to OOM.
+            if (!SetProperty(cx, object, id, val, receiver, result))
+                return false;
+            if (!result)
+                return result.reportError(cx, object, id);
         }
     } else {
         RootedNativeObject nativeObject(cx, &object->as<NativeObject>());

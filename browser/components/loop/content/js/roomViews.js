@@ -92,9 +92,10 @@ loop.roomViews = (function(mozL10n) {
       event.preventDefault();
 
       var origin = event.currentTarget.dataset.provider;
-      var provider = this.props.socialShareProviders.filter(function(provider) {
-        return provider.origin == origin;
-      })[0];
+      var provider = this.props.socialShareProviders
+                         .filter(function(socialProvider) {
+                           return socialProvider.origin == origin;
+                         })[0];
 
       this.props.dispatcher.dispatch(new sharedActions.ShareRoomUrl({
         provider: provider,
@@ -304,12 +305,12 @@ loop.roomViews = (function(mozL10n) {
           this.props.mozLoop.getSelectedTabMetadata(function(metadata) {
             var previewImage = metadata.favicon || "";
             var description = metadata.title || metadata.description;
-            var url = metadata.url;
+            var metaUrl = metadata.url;
             this.setState({
               availableContext: {
                 previewImage: previewImage,
                 description: description,
-                url: url
+                url: metaUrl
               }
            });
           }.bind(this));
@@ -647,6 +648,9 @@ loop.roomViews = (function(mozL10n) {
      * room state and other flags.
      *
      * @return {Boolean} True if remote video should be rended.
+     *
+     * XXX Refactor shouldRenderRemoteVideo & shouldRenderLoading into one fn
+     *     that returns an enum
      */
     shouldRenderRemoteVideo: function() {
       switch(this.state.roomState) {
@@ -663,17 +667,49 @@ loop.roomViews = (function(mozL10n) {
 
           return true;
 
+        case ROOM_STATES.READY:
+        case ROOM_STATES.INIT:
+        case ROOM_STATES.JOINING:
         case ROOM_STATES.SESSION_CONNECTED:
         case ROOM_STATES.JOINED:
+        case ROOM_STATES.MEDIA_WAIT:
           // this case is so that we don't show an avatar while waiting for
           // the other party to connect
           return true;
 
+        case ROOM_STATES.CLOSING:
+          return true;
+
         default:
-          console.warn("StandaloneRoomView.shouldRenderRemoteVideo:" +
+          console.warn("DesktopRoomConversationView.shouldRenderRemoteVideo:" +
             " unexpected roomState: ", this.state.roomState);
           return true;
       }
+    },
+
+    /**
+     * Should we render a visual cue to the user (e.g. a spinner) that a local
+     * stream is on its way from the camera?
+     *
+     * @returns {boolean}
+     * @private
+     */
+    _shouldRenderLocalLoading: function () {
+      return this.state.roomState === ROOM_STATES.MEDIA_WAIT &&
+             !this.state.localSrcVideoObject;
+    },
+
+    /**
+     * Should we render a visual cue to the user (e.g. a spinner) that a remote
+     * stream is on its way from the other user?
+     *
+     * @returns {boolean}
+     * @private
+     */
+    _shouldRenderRemoteLoading: function() {
+      return this.state.roomState === ROOM_STATES.HAS_PARTICIPANTS &&
+             !this.state.remoteSrcVideoObject &&
+             !this.state.mediaConnected;
     },
 
     render: function() {
@@ -734,6 +770,7 @@ loop.roomViews = (function(mozL10n) {
                       React.createElement("div", {className: "video_inner remote focus-stream"}, 
                         React.createElement(sharedViews.MediaView, {displayAvatar: !this.shouldRenderRemoteVideo(), 
                           posterUrl: this.props.remotePosterUrl, 
+                          isLoading: this._shouldRenderRemoteLoading(), 
                           mediaType: "remote", 
                           srcVideoObject: this.state.remoteSrcVideoObject})
                       )
@@ -741,6 +778,7 @@ loop.roomViews = (function(mozL10n) {
                     React.createElement("div", {className: localStreamClasses}, 
                       React.createElement(sharedViews.MediaView, {displayAvatar: this.state.videoMuted, 
                         posterUrl: this.props.localPosterUrl, 
+                        isLoading: this._shouldRenderLocalLoading(), 
                         mediaType: "local", 
                         srcVideoObject: this.state.localSrcVideoObject})
                     )
@@ -761,7 +799,10 @@ loop.roomViews = (function(mozL10n) {
                 mozLoop: this.props.mozLoop, 
                 roomData: roomData, 
                 show: !shouldRenderInvitationOverlay && shouldRenderContextView}), 
-              React.createElement(sharedViews.TextChatView, {dispatcher: this.props.dispatcher})
+              React.createElement(sharedViews.TextChatView, {
+                dispatcher: this.props.dispatcher, 
+                showAlways: false, 
+                showRoomName: false})
             )
           );
         }
