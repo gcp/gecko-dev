@@ -12,6 +12,7 @@ let { devtools } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
 let { gDevTools } = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
 let { DevToolsUtils } = Cu.import("resource://gre/modules/devtools/DevToolsUtils.jsm", {});
 let { DebuggerServer } = Cu.import("resource://gre/modules/devtools/dbg-server.jsm", {});
+let { console } = devtools.require("resource://gre/modules/devtools/Console.jsm");
 let { merge } = devtools.require("sdk/util/object");
 let { generateUUID } = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
 let { getPerformanceFront, PerformanceFront } = devtools.require("devtools/performance/front");
@@ -38,7 +39,7 @@ const IDLE_PREF = "devtools.performance.ui.show-idle-blocks";
 const INVERT_PREF = "devtools.performance.ui.invert-call-tree";
 const INVERT_FLAME_PREF = "devtools.performance.ui.invert-flame-graph";
 const FLATTEN_PREF = "devtools.performance.ui.flatten-tree-recursion";
-const JIT_PREF = "devtools.performance.ui.show-jit-optimizations";
+const JIT_PREF = "devtools.performance.ui.enable-jit-optimizations";
 const EXPERIMENTAL_PREF = "devtools.performance.ui.experimental";
 
 // All tests are asynchronous.
@@ -55,12 +56,13 @@ let DEFAULT_PREFS = [
   "devtools.performance.ui.enable-memory",
   "devtools.performance.ui.enable-allocations",
   "devtools.performance.ui.enable-framerate",
-  "devtools.performance.ui.show-jit-optimizations",
+  "devtools.performance.ui.enable-jit-optimizations",
   "devtools.performance.memory.sample-probability",
   "devtools.performance.memory.max-log-length",
   "devtools.performance.profiler.buffer-size",
   "devtools.performance.profiler.sample-frequency-khz",
   "devtools.performance.ui.experimental",
+  "devtools.performance.timeline.hidden-markers",
 ].reduce((prefs, pref) => {
   prefs[pref] = Preferences.get(pref);
   return prefs;

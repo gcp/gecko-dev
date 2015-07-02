@@ -85,6 +85,10 @@ IsTypeSupported(const nsAString& aType)
   if (NS_FAILED(rv)) {
     return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
   }
+  if (Preferences::GetBool("media.mediasource.format-reader", false) &&
+      !mimeType.EqualsASCII("video/mp4") && !mimeType.EqualsASCII("audio/mp4")) {
+    return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+  }
   bool found = false;
   for (uint32_t i = 0; gMediaSourceTypes[i]; ++i) {
     if (mimeType.EqualsASCII(gMediaSourceTypes[i])) {
@@ -413,8 +417,6 @@ MediaSource::Detach()
     MOZ_ASSERT(mActiveSourceBuffers->IsEmpty() && mSourceBuffers->IsEmpty());
     return;
   }
-  mDecoder->DetachMediaSource();
-  mDecoder = nullptr;
   mMediaElement = nullptr;
   mFirstSourceBufferInitialized = false;
   SetReadyState(MediaSourceReadyState::Closed);
@@ -424,6 +426,8 @@ MediaSource::Detach()
   if (mSourceBuffers) {
     mSourceBuffers->Clear();
   }
+  mDecoder->DetachMediaSource();
+  mDecoder = nullptr;
 }
 
 MediaSource::MediaSource(nsPIDOMWindow* aWindow)

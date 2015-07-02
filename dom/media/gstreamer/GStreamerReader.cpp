@@ -374,6 +374,9 @@ nsresult GStreamerReader::ReadMetadata(MediaInfo* aInfo,
    * might be concurrent stream operations happening on both decoding and gstreamer
    * threads which will screw the GStreamer state machine.
    */
+  LOG(LogLevel::Debug, "content-type: %s %s",
+      mDecoder->GetResource()->GetContentType().get(),
+      mDecoder->GetResource()->GetContentURL().get());
   bool isMP3 = mDecoder->GetResource()->GetContentType().EqualsASCII(AUDIO_MP3);
   if (isMP3) {
     ParseMP3Headers();
@@ -884,15 +887,9 @@ media::TimeIntervals GStreamerReader::GetBuffered()
   nsTArray<MediaByteRange> ranges;
   resource->GetCachedRanges(ranges);
 
-  if (resource->IsDataCachedToEndOfResource(0)) {
+  if (resource->IsDataCachedToEndOfResource(0) && mDuration.ReadOnWrongThread().isSome()) {
     /* fast path for local or completely cached files */
-    gint64 duration = 0;
-
-    {
-      ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-      duration = mDecoder->GetMediaDuration();
-    }
-
+    gint64 duration = mDuration.ReadOnWrongThread().ref().ToMicroseconds();
     LOG(LogLevel::Debug, "complete range [0, %f] for [0, %li]",
         (double) duration / GST_MSECOND, GetDataLength());
     buffered +=

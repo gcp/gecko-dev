@@ -44,6 +44,9 @@ using namespace mozilla::ipc;
 namespace mozilla {
 namespace net {
 
+extern bool
+WillRedirect(const nsHttpResponseHead * response);
+
 namespace {
 
 const uint32_t kMaxFileDescriptorsPerMessage = 250;
@@ -781,6 +784,8 @@ HttpChannelChild::OnStopRequest(const nsresult& channelStatus,
     DoOnStopRequest(this, mListenerContext);
   }
 
+  ReleaseListeners();
+
   if (mLoadFlags & LOAD_DOCUMENT_URI) {
     // Keep IPDL channel open, but only for updating security info.
     mKeptAlive = true;
@@ -1469,43 +1474,6 @@ HttpChannelChild::Resume()
 // HttpChannelChild::nsIChannel
 //-----------------------------------------------------------------------------
 
-// helper function to assign loadInfo to openArgs
-void
-propagateLoadInfo(nsILoadInfo *aLoadInfo,
-                  HttpChannelOpenArgs& openArgs)
-{
-  mozilla::ipc::PrincipalInfo requestingPrincipalInfo;
-  mozilla::ipc::PrincipalInfo triggeringPrincipalInfo;
-
-  if (aLoadInfo) {
-    mozilla::ipc::PrincipalToPrincipalInfo(aLoadInfo->LoadingPrincipal(),
-                                           &requestingPrincipalInfo);
-    openArgs.requestingPrincipalInfo() = requestingPrincipalInfo;
-
-    mozilla::ipc::PrincipalToPrincipalInfo(aLoadInfo->TriggeringPrincipal(),
-                                           &triggeringPrincipalInfo);
-    openArgs.triggeringPrincipalInfo() = triggeringPrincipalInfo;
-
-    openArgs.securityFlags() = aLoadInfo->GetSecurityFlags();
-    openArgs.contentPolicyType() = aLoadInfo->GetContentPolicyType();
-    openArgs.innerWindowID() = aLoadInfo->GetInnerWindowID();
-    openArgs.outerWindowID() = aLoadInfo->GetOuterWindowID();
-    openArgs.parentOuterWindowID() = aLoadInfo->GetParentOuterWindowID();
-    return;
-  }
-
-  // use default values if no loadInfo is provided
-  mozilla::ipc::PrincipalToPrincipalInfo(nsContentUtils::GetSystemPrincipal(),
-                                         &requestingPrincipalInfo);
-  openArgs.requestingPrincipalInfo() = requestingPrincipalInfo;
-  openArgs.triggeringPrincipalInfo() = requestingPrincipalInfo;
-  openArgs.securityFlags() = nsILoadInfo::SEC_NORMAL;
-  openArgs.contentPolicyType() = nsIContentPolicy::TYPE_OTHER;
-  openArgs.innerWindowID() = 0;
-  openArgs.outerWindowID() = 0;
-  openArgs.parentOuterWindowID() = 0;
-}
-
 NS_IMETHODIMP
 HttpChannelChild::GetSecurityInfo(nsISupports **aSecurityInfo)
 {
@@ -1710,7 +1678,8 @@ HttpChannelChild::ContinueAsyncOpen()
   }
   openArgs.cacheKey() = cacheKey;
 
-  propagateLoadInfo(mLoadInfo, openArgs);
+  nsresult rv = mozilla::ipc::LoadInfoToLoadInfoArgs(mLoadInfo, &openArgs.loadInfo());
+  NS_ENSURE_SUCCESS(rv, rv);
 
   // The socket transport in the chrome process now holds a logical ref to us
   // until OnStopRequest, or we do a redirect, or we hit an IPDL error.
@@ -2186,8 +2155,11 @@ HttpChannelChild::OverrideWithSynthesizedResponse(nsAutoPtr<nsHttpResponseHead>&
                                                   nsIInputStream* aSynthesizedInput,
                                                   nsIStreamListener* aStreamListener)
 {
-  // Intercepted responses should already be decoded.
-  SetApplyConversion(false);
+  // Intercepted responses should already be decoded.  If its a redirect,
+  // however, we want to respect the encoding of the final result instead.
+  if (!WillRedirect(aResponseHead)) {
+    SetApplyConversion(false);
+  }
 
   mResponseHead = aResponseHead;
   mSynthesizedResponse = true;

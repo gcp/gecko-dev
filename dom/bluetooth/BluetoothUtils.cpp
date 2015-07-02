@@ -43,17 +43,6 @@ UuidToString(const BluetoothUuid& aUuid, nsAString& aString)
 }
 
 void
-ReversedUuidToString(const BluetoothUuid& aUuid, nsAString& aString)
-{
-  BluetoothUuid uuid;
-  for (uint8_t i = 0; i < 16; i++) {
-    uuid.mUuid[i] = aUuid.mUuid[15 - i];
-  }
-
-  UuidToString(uuid, aString);
-}
-
-void
 StringToUuid(const char* aString, BluetoothUuid& aUuid)
 {
   uint32_t uuid0, uuid4;
@@ -100,22 +89,14 @@ GenerateUuid(nsAString &aUuidString)
 
 void
 GeneratePathFromGattId(const BluetoothGattId& aId,
-                       nsAString& aPath,
-                       nsAString& aUuidStr)
-{
-  ReversedUuidToString(aId.mUuid, aUuidStr);
-
-  aPath.Assign(aUuidStr);
-  aPath.AppendLiteral("_");
-  aPath.AppendInt(aId.mInstanceId);
-}
-
-void
-GeneratePathFromGattId(const BluetoothGattId& aId,
                        nsAString& aPath)
 {
   nsString uuidStr;
-  GeneratePathFromGattId(aId, aPath, uuidStr);
+  UuidToString(aId.mUuid, uuidStr);
+
+  aPath.Assign(uuidStr);
+  aPath.AppendLiteral("_");
+  aPath.AppendInt(aId.mInstanceId);
 }
 
 void
@@ -297,7 +278,7 @@ DispatchReplyError(BluetoothReplyRunnable* aRunnable,
   MOZ_ASSERT(!aErrorStr.IsEmpty());
 
   // Reply will be deleted by the runnable after running on main thread
-#if MOZ_B2G_BT_API_V2
+#ifndef MOZ_B2G_BT_API_V1
   BluetoothReply* reply =
     new BluetoothReply(BluetoothReplyError(STATUS_FAIL, nsString(aErrorStr)));
 #else
@@ -317,7 +298,7 @@ DispatchReplyError(BluetoothReplyRunnable* aRunnable,
   MOZ_ASSERT(aStatus != STATUS_SUCCESS);
 
   // Reply will be deleted by the runnable after running on main thread
-#if MOZ_B2G_BT_API_V2
+#ifndef MOZ_B2G_BT_API_V1
   BluetoothReply* reply =
     new BluetoothReply(BluetoothReplyError(aStatus, EmptyString()));
 #else
@@ -344,7 +325,7 @@ DispatchStatusChangedEvent(const nsAString& aType,
   BluetoothService* bs = BluetoothService::Get();
   NS_ENSURE_TRUE_VOID(bs);
 
-#ifdef MOZ_B2G_BT_API_V2
+#ifndef MOZ_B2G_BT_API_V1
   bs->DistributeSignal(aType, NS_LITERAL_STRING(KEY_ADAPTER), data);
 #else
   BluetoothSignal signal(nsString(aType), NS_LITERAL_STRING(KEY_ADAPTER), data);

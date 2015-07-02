@@ -15,6 +15,7 @@
 #include "mozilla/dom/cache/ActorUtils.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
 #include "mozilla/dom/ipc/BlobChild.h"
+#include "mozilla/dom/MessagePortChild.h"
 #include "mozilla/ipc/PBackgroundTestChild.h"
 #include "mozilla/layout/VsyncChild.h"
 #include "mozilla/net/PUDPSocketChild.h"
@@ -346,16 +347,26 @@ BackgroundChildImpl::DeallocPCacheStreamControlChild(PCacheStreamControlChild* a
   return true;
 }
 
-media::PMediaChild*
-BackgroundChildImpl::AllocPMediaChild()
+// -----------------------------------------------------------------------------
+// MessageChannel/MessagePort API
+// -----------------------------------------------------------------------------
+
+dom::PMessagePortChild*
+BackgroundChildImpl::AllocPMessagePortChild(const nsID& aUUID,
+                                            const nsID& aDestinationUUID,
+                                            const uint32_t& aSequenceID)
 {
-  return media::AllocPMediaChild();
+  nsRefPtr<dom::MessagePortChild> agent = new dom::MessagePortChild();
+  return agent.forget().take();
 }
 
 bool
-BackgroundChildImpl::DeallocPMediaChild(media::PMediaChild *aActor)
+BackgroundChildImpl::DeallocPMessagePortChild(PMessagePortChild* aActor)
 {
-  return media::DeallocPMediaChild(aActor);
+  nsRefPtr<dom::MessagePortChild> child =
+    dont_AddRef(static_cast<dom::MessagePortChild*>(aActor));
+  MOZ_ASSERT(child);
+  return true;
 }
 
 } // namespace ipc

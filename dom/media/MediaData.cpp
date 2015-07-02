@@ -25,6 +25,9 @@ using layers::ImageContainer;
 using layers::PlanarYCbCrImage;
 using layers::PlanarYCbCrData;
 
+const char* AudioData::sTypeName = "audio";
+const char* VideoData::sTypeName = "video";
+
 void
 AudioData::EnsureAudioBuffer()
 {
@@ -109,7 +112,7 @@ VideoData::VideoData(int64_t aOffset,
                      int64_t aTime,
                      int64_t aDuration,
                      int64_t aTimecode)
-  : MediaData(VIDEO_DATA, aOffset, aTime, aDuration)
+  : MediaData(sType, aOffset, aTime, aDuration)
   , mDuplicate(true)
 {
   NS_ASSERTION(mDuration >= 0, "Frame must have non-negative duration.");
@@ -122,7 +125,7 @@ VideoData::VideoData(int64_t aOffset,
                      bool aKeyframe,
                      int64_t aTimecode,
                      IntSize aDisplay)
-  : MediaData(VIDEO_DATA, aOffset, aTime, aDuration)
+  : MediaData(sType, aOffset, aTime, aDuration)
   , mDisplay(aDisplay)
   , mDuplicate(false)
 {
@@ -490,9 +493,10 @@ MediaRawData::MediaRawData()
   , mData(nullptr)
   , mSize(0)
   , mCrypto(mCryptoInternal)
-  , mBuffer(new MediaLargeByteBuffer(RAW_DATA_DEFAULT_SIZE))
+  , mBuffer(new MediaByteBuffer())
   , mPadding(0)
 {
+  unused << mBuffer->SetCapacity(RAW_DATA_DEFAULT_SIZE, fallible);
 }
 
 MediaRawData::MediaRawData(const uint8_t* aData, size_t aSize)
@@ -500,7 +504,7 @@ MediaRawData::MediaRawData(const uint8_t* aData, size_t aSize)
   , mData(nullptr)
   , mSize(0)
   , mCrypto(mCryptoInternal)
-  , mBuffer(new MediaLargeByteBuffer(RAW_DATA_DEFAULT_SIZE))
+  , mBuffer(new MediaByteBuffer())
   , mPadding(0)
 {
   if (!EnsureCapacity(aSize)) {
@@ -524,6 +528,7 @@ MediaRawData::Clone() const
   s->mKeyframe = mKeyframe;
   s->mExtraData = mExtraData;
   s->mCryptoInternal = mCryptoInternal;
+  s->mTrackInfo = mTrackInfo;
   if (mSize) {
     if (!s->EnsureCapacity(mSize)) {
       return nullptr;
@@ -577,9 +582,6 @@ MediaRawData::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t size = aMallocSizeOf(this);
 
-  if (mExtraData) {
-    size += mExtraData->SizeOfIncludingThis(aMallocSizeOf);
-  }
   size += mBuffer->SizeOfIncludingThis(aMallocSizeOf);
   return size;
 }

@@ -372,6 +372,7 @@ pref("media.peerconnection.video.max_bitrate", 2000);
 pref("media.navigator.permission.disabled", false);
 pref("media.peerconnection.default_iceservers", "[]");
 pref("media.peerconnection.ice.loopback", false); // Set only for testing in offline environments.
+pref("media.peerconnection.ice.tcp", false);
 pref("media.peerconnection.use_document_iceservers", true);
 pref("media.peerconnection.identity.enabled", true);
 pref("media.peerconnection.identity.timeout", 10000);
@@ -453,6 +454,9 @@ pref("media.mediasource.whitelist", false);
 
 pref("media.mediasource.mp4.enabled", true);
 pref("media.mediasource.webm.enabled", false);
+
+// Enable new MediaSource architecture.
+pref("media.mediasource.format-reader", false);
 
 // Enable new MediaFormatReader architecture for mp4 in MSE
 pref("media.mediasource.format-reader.mp4", true);
@@ -1196,7 +1200,7 @@ pref("network.warnOnAboutNetworking", true);
 // pref("network.protocol-handler.expose.imap", true);
 
 // Whether IOService.connectivity and NS_IsOffline depends on connectivity status
-pref("network.manage-offline-status", false);
+pref("network.manage-offline-status", true);
 // If set to true, IOService.offline depends on IOService.connectivity
 pref("network.offline-mirrors-connectivity", true);
 
@@ -1790,6 +1794,13 @@ pref("intl.locale.matchOS",                 false);
 pref("intl.fallbackCharsetList.ISO-8859-1", "windows-1252");
 pref("font.language.group",                 "chrome://global/locale/intl.properties");
 
+// Android-specific pref to use key-events-only mode for IME-unaware webapps.
+#ifdef MOZ_WIDGET_ANDROID
+pref("intl.ime.hack.on_ime_unaware_apps.fire_key_events_for_composition", true);
+#else
+pref("intl.ime.hack.on_ime_unaware_apps.fire_key_events_for_composition", false);
+#endif
+
 // these locales have right-to-left UI
 pref("intl.uidirection.ar", "rtl");
 pref("intl.uidirection.he", "rtl");
@@ -1857,7 +1868,7 @@ pref("intl.hyphenation-alias.nb-*", "nb");
 pref("intl.hyphenation-alias.nn-*", "nn");
 
 pref("font.name.serif.x-math", "Latin Modern Math");
-pref("font.name-list.serif.x-math", "Latin Modern Math, XITS Math, Cambria Math, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, MathJax_Main, STIXGeneral, DejaVu Serif, DejaVu Sans, Standard Symbols L, serif");
+pref("font.name-list.serif.x-math", "Latin Modern Math, XITS Math, Cambria Math, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, STIXGeneral, DejaVu Serif, DejaVu Sans, serif");
 pref("font.name.sans-serif.x-math", "sans-serif");
 pref("font.name.monospace.x-math", "monospace");
 
@@ -2973,7 +2984,7 @@ pref("font.minimum-size.th", 10);
 pref("font.default.x-devanagari", "sans-serif");
 pref("font.name.serif.x-math", "Latin Modern Math");
 // We have special support for Monotype Symbol on Windows.
-pref("font.name-list.serif.x-math", "Latin Modern Math, XITS Math, Cambria Math, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, MathJax_Main, STIXGeneral, DejaVu Serif, DejaVu Sans, Symbol, Times New Roman");
+pref("font.name-list.serif.x-math", "Latin Modern Math, XITS Math, Cambria Math, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, STIXGeneral, DejaVu Serif, DejaVu Sans, Symbol, Times New Roman");
 pref("font.name.sans-serif.x-math", "Arial");
 pref("font.name.monospace.x-math", "Courier New");
 pref("font.name.cursive.x-math", "Comic Sans MS");
@@ -3404,7 +3415,7 @@ pref("font.size.variable.zh-TW", 15);
 
 pref("font.name.serif.x-math", "Latin Modern Math");
 // Apple's Symbol is Unicode so use it
-pref("font.name-list.serif.x-math", "Latin Modern Math, XITS Math, Cambria Math, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, MathJax_Main, STIXGeneral, DejaVu Serif, DejaVu Sans, Symbol, Times");
+pref("font.name-list.serif.x-math", "Latin Modern Math, XITS Math, Cambria Math, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, STIXGeneral, DejaVu Serif, DejaVu Sans, Symbol, Times");
 pref("font.name.sans-serif.x-math", "Helvetica");
 pref("font.name.monospace.x-math", "Courier");
 pref("font.name.cursive.x-math", "Apple Chancery");
@@ -3503,7 +3514,6 @@ pref("helpers.global_mime_types_file", "/etc/mime.types");
 pref("helpers.global_mailcap_file", "/etc/mailcap");
 pref("helpers.private_mime_types_file", "~/.mime.types");
 pref("helpers.private_mailcap_file", "~/.mailcap");
-pref("print.print_command", "lpr ${MOZ_PRINTER_NAME:+-P\"$MOZ_PRINTER_NAME\"}");
 pref("print.printer_list", ""); // list of printers, separated by spaces
 pref("print.print_reversed", false);
 pref("print.print_color", true);
@@ -3523,9 +3533,6 @@ pref("layout.css.scroll-snap.enabled", false);
 
 /* PostScript print module prefs */
 // pref("print.postscript.enabled",      true);
-pref("print.postscript.paper_size",    "letter");
-pref("print.postscript.orientation",   "portrait");
-pref("print.postscript.print_command", "lpr ${MOZ_PRINTER_NAME:+-P\"$MOZ_PRINTER_NAME\"}");
 
 // Setting default_level_parent to true makes the default level for popup
 // windows "top" instead of "parent".  On GTK2 platform, this is implemented
@@ -3576,7 +3583,6 @@ pref("helpers.global_mime_types_file", "/etc/mime.types");
 pref("helpers.global_mailcap_file", "/etc/mailcap");
 pref("helpers.private_mime_types_file", "~/.mime.types");
 pref("helpers.private_mailcap_file", "~/.mailcap");
-pref("print.print_command", "lpr ${MOZ_PRINTER_NAME:+-P\"$MOZ_PRINTER_NAME\"}");
 pref("print.printer_list", ""); // list of printers, separated by spaces
 pref("print.print_reversed", false);
 pref("print.print_color", true);
@@ -3710,9 +3716,6 @@ pref("font.name.monospace.zh-TW", "monospace");
 
 /* PostScript print module prefs */
 // pref("print.postscript.enabled",      true);
-pref("print.postscript.paper_size",    "letter");
-pref("print.postscript.orientation",   "portrait");
-pref("print.postscript.print_command", "lpr ${MOZ_PRINTER_NAME:+-P\"$MOZ_PRINTER_NAME\"}");
 
 // On GTK2 platform, we should use topmost window level for the default window
 // level of <panel> element of XUL. GTK2 has only two window types. One is
@@ -3830,7 +3833,7 @@ pref("font.name.monospace.zh-TW", "Fira Mono");
 pref("font.name-list.sans-serif.zh-TW", "Fira Sans,Droid Sans Fallback");
 
 pref("font.name.serif.x-math", "Latin Modern Math");
-pref("font.name-list.serif.x-math", "Latin Modern Math, XITS Math, Cambria Math, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, MathJax_Main, STIXGeneral, DejaVu Serif, DejaVu Sans, Charis SIL Compact");
+pref("font.name-list.serif.x-math", "Latin Modern Math, XITS Math, Cambria Math, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, STIXGeneral, DejaVu Serif, DejaVu Sans, Charis SIL Compact");
 pref("font.name.sans-serif.x-math", "Fira Sans");
 pref("font.name.monospace.x-math", "Fira Mono");
 
@@ -3908,7 +3911,7 @@ pref("font.name-list.sans-serif.zh-TW", "Roboto, Droid Sans, Noto Sans TC, Noto 
 pref("font.name-list.monospace.zh-TW", "Droid Sans Fallback");
 
 pref("font.name.serif.x-math", "Latin Modern Math");
-pref("font.name-list.serif.x-math", "Latin Modern Math, XITS Math, Cambria Math, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, MathJax_Main, STIXGeneral, DejaVu Serif, DejaVu Sans, Charis SIL Compact");
+pref("font.name-list.serif.x-math", "Latin Modern Math, XITS Math, Cambria Math, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, STIXGeneral, DejaVu Serif, DejaVu Sans, Charis SIL Compact");
 pref("font.name.sans-serif.x-math", "Clear Sans");
 pref("font.name.monospace.x-math", "Droid Sans Mono");
 
@@ -3932,14 +3935,6 @@ pref("font.name.sans-serif.x-unicode", "dt-interface system-ucs2.cjk_japan-0");
 pref("font.name.monospace.x-unicode", "dt-interface user-ucs2.cjk_japan-0");
 
 # AIX
-#endif
-
-#ifdef SOLARIS
-
-pref("print.postscript.print_command", "lp -c -s ${MOZ_PRINTER_NAME:+-d\"$MOZ_PRINTER_NAME\"}");
-pref("print.print_command", "lp -c -s ${MOZ_PRINTER_NAME:+-d\"$MOZ_PRINTER_NAME\"}");
-
-# Solaris
 #endif
 
 // Login Manager prefs
@@ -4213,10 +4208,19 @@ pref("layers.offmainthreadcomposition.frame-rate", -1);
 pref("layers.async-video.enabled", true);
 pref("layers.async-video-oop.enabled",true);
 
+#ifdef MOZ_WIDGET_UIKIT
+pref("layers.async-pan-zoom.enabled", true);
+#endif
+
+#ifdef MOZ_WIDGET_UIKIT
+pref("layers.async-pan-zoom.enabled", true);
+#endif
+
 #ifdef XP_MACOSX
 pref("layers.enable-tiles", true);
 pref("layers.tiled-drawtarget.enabled", true);
 #endif
+
 
 // same effect as layers.offmainthreadcomposition.enabled, but specifically for
 // use with tests.
@@ -4438,12 +4442,11 @@ pref("dom.w3c_touch_events.enabled", 2);
 
 // W3C draft pointer events
 pref("dom.w3c_pointer_events.enabled", false);
+// W3C touch-action css property (related to touch and pointer events)
+pref("layout.css.touch_action.enabled", false);
 
 // W3C draft ImageCapture API
 pref("dom.imagecapture.enabled", false);
-
-// W3C touch-action css property (related to touch and pointer events)
-pref("layout.css.touch_action.enabled", false);
 
 // Enables some assertions in nsStyleContext that are too expensive
 // for general use, but might be useful to enable for specific tests.
@@ -4783,6 +4786,9 @@ pref("camera.control.low_memory_thresholdMB", 404);
 
 // UDPSocket API
 pref("dom.udpsocket.enabled", false);
+
+// MessageChannel enabled by default.
+pref("dom.messageChannel.enabled", true);
 
 // Disable before keyboard events and after keyboard events by default.
 pref("dom.beforeAfterKeyboardEvent.enabled", false);

@@ -85,6 +85,7 @@ class nsIStringBundleService;
 class nsISupportsArray;
 class nsISupportsHashKey;
 class nsIURI;
+class nsIUUIDGenerator;
 class nsIWidget;
 class nsIWordBreaker;
 class nsIXPConnect;
@@ -99,6 +100,7 @@ class nsViewportInfo;
 class nsWrapperCache;
 class nsAttrValue;
 class nsITransferable;
+class nsPIWindowRoot;
 
 struct JSPropertyDescriptor;
 struct JSRuntime;
@@ -852,6 +854,11 @@ public:
    */
   static uint32_t ParseSandboxAttributeToFlags(const nsAttrValue* sandboxAttr);
 
+  /**
+   * Helper function that generates a UUID.
+   */
+  static nsresult GenerateUUIDInPlace(nsID& aUUID);
+
 
   /**
    * Fill (with the parameters given) the localized string named |aKey| in
@@ -914,6 +921,11 @@ public:
    * Return the content policy service
    */
   static nsIContentPolicy *GetContentPolicy();
+
+  /**
+   * Map internal content policy types to external ones.
+   */
+  static nsContentPolicyType InternalContentPolicyTypeToExternal(nsContentPolicyType aType);
 
   /**
    * Quick helper to determine whether there are any mutation listeners
@@ -1123,7 +1135,7 @@ public:
   static mozilla::EventListenerManager*
     GetExistingListenerManagerForNode(const nsINode* aNode);
 
-  static void UnmarkGrayJSListenersInCCGenerationDocuments(uint32_t aGeneration);
+  static void UnmarkGrayJSListenersInCCGenerationDocuments();
 
   /**
    * Remove the eventlistener manager for aNode.
@@ -1575,6 +1587,27 @@ public:
    * optional as it is only used for showing the URL in the console.
    */
   static void WarnScriptWasIgnored(nsIDocument* aDocument);
+
+  /**
+   * Whether to assert that RunInStableState() succeeds, or ignore failure,
+   * which may happen late in shutdown.
+   */
+  enum class DispatchFailureHandling { AssertSuccess, IgnoreFailure };
+
+  /**
+   * Add a "synchronous section", in the form of an nsIRunnable run once the
+   * event loop has reached a "stable state". |aRunnable| must not cause any
+   * queued events to be processed (i.e. must not spin the event loop).
+   * We've reached a stable state when the currently executing task/event has
+   * finished, see
+   * http://www.whatwg.org/specs/web-apps/current-work/multipage/webappapis.html#synchronous-section
+   * In practice this runs aRunnable once the currently executing event
+   * finishes. If called multiple times per task/event, all the runnables will
+   * be executed, in the order in which RunInStableState() was called.
+   */
+  static void RunInStableState(already_AddRefed<nsIRunnable> aRunnable,
+                               DispatchFailureHandling aHandling =
+                                 DispatchFailureHandling::AssertSuccess);
 
   /**
    * Retrieve information about the viewport as a data structure.
@@ -2330,7 +2363,7 @@ public:
    * Synthesize a key event to the given widget
    * (see nsIDOMWindowUtils.sendKeyEvent).
    */
-  static nsresult SendKeyEvent(nsCOMPtr<nsIWidget> aWidget,
+  static nsresult SendKeyEvent(nsIWidget* aWidget,
                                const nsAString& aType,
                                int32_t aKeyCode,
                                int32_t aCharCode,
@@ -2362,6 +2395,8 @@ public:
 
   static void FirePageHideEvent(nsIDocShellTreeItem* aItem,
                                 mozilla::dom::EventTarget* aChromeEventHandler);
+
+  static already_AddRefed<nsPIWindowRoot> GetWindowRoot(nsIDocument* aDoc);
 
 private:
   static bool InitializeEventTable();
@@ -2414,6 +2449,7 @@ private:
   static nsNameSpaceManager *sNameSpaceManager;
 
   static nsIIOService *sIOService;
+  static nsIUUIDGenerator *sUUIDGenerator;
 
   static bool sImgLoaderInitialized;
   static void InitImgLoader();

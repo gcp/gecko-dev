@@ -92,6 +92,7 @@
 #include "nsHostObjectProtocolHandler.h"
 #include "nsHtml5Module.h"
 #include "nsHtml5StringParser.h"
+#include "nsIAppShell.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsICategoryManager.h"
 #include "nsIChannelEventSink.h"
@@ -182,6 +183,7 @@
 #include "nsUnicodeProperties.h"
 #include "nsViewManager.h"
 #include "nsViewportInfo.h"
+#include "nsWidgetsCID.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsXULPopupManager.h"
 #include "xpcprivate.h" // nsXPConnect
@@ -216,6 +218,7 @@ nsIPrincipal *nsContentUtils::sNullSubjectPrincipal;
 nsIParserService *nsContentUtils::sParserService = nullptr;
 nsNameSpaceManager *nsContentUtils::sNameSpaceManager;
 nsIIOService *nsContentUtils::sIOService;
+nsIUUIDGenerator *nsContentUtils::sUUIDGenerator;
 nsIConsoleService *nsContentUtils::sConsoleService;
 nsDataHashtable<nsISupportsHashKey, EventNameMapping>* nsContentUtils::sAtomEventTable = nullptr;
 nsDataHashtable<nsStringHashKey, EventNameMapping>* nsContentUtils::sStringEventTable = nullptr;
@@ -337,6 +340,7 @@ namespace {
 
 static NS_DEFINE_CID(kParserServiceCID, NS_PARSERSERVICE_CID);
 static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
+static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 static PLDHashTable* sEventListenerManagersHash;
 
@@ -547,6 +551,13 @@ nsContentUtils::Init()
 #endif
 
   Element::InitCCCallbacks();
+
+  nsCOMPtr<nsIUUIDGenerator> uuidGenerator =
+    do_GetService("@mozilla.org/uuid-generator;1", &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  uuidGenerator.forget(&sUUIDGenerator);
 
   sInitialized = true;
 
@@ -1800,6 +1811,7 @@ nsContentUtils::Shutdown()
   NS_IF_RELEASE(sNullSubjectPrincipal);
   NS_IF_RELEASE(sParserService);
   NS_IF_RELEASE(sIOService);
+  NS_IF_RELEASE(sUUIDGenerator);
   NS_IF_RELEASE(sLineBreaker);
   NS_IF_RELEASE(sWordBreaker);
   NS_IF_RELEASE(sBidiKeyboard);
@@ -3982,28 +3994,20 @@ nsContentUtils::MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent,
   }
 }
 
-PLDHashOperator
-ListenerEnumerator(PLDHashTable* aTable, PLDHashEntryHdr* aEntry,
-                   uint32_t aNumber, void* aArg)
+void
+nsContentUtils::UnmarkGrayJSListenersInCCGenerationDocuments()
 {
-  EventListenerManagerMapEntry* entry =
-    static_cast<EventListenerManagerMapEntry*>(aEntry);
-  if (entry) {
+  if (!sEventListenerManagersHash) {
+    return;
+  }
+
+  for (auto i = sEventListenerManagersHash->Iter(); !i.Done(); i.Next()) {
+    auto entry = static_cast<EventListenerManagerMapEntry*>(i.Get());
     nsINode* n = static_cast<nsINode*>(entry->mListenerManager->GetTarget());
     if (n && n->IsInDoc() &&
         nsCCUncollectableMarker::InGeneration(n->OwnerDoc()->GetMarkedCCGeneration())) {
       entry->mListenerManager->MarkForCC();
     }
-  }
-  return PL_DHASH_NEXT;
-}
-
-void
-nsContentUtils::UnmarkGrayJSListenersInCCGenerationDocuments(uint32_t aGeneration)
-{
-  if (sEventListenerManagersHash) {
-    PL_DHashTableEnumerate(sEventListenerManagersHash, ListenerEnumerator,
-                           &aGeneration);
   }
 }
 
@@ -5146,6 +5150,20 @@ nsContentUtils::AddScriptRunner(nsIRunnable* aRunnable)
   run->Run();
 
   return true;
+}
+
+/* static */
+void
+nsContentUtils::RunInStableState(already_AddRefed<nsIRunnable> aRunnable,
+                                 DispatchFailureHandling aHandling)
+{
+  nsCOMPtr<nsIRunnable> runnable = aRunnable;
+  nsCOMPtr<nsIAppShell> appShell(do_GetService(kAppShellCID));
+  if (!appShell) {
+    MOZ_ASSERT(aHandling == DispatchFailureHandling::IgnoreFailure);
+    return;
+  }
+  appShell->RunInStableState(runnable.forget());
 }
 
 void
@@ -7141,6 +7159,19 @@ nsContentUtils::IsJavascriptMIMEType(const nsAString& aMIMEType)
   return false;
 }
 
+nsresult
+nsContentUtils::GenerateUUIDInPlace(nsID& aUUID)
+{
+  MOZ_ASSERT(sUUIDGenerator);
+
+  nsresult rv = sUUIDGenerator->GenerateUUIDInPlace(&aUUID);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
 uint64_t
 nsContentUtils::GetInnerWindowID(nsIRequest* aRequest)
 {
@@ -7414,7 +7445,9 @@ nsContentUtils::GetSurfaceData(mozilla::gfx::DataSourceSurface* aSurface,
                                size_t* aLength, int32_t* aStride)
 {
   mozilla::gfx::DataSourceSurface::MappedSurface map;
-  aSurface->Map(mozilla::gfx::DataSourceSurface::MapType::READ, &map);
+  if (NS_WARN_IF(!aSurface->Map(mozilla::gfx::DataSourceSurface::MapType::READ, &map))) {
+    return nullptr;
+  }
   mozilla::gfx::IntSize size = aSurface->GetSize();
   mozilla::CheckedInt32 requiredBytes =
     mozilla::CheckedInt32(map.mStride) * mozilla::CheckedInt32(size.height);
@@ -7542,7 +7575,7 @@ nsContentUtils::GetViewToDispatchEvent(nsPresContext* presContext,
 }
 
 nsresult
-nsContentUtils::SendKeyEvent(nsCOMPtr<nsIWidget> aWidget,
+nsContentUtils::SendKeyEvent(nsIWidget* aWidget,
                              const nsAString& aType,
                              int32_t aKeyCode,
                              int32_t aCharCode,
@@ -7785,5 +7818,46 @@ nsContentUtils::FirePageShowEvent(nsIDocShellTreeItem* aItem,
   NS_ASSERTION(doc, "What happened here?");
   if (doc->IsShowing() == aFireIfShowing) {
     doc->OnPageShow(true, aChromeEventHandler);
+  }
+}
+
+/* static */
+already_AddRefed<nsPIWindowRoot>
+nsContentUtils::GetWindowRoot(nsIDocument* aDoc)
+{
+  if (aDoc) {
+    nsPIDOMWindow* win = aDoc->GetWindow();
+    if (win) {
+      return win->GetTopWindowRoot();
+    }
+  }
+  return nullptr;
+}
+
+/* static */
+nsContentPolicyType
+nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType)
+{
+  switch (aType) {
+  case nsIContentPolicy::TYPE_INTERNAL_SCRIPT:
+  case nsIContentPolicy::TYPE_INTERNAL_WORKER:
+  case nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER:
+    return nsIContentPolicy::TYPE_SCRIPT;
+
+  case nsIContentPolicy::TYPE_INTERNAL_EMBED:
+  case nsIContentPolicy::TYPE_INTERNAL_OBJECT:
+    return nsIContentPolicy::TYPE_OBJECT;
+
+  case nsIContentPolicy::TYPE_INTERNAL_FRAME:
+  case nsIContentPolicy::TYPE_INTERNAL_IFRAME:
+    return nsIContentPolicy::TYPE_SUBDOCUMENT;
+
+  case nsIContentPolicy::TYPE_INTERNAL_AUDIO:
+  case nsIContentPolicy::TYPE_INTERNAL_VIDEO:
+  case nsIContentPolicy::TYPE_INTERNAL_TRACK:
+    return nsIContentPolicy::TYPE_MEDIA;
+
+  default:
+    return aType;
   }
 }

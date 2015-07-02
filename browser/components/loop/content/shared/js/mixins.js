@@ -255,6 +255,10 @@ loop.shared.mixins = (function() {
    */
   var DocumentVisibilityMixin = {
     _onDocumentVisibilityChanged: function(event) {
+      if (!this.isMounted()) {
+        return;
+      }
+
       var hidden = event.target.hidden;
       if (hidden && typeof this.onDocumentHidden === "function") {
         this.onDocumentHidden();
@@ -267,6 +271,9 @@ loop.shared.mixins = (function() {
     componentDidMount: function() {
       rootObject.document.addEventListener(
         "visibilitychange", this._onDocumentVisibilityChanged);
+      // Assume that the consumer components is only mounted when the document
+      // has become visible.
+      this._onDocumentVisibilityChanged({ target: rootObject.document });
     },
 
     componentWillUnmount: function() {
@@ -280,16 +287,8 @@ loop.shared.mixins = (function() {
    * elements and handling updates of the media containers.
    */
   var MediaSetupMixin = {
-
     componentDidMount: function() {
       this.resetDimensionsCache();
-      rootObject.addEventListener("orientationchange", this.updateVideoContainer);
-      rootObject.addEventListener("resize", this.updateVideoContainer);
-    },
-
-    componentWillUnmount: function() {
-      rootObject.removeEventListener("orientationchange", this.updateVideoContainer);
-      rootObject.removeEventListener("resize", this.updateVideoContainer);
     },
 
     /**

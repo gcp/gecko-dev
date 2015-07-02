@@ -161,8 +161,8 @@ ogg_packet InitOggPacket(const unsigned char* aData, size_t aLength,
 static bool sIsIntelDecoderEnabled = false;
 #endif
 
-WebMReader::WebMReader(AbstractMediaDecoder* aDecoder)
-  : MediaDecoderReader(aDecoder)
+WebMReader::WebMReader(AbstractMediaDecoder* aDecoder, MediaTaskQueue* aBorrowedTaskQueue)
+  : MediaDecoderReader(aDecoder, aBorrowedTaskQueue)
   , mContext(nullptr)
   , mPacketCount(0)
   , mOpusDecoder(nullptr)
@@ -1093,7 +1093,7 @@ nsresult WebMReader::SeekInternal(int64_t aTarget)
 
 media::TimeIntervals WebMReader::GetBuffered()
 {
-  MOZ_ASSERT(mStartTime != -1, "Need to finish metadata decode first");
+  NS_ENSURE_TRUE(mStartTime >= 0, media::TimeIntervals());
   AutoPinned<MediaResource> resource(mDecoder->GetResource());
 
   media::TimeIntervals buffered;

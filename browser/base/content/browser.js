@@ -1901,6 +1901,10 @@ function BrowserReloadOrDuplicate(aEvent) {
 }
 
 function BrowserReload() {
+  if (gBrowser.currentURI.schemeIs("view-source")) {
+    // Bug 1167797: For view source, we always skip the cache
+    return BrowserReloadSkipCache();
+  }
   const reloadFlags = nsIWebNavigation.LOAD_FLAGS_NONE;
   BrowserReloadWithFlags(reloadFlags);
 }
@@ -3015,7 +3019,7 @@ let BrowserOnClick = {
         label: gNavigatorBundle.getString("safebrowsing.notAnAttackButton.label"),
         accessKey: gNavigatorBundle.getString("safebrowsing.notAnAttackButton.accessKey"),
         callback: function() {
-          openUILinkIn(gSafeBrowsing.getReportURL('MalwareError'), 'tab');
+          openUILinkIn(gSafeBrowsing.getReportURL('MalwareMistake'), 'tab');
         }
       };
     } else if (reason === 'phishing') {
@@ -3024,7 +3028,7 @@ let BrowserOnClick = {
         label: gNavigatorBundle.getString("safebrowsing.notAForgeryButton.label"),
         accessKey: gNavigatorBundle.getString("safebrowsing.notAForgeryButton.accessKey"),
         callback: function() {
-          openUILinkIn(gSafeBrowsing.getReportURL('Error'), 'tab');
+          openUILinkIn(gSafeBrowsing.getReportURL('PhishMistake'), 'tab');
         }
       };
     } else if (reason === 'unwanted') {
@@ -5062,7 +5066,15 @@ var TabsInTitlebar = {
       if (this._lastSizeMode == sizemode) {
         return;
       }
+      let oldSizeMode = this._lastSizeMode;
       this._lastSizeMode = sizemode;
+      // Don't update right now if we are leaving fullscreen, since the UI is
+      // still changing in the consequent "fullscreen" event. Code there will
+      // call this function again when everything is ready.
+      // See browser-fullScreen.js: FullScreen.toggle and bug 1173768.
+      if (oldSizeMode == "fullscreen") {
+        return;
+      }
     }
 
     for (let something in this._disallowed) {
@@ -7185,15 +7197,18 @@ let gPrivateBrowsingUI = {
       }
     }
 
-    if (gURLBar &&
-        !PrivateBrowsingUtils.permanentPrivateBrowsing) {
-      // Disable switch to tab autocompletion for private windows.
-      // We leave it enabled for permanent private browsing mode though.
+    if (gURLBar) {
       let value = gURLBar.getAttribute("autocompletesearchparam") || "";
-      if (!value.includes("disable-private-actions")) {
-        gURLBar.setAttribute("autocompletesearchparam",
-                             value + " disable-private-actions");
+      if (!PrivateBrowsingUtils.permanentPrivateBrowsing &&
+          !value.includes("disable-private-actions")) {
+        // Disable switch to tab autocompletion for private windows.
+        // We leave it enabled for permanent private browsing mode though.
+        value += " disable-private-actions";
       }
+      if (!value.includes("private-window")) {
+        value += " private-window";
+      }
+      gURLBar.setAttribute("autocompletesearchparam", value);
     }
   }
 };
@@ -7203,11 +7218,6 @@ let gRemoteTabsUI = {
     if (window.location.href != getBrowserURL() &&
         // Also check hidden window for the Mac no-window case
         window.location.href != "chrome://browser/content/hiddenWindow.xul") {
-      return;
-    }
-
-    if (Services.appinfo.inSafeMode) {
-      // e10s isn't supported in safe mode, so don't show the menu items for it
       return;
     }
 

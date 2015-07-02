@@ -36,6 +36,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/MemoryReporting.h"
+#include "ZoomConstraintsClient.h"
 
 class nsRange;
 
@@ -88,7 +89,7 @@ public:
   virtual void Destroy() override;
   virtual void MakeZombie() override;
 
-  virtual nsresult SetPreferenceStyleRules(bool aForceReflow) override;
+  virtual void UpdatePreferenceStyles() override;
 
   NS_IMETHOD GetSelection(SelectionType aType, nsISelection** aSelection) override;
   virtual mozilla::dom::Selection* GetCurrentSelection(SelectionType aType) override;
@@ -514,16 +515,7 @@ protected:
 
   void RecordStyleSheetChange(nsIStyleSheet* aStyleSheet);
 
-    /**
-    * methods that manage rules that are used to implement the associated preferences
-    *  - initially created for bugs 31816, 20760, 22963
-    */
-  nsresult ClearPreferenceStyleRules(void);
-  nsresult CreatePreferenceStyleSheet(void);
-  nsresult SetPrefLinkRules(void);
-  nsresult SetPrefFocusRules(void);
-  nsresult SetPrefNoScriptRule();
-  nsresult SetPrefNoFramesRule(void);
+  void RemovePreferenceStyles();
 
   // methods for painting a range to an offscreen buffer
 
@@ -818,6 +810,8 @@ protected:
   // TouchManager
   TouchManager              mTouchManager;
 
+  nsRefPtr<ZoomConstraintsClient> mZoomConstraintsClient;
+
   // TouchCaret
   nsRefPtr<mozilla::TouchCaret> mTouchCaret;
   nsRefPtr<mozilla::SelectionCarets> mSelectionCarets;
@@ -886,6 +880,9 @@ protected:
 
   // Whether the last chrome-only escape key event is consumed.
   bool                      mIsLastChromeOnlyEscapeKeyConsumed : 1;
+
+  // Whether the widget has received a paint message yet.
+  bool                      mHasReceivedPaintMessage : 1;
 
   static bool               sDisableNonTestMouseEvents;
 };

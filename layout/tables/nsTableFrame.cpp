@@ -1542,10 +1542,9 @@ nsTableFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
 }
 
 /* virtual */ nsIFrame::IntrinsicISizeOffsetData
-nsTableFrame::IntrinsicISizeOffsets(nsRenderingContext* aRenderingContext)
+nsTableFrame::IntrinsicISizeOffsets()
 {
-  IntrinsicISizeOffsetData result =
-    nsContainerFrame::IntrinsicISizeOffsets(aRenderingContext);
+  IntrinsicISizeOffsetData result = nsContainerFrame::IntrinsicISizeOffsets();
 
   result.hMargin = 0;
   result.hPctMargin = 0;
@@ -1708,7 +1707,7 @@ nsTableFrame::RequestSpecialHeightReflow(const nsHTMLReflowState& aReflowState)
                  nsGkAtoms::tableFrame == frameType,
                  "unexpected frame type");
 
-    rs->frame->AddStateBits(NS_FRAME_CONTAINS_RELATIVE_HEIGHT);
+    rs->frame->AddStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE);
     if (nsGkAtoms::tableFrame == frameType) {
       NS_ASSERTION(rs != &aReflowState,
                    "should not request special height reflow for table");
@@ -1835,7 +1834,7 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
     }
 
     bool needToInitiateSpecialReflow =
-      !!(GetStateBits() & NS_FRAME_CONTAINS_RELATIVE_HEIGHT);
+      !!(GetStateBits() & NS_FRAME_CONTAINS_RELATIVE_BSIZE);
     // see if an extra reflow will be necessary in pagination mode when there is a specified table height
     if (isPaginated && !GetPrevInFlow() && (NS_UNCONSTRAINEDSIZE != aReflowState.AvailableHeight())) {
       nscoord tableSpecifiedHeight = CalcBorderBoxHeight(aReflowState);
@@ -1862,7 +1861,7 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
                 lastChildReflowed, aStatus);
 
     // reevaluate special height reflow conditions
-    if (GetStateBits() & NS_FRAME_CONTAINS_RELATIVE_HEIGHT)
+    if (GetStateBits() & NS_FRAME_CONTAINS_RELATIVE_BSIZE)
       needToInitiateSpecialReflow = true;
 
     // XXXldb Are all these conditions correct?
@@ -2606,39 +2605,39 @@ DivideBCBorderSize(BCPixelSize  aPixelSize,
 LogicalMargin
 nsTableFrame::GetOuterBCBorder(const WritingMode aWM) const
 {
-  if (NeedToCalcBCBorders())
+  if (NeedToCalcBCBorders()) {
     const_cast<nsTableFrame*>(this)->CalcBCBorders();
+  }
 
   int32_t p2t = nsPresContext::AppUnitsPerCSSPixel();
   BCPropertyData* propData = GetBCProperty();
   if (propData) {
-    return LogicalMargin(
-      aWM,
-      BC_BORDER_START_HALF_COORD(p2t, propData->mTopBorderWidth),
-      BC_BORDER_END_HALF_COORD(p2t, propData->mRightBorderWidth),
-      BC_BORDER_END_HALF_COORD(p2t, propData->mBottomBorderWidth),
-      BC_BORDER_START_HALF_COORD(p2t, propData->mLeftBorderWidth));
+    nsMargin r(BC_BORDER_START_HALF_COORD(p2t, propData->mTopBorderWidth),
+               BC_BORDER_END_HALF_COORD(p2t, propData->mRightBorderWidth),
+               BC_BORDER_END_HALF_COORD(p2t, propData->mBottomBorderWidth),
+               BC_BORDER_START_HALF_COORD(p2t, propData->mLeftBorderWidth));
+    return LogicalMargin(aWM, r);
   }
-  return LogicalMargin(GetWritingMode());
+  return LogicalMargin(aWM);
 }
 
 LogicalMargin
 nsTableFrame::GetIncludedOuterBCBorder(const WritingMode aWM) const
 {
-  if (NeedToCalcBCBorders())
+  if (NeedToCalcBCBorders()) {
     const_cast<nsTableFrame*>(this)->CalcBCBorders();
+  }
 
   int32_t p2t = nsPresContext::AppUnitsPerCSSPixel();
   BCPropertyData* propData = GetBCProperty();
   if (propData) {
-    return LogicalMargin(
-      aWM,
-      BC_BORDER_START_HALF_COORD(p2t, propData->mTopBorderWidth),
-      BC_BORDER_END_HALF_COORD(p2t, propData->mRightCellBorderWidth),
-      BC_BORDER_END_HALF_COORD(p2t, propData->mBottomBorderWidth),
-      BC_BORDER_START_HALF_COORD(p2t, propData->mLeftCellBorderWidth));
+    nsMargin r(BC_BORDER_START_HALF_COORD(p2t, propData->mTopBorderWidth),
+               BC_BORDER_END_HALF_COORD(p2t, propData->mRightCellBorderWidth),
+               BC_BORDER_END_HALF_COORD(p2t, propData->mBottomBorderWidth),
+               BC_BORDER_START_HALF_COORD(p2t, propData->mLeftCellBorderWidth));
+    return LogicalMargin(aWM, r);
   }
-  return LogicalMargin(GetWritingMode());
+  return LogicalMargin(aWM);
 }
 
 LogicalMargin
@@ -2970,7 +2969,7 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
         NS_SUBTREE_DIRTY(kidFrame) ||
         (aReflowState.reflowState.mFlags.mSpecialHeightReflow &&
          (isPaginated || (kidFrame->GetStateBits() &
-                          NS_FRAME_CONTAINS_RELATIVE_HEIGHT)))) {
+                          NS_FRAME_CONTAINS_RELATIVE_BSIZE)))) {
       if (pageBreak) {
         if (allowRepeatedFooter) {
           PlaceRepeatedFooter(aReflowState, tfoot, footerHeight);

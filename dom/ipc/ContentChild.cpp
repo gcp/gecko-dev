@@ -52,6 +52,7 @@
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
 #include "mozilla/widget/WidgetMessageUtils.h"
+#include "mozilla/media/MediaChild.h"
 
 #if defined(MOZ_CONTENT_SANDBOX)
 #if defined(XP_WIN)
@@ -204,6 +205,7 @@ using namespace mozilla::dom::mobileconnection;
 using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::telephony;
 using namespace mozilla::dom::voicemail;
+using namespace mozilla::media;
 using namespace mozilla::embedding;
 using namespace mozilla::gmp;
 using namespace mozilla::hal_sandbox;
@@ -1750,6 +1752,18 @@ ContentChild::DeallocPVoicemailChild(PVoicemailChild* aActor)
     return true;
 }
 
+media::PMediaChild*
+ContentChild::AllocPMediaChild()
+{
+  return media::AllocPMediaChild();
+}
+
+bool
+ContentChild::DeallocPMediaChild(media::PMediaChild *aActor)
+{
+  return media::DeallocPMediaChild(aActor);
+}
+
 PStorageChild*
 ContentChild::AllocPStorageChild()
 {
@@ -2634,14 +2648,17 @@ ContentChild::RecvStopProfiler()
 }
 
 bool
-ContentChild::RecvGetProfile(nsCString* aProfile)
+ContentChild::RecvGatherProfile()
 {
+    nsCString profileCString;
     UniquePtr<char[]> profile = profiler_get_profile();
     if (profile) {
-        *aProfile = nsCString(profile.get(), strlen(profile.get()));
+        profileCString = nsCString(profile.get(), strlen(profile.get()));
     } else {
-        *aProfile = EmptyCString();
+        profileCString = EmptyCString();
     }
+
+    unused << SendProfile(profileCString);
     return true;
 }
 

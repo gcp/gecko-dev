@@ -850,6 +850,43 @@ describe("loop.panel", function() {
       expect(contextContent).to.not.equal(null);
     });
 
+    it("should cancel the checkbox when a new URL is available", function() {
+      fakeMozLoop.getSelectedTabMetadata = function (callback) {
+        callback({
+          url: "https://www.example.com",
+          description: "fake description",
+          previews: [""]
+        });
+      };
+
+      var view = createTestComponent();
+
+      view.setState({ checked: true });
+
+      // Simulate being visible
+      view.onDocumentVisible();
+
+      expect(view.state.checked).eql(false);
+    });
+
+    it("should show a default favicon when none is available", function() {
+      fakeMozLoop.getSelectedTabMetadata = function (callback) {
+        callback({
+          url: "https://www.example.com",
+          description: "fake description",
+          previews: [""]
+        });
+      };
+
+      var view = createTestComponent();
+
+      // Simulate being visible
+      view.onDocumentVisible();
+
+      var previewImage = view.getDOMNode().querySelector(".context-preview");
+      expect(previewImage.src).to.match(/loop\/shared\/img\/icons-16x16.svg#globe$/);
+    });
+
     it("should not show context information when a URL is unavailable", function() {
       fakeMozLoop.getSelectedTabMetadata = function (callback) {
         callback({

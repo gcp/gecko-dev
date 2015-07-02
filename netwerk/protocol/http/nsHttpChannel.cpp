@@ -157,6 +157,8 @@ bool IsRedirectStatus(uint32_t status)
            status == 307 || status == 308;
 }
 
+} // unnamed namespace
+
 // We only treat 3xx responses as redirects if they have a Location header and
 // the status code is in a whitelist.
 bool
@@ -165,8 +167,6 @@ WillRedirect(const nsHttpResponseHead * response)
     return IsRedirectStatus(response->Status()) &&
            response->PeekHeader(nsHttp::Location);
 }
-
-} // unnamed namespace
 
 nsresult
 StoreAuthorizationMetaData(nsICacheEntry *entry, nsHttpRequestHead *requestHead);
@@ -1375,7 +1375,7 @@ nsHttpChannel::ProcessResponse()
     // happen after OnExamineResponse.
     if (!mTransaction->ProxyConnectFailed() && (httpStatus != 407)) {
         SetCookie(mResponseHead->PeekHeader(nsHttp::Set_Cookie));
-        if (httpStatus < 500) {
+        if ((httpStatus < 500) && (httpStatus != 421)) {
             ProcessAltService();
         }
     }
@@ -4436,6 +4436,22 @@ nsHttpChannel::AsyncProcessRedirection(uint32_t redirectType)
         return NS_ERROR_CORRUPTED_CONTENT;
     }
 
+    nsAutoCString redirectHost;
+    mRedirectURI->GetHost(redirectHost);
+    nsAutoCString currentHost;
+    mURI->GetHost(currentHost);
+    if (redirectHost != currentHost) {
+        // When redirecting to another domain, the target domain should not be
+        // percent encoded, as the URL parser does not yet support that
+        nsAutoCString unescapedHost;
+        if (NS_UnescapeURL(redirectHost.BeginReading(), redirectHost.Length(),
+                           0, unescapedHost)) {
+            if (IsUTF8(unescapedHost)) {
+                mRedirectURI->SetHost(unescapedHost);
+            }
+        }
+    }
+
     if (mApplicationCache) {
         // if we are redirected to a different origin check if there is a fallback
         // cache entry to fall back to. we don't care about file strict
@@ -4777,7 +4793,10 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
     MOZ_ASSERT(NS_IsMainThread());
     if (gHttpHandler->PackagedAppsEnabled()) {
         nsAutoCString path;
-        mURI->GetPath(path);
+        nsCOMPtr<nsIURL> url(do_QueryInterface(mURI));
+        if (url) {
+            url->GetFilePath(path);
+        }
         mIsPackagedAppResource = path.Find(PACKAGED_APP_TOKEN) != kNotFound;
     }
 

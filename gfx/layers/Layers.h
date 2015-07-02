@@ -46,6 +46,7 @@
 #include "mozilla/Logging.h"                      // for PRLogModuleInfo
 #include "nsIWidget.h"                  // For plugin window configuration information structs
 #include "gfxVR.h"
+#include "ImageContainer.h"
 
 class gfxContext;
 
@@ -81,7 +82,6 @@ class PaintedLayer;
 class ContainerLayer;
 class ImageLayer;
 class ColorLayer;
-class ImageContainer;
 class CanvasLayer;
 class ReadbackLayer;
 class ReadbackProcessor;
@@ -93,6 +93,7 @@ class LayerManagerComposite;
 class SpecificLayerAttributes;
 class Compositor;
 class FrameUniformityData;
+class PersistentBufferProvider;
 
 namespace layerscope {
 class LayersPacket;
@@ -435,19 +436,12 @@ public:
    * Can be called anytime, from any thread.
    *
    * Creates an Image container which forwards its images to the compositor within
-   * layer transactions on the main thread.
+   * layer transactions on the main thread or asynchronously using the ImageBridge IPDL protocol.
+   * In the case of asynchronous, If the protocol is not available, the returned ImageContainer
+   * will forward images within layer transactions.
    */
-  static already_AddRefed<ImageContainer> CreateImageContainer();
-
-  /**
-   * Can be called anytime, from any thread.
-   *
-   * Tries to create an Image container which forwards its images to the compositor
-   * asynchronously using the ImageBridge IPDL protocol. If the protocol is not
-   * available, the returned ImageContainer will forward images within layer
-   * transactions, just like if it was created with CreateImageContainer().
-   */
-  static already_AddRefed<ImageContainer> CreateAsynchronousImageContainer();
+  static already_AddRefed<ImageContainer> CreateImageContainer(ImageContainer::Mode flag
+                                                                = ImageContainer::SYNCHRONOUS);
 
   /**
    * Type of layer manager his is. This is to be used sparsely in order to
@@ -487,6 +481,14 @@ public:
   virtual TemporaryRef<mozilla::gfx::DrawTarget>
     CreateDrawTarget(const mozilla::gfx::IntSize &aSize,
                      mozilla::gfx::SurfaceFormat aFormat);
+
+  /**
+   * Creates a PersistentBufferProvider for use with canvas which is optimized for
+   * inter-operating with this layermanager.
+   */
+  virtual TemporaryRef<PersistentBufferProvider>
+    CreatePersistentBufferProvider(const mozilla::gfx::IntSize &aSize,
+                                   mozilla::gfx::SurfaceFormat aFormat);
 
   virtual bool CanUseCanvasLayerForSize(const gfx::IntSize &aSize) { return true; }
 
@@ -2138,7 +2140,7 @@ class CanvasLayer : public Layer {
 public:
   struct Data {
     Data()
-      : mDrawTarget(nullptr)
+      : mBufferProvider(nullptr)
       , mGLContext(nullptr)
       , mFrontbufferGLTex(0)
       , mSize(0,0)
@@ -2147,7 +2149,7 @@ public:
     { }
 
     // One of these two must be specified for Canvas2D, but never both
-    mozilla::gfx::DrawTarget* mDrawTarget; // a DrawTarget for the canvas contents
+    PersistentBufferProvider* mBufferProvider; // A BufferProvider for the Canvas contents
     mozilla::gl::GLContext* mGLContext; // or this, for GL.
 
     // Frontbuffer override

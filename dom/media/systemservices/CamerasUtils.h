@@ -10,6 +10,8 @@
 #include "nsThreadUtils.h"
 #include "nsCOMPtr.h"
 
+#include "base/thread.h"
+
 namespace mozilla {
 namespace camera {
 
@@ -18,7 +20,7 @@ nsresult SynchronouslyCreatePBackground();
 class ThreadDestructor : public nsRunnable
 {
 public:
-  explicit ThreadDestructor(nsIThread *aThread)
+  explicit ThreadDestructor(nsCOMPtr<nsIThread> aThread)
     : mThread(aThread) {}
 
   NS_IMETHOD Run() override
@@ -32,6 +34,21 @@ public:
 private:
   ~ThreadDestructor() {}
   nsCOMPtr<nsIThread> mThread;
+};
+
+class RunnableTask : public Task
+{
+public:
+  explicit RunnableTask(nsRefPtr<nsIRunnable> aRunnable)
+    : mRunnable(aRunnable) {}
+
+  void Run() override {
+    mRunnable->Run();
+  }
+
+private:
+  ~RunnableTask() {}
+  nsRefPtr<nsIRunnable> mRunnable;
 };
 
 }

@@ -898,8 +898,8 @@ class ParseNode
 
     enum AllowConstantObjects {
         DontAllowObjects = 0,
-        DontAllowNestedObjects,
-        AllowObjects
+        AllowObjects,
+        ForCopyOnWriteArray
     };
 
     bool getConstantValue(ExclusiveContext* cx, AllowConstantObjects allowObjects, MutableHandleValue vp,
@@ -1699,6 +1699,7 @@ enum FunctionSyntaxKind
     Arrow,
     Method,
     ClassConstructor,
+    DerivedClassConstructor,
     Getter,
     Setter
 };

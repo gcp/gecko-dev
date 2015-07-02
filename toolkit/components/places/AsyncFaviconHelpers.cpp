@@ -582,13 +582,23 @@ AsyncFetchAndSetIconFromNetwork::OnDataAvailable(nsIRequest* aRequest,
                                                  uint64_t aOffset,
                                                  uint32_t aCount)
 {
+  const size_t kMaxFaviconDownloadSize = 1 * 1024 * 1024;
+  if (mIcon.data.Length() + aCount > kMaxFaviconDownloadSize) {
+    mIcon.data.Truncate();
+    return NS_ERROR_FILE_TOO_BIG;
+  }
+
   nsAutoCString buffer;
   nsresult rv = NS_ConsumeStream(aInputStream, aCount, buffer);
   if (rv != NS_BASE_STREAM_WOULD_BLOCK && NS_FAILED(rv)) {
     return rv;
   }
 
-  mIcon.data.Append(buffer);
+  if (!mIcon.data.Append(buffer, fallible)) {
+    mIcon.data.Truncate();
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   return NS_OK;
 }
 
@@ -635,9 +645,21 @@ AsyncFetchAndSetIconFromNetwork::OnStopRequest(nsIRequest* aRequest,
     return NS_OK;
   }
 
-  NS_SniffContent(NS_DATA_SNIFFER_CATEGORY, aRequest,
-                  TO_INTBUFFER(mIcon.data), mIcon.data.Length(),
-                  mIcon.mimeType);
+  nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);
+  // aRequest should always QI to nsIChannel.
+  // See AsyncFetchAndSetIconFromNetwork::Run()
+  MOZ_ASSERT(channel);
+
+  nsAutoCString contentType;
+  channel->GetContentType(contentType);
+  // Bug 366324 - can't sniff SVG yet, so rely on server-specified type
+  if (contentType.EqualsLiteral("image/svg+xml")) {
+    mIcon.mimeType.AssignLiteral("image/svg+xml");
+  } else {
+    NS_SniffContent(NS_DATA_SNIFFER_CATEGORY, aRequest,
+                    TO_INTBUFFER(mIcon.data), mIcon.data.Length(),
+                    mIcon.mimeType);
+  }
 
   // If the icon does not have a valid MIME type, add it to the failed cache.
   if (mIcon.mimeType.IsEmpty()) {
@@ -649,10 +671,6 @@ AsyncFetchAndSetIconFromNetwork::OnStopRequest(nsIRequest* aRequest,
     return NS_OK;
   }
 
-  nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);
-  // aRequest should always QI to nsIChannel.
-  // See AsyncFetchAndSetIconFromNetwork::Run()
-  MOZ_ASSERT(channel);
   mIcon.expiration = GetExpirationTimeFromChannel(channel);
 
   // Telemetry probes to measure the favicon file sizes for each different file type.

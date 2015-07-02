@@ -500,9 +500,8 @@ loop.panel = (function(_, mozL10n) {
 
       return (
         <div className="room-entry-context-item">
-          <a href={roomUrl.location} onClick={this.handleClick}>
-            <img title={roomUrl.description}
-                 src={roomUrl.thumbnail} />
+          <a href={roomUrl.location} title={roomUrl.description} onClick={this.handleClick}>
+            <img src={roomUrl.thumbnail || "loop/shared/img/icons-16x16.svg#globe"} />
           </a>
         </div>
       );
@@ -721,10 +720,17 @@ loop.panel = (function(_, mozL10n) {
       // even if there's a small delay.
 
       this.props.mozLoop.getSelectedTabMetadata(function callback(metadata) {
+        // Bail out when the component is not mounted (anymore).
+        // This occurs during test runs. See bug 1174611 for more info.
+        if (!this.isMounted()) {
+          return;
+        }
+
         var previewImage = metadata.favicon || "";
         var description = metadata.title || metadata.description;
         var url = metadata.url;
         this.setState({
+          checked: false,
           previewImage: previewImage,
           description: description,
           url: url
@@ -770,15 +776,16 @@ loop.panel = (function(_, mozL10n) {
       return (
         <div className="new-room-view">
           <div className={contextClasses}>
-            <Checkbox label={mozL10n.get("context_inroom_label")}
+            <Checkbox checked={this.state.checked}
+                      label={mozL10n.get("context_inroom_label")}
                       onChange={this.onCheckboxChange} />
-            <div className="context-content">
-              <img className="context-preview" src={this.state.previewImage}/>
-              <span className="context-description">
-                {this.state.description}
-                <span className="context-url">{hostname}</span>
-              </span>
-            </div>
+            <sharedViews.ContextUrlView
+              allowClick={false}
+              description={this.state.description}
+              showContextTitle={false}
+              thumbnail={this.state.previewImage}
+              url={this.state.url}
+              useDesktopPaths={true} />
           </div>
           <button className="btn btn-info new-room-button"
                   onClick={this.handleCreateButtonClick}

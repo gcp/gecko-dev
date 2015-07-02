@@ -311,11 +311,13 @@ class JSObject : public js::gc::Cell
     // along with them, and are not each their own malloc blocks.
     size_t sizeOfIncludingThisInNursery() const;
 
-    /*
-     * Marks this object as having a singleton type, and leave the group lazy.
-     * Constructs a new, unique shape for the object.
-     */
+    // Marks this object as having a singleton group, and leave the group lazy.
+    // Constructs a new, unique shape for the object. This should only be
+    // called for an object that was just created.
     static inline bool setSingleton(js::ExclusiveContext* cx, js::HandleObject obj);
+
+    // Change an existing object to have a singleton group.
+    static bool changeToSingleton(JSContext* cx, js::HandleObject obj);
 
     inline js::ObjectGroup* getGroup(JSContext* cx);
 
@@ -628,7 +630,7 @@ JSObject::writeBarrierPostRelocate(JSObject* obj, void* cellp)
     MOZ_ASSERT(obj == *static_cast<JSObject**>(cellp));
     js::gc::StoreBuffer* storeBuffer = obj->storeBuffer();
     if (storeBuffer)
-        storeBuffer->putRelocatableCellFromAnyThread(static_cast<js::gc::Cell**>(cellp));
+        storeBuffer->putCellFromAnyThread(static_cast<js::gc::Cell**>(cellp));
 }
 
 /* static */ MOZ_ALWAYS_INLINE void
@@ -637,7 +639,7 @@ JSObject::writeBarrierPostRemove(JSObject* obj, void* cellp)
     MOZ_ASSERT(cellp);
     MOZ_ASSERT(obj);
     MOZ_ASSERT(obj == *static_cast<JSObject**>(cellp));
-    obj->shadowRuntimeFromAnyThread()->gcStoreBufferPtr()->removeRelocatableCellFromAnyThread(
+    obj->shadowRuntimeFromAnyThread()->gcStoreBufferPtr()->unputCellFromAnyThread(
         static_cast<js::gc::Cell**>(cellp));
 }
 
@@ -1276,9 +1278,6 @@ ToObjectFromStack(JSContext* cx, HandleValue vp)
 template<XDRMode mode>
 bool
 XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj);
-
-extern JSObject*
-CloneObjectLiteral(JSContext* cx, HandleObject srcObj);
 
 extern bool
 ReportGetterOnlyAssignment(JSContext* cx, bool strict);

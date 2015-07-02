@@ -200,6 +200,12 @@
 #include "nsIBrowserSearchService.h"
 #endif
 
+#include "mozIThirdPartyUtil.h"
+// Values for the network.cookie.cookieBehavior pref are documented in
+// nsCookieService.cpp
+#define COOKIE_BEHAVIOR_ACCEPT 0 // Allow all cookies.
+#define COOKIE_BEHAVIOR_REJECT_FOREIGN 1 // Reject all third-party cookies.
+
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 #if defined(DEBUG_bryner) || defined(DEBUG_chb)
@@ -944,7 +950,7 @@ nsDocShell::nsDocShell()
 
 nsDocShell::~nsDocShell()
 {
-  MOZ_ASSERT(!mProfileTimelineRecording);
+  MOZ_ASSERT(!IsObserved());
 
   Destroy();
 
@@ -2927,6 +2933,8 @@ nsDocShell::HistoryTransactionRemoved(int32_t aIndex)
 
 unsigned long nsDocShell::gProfileTimelineRecordingsCount = 0;
 
+mozilla::LinkedList<nsDocShell::ObservedDocShell>* nsDocShell::gObservedDocShells = nullptr;
+
 NS_IMETHODIMP
 nsDocShell::SetRecordProfileTimelineMarkers(bool aValue)
 {
@@ -2935,11 +2943,16 @@ nsDocShell::SetRecordProfileTimelineMarkers(bool aValue)
     if (aValue) {
       ++gProfileTimelineRecordingsCount;
       UseEntryScriptProfiling();
-      mProfileTimelineRecording = true;
+
+      MOZ_ASSERT(!mObserved);
+      mObserved.reset(new ObservedDocShell(this));
+      GetOrCreateObservedDocShells().insertFront(mObserved.get());
     } else {
       --gProfileTimelineRecordingsCount;
       UnuseEntryScriptProfiling();
-      mProfileTimelineRecording = false;
+
+      mObserved.reset(nullptr);
+
       ClearProfileTimelineMarkers();
     }
   }
@@ -2950,7 +2963,7 @@ nsDocShell::SetRecordProfileTimelineMarkers(bool aValue)
 NS_IMETHODIMP
 nsDocShell::GetRecordProfileTimelineMarkers(bool* aValue)
 {
-  *aValue = mProfileTimelineRecording;
+  *aValue = IsObserved();
   return NS_OK;
 }
 
@@ -3090,7 +3103,7 @@ void
 nsDocShell::AddProfileTimelineMarker(const char* aName,
                                      TracingMetadata aMetaData)
 {
-  if (mProfileTimelineRecording) {
+  if (IsObserved()) {
     TimelineMarker* marker = new TimelineMarker(this, aName, aMetaData);
     mProfileTimelineMarkers.AppendElement(marker);
   }
@@ -3099,7 +3112,7 @@ nsDocShell::AddProfileTimelineMarker(const char* aName,
 void
 nsDocShell::AddProfileTimelineMarker(UniquePtr<TimelineMarker>&& aMarker)
 {
-  if (mProfileTimelineRecording) {
+  if (IsObserved()) {
     mProfileTimelineMarkers.AppendElement(Move(aMarker));
   }
 }
@@ -10081,6 +10094,11 @@ nsDocShell::InternalLoad(nsIURI* aURI,
        */
       SetHistoryEntry(&mLSHE, aSHEntry);
 
+      // Set the doc's URI according to the new history entry's URI.
+      nsCOMPtr<nsIDocument> doc = GetDocument();
+      NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
+      doc->SetDocumentURI(aURI);
+
       /* This is a anchor traversal with in the same page.
        * call OnNewURI() so that, this traversal will be
        * recorded in session and global history.
@@ -10170,11 +10188,6 @@ nsDocShell::InternalLoad(nsIURI* aURI,
           mGlobalHistory->SetPageTitle(aURI, mTitle);
         }
       }
-
-      // Set the doc's URI according to the new history entry's URI.
-      nsCOMPtr<nsIDocument> doc = GetDocument();
-      NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
-      doc->SetDocumentURI(aURI);
 
       SetDocCurrentStateObj(mOSHE);
 
@@ -11703,8 +11716,8 @@ nsDocShell::AddState(JS::Handle<JS::Value> aData, const nsAString& aTitle,
   // document and it requires LOCATION_CHANGE_SAME_DOCUMENT flag. Otherwise,
   // FireOnLocationChange(...) breaks security UI.
   if (!equalURIs) {
-    SetCurrentURI(newURI, nullptr, true, LOCATION_CHANGE_SAME_DOCUMENT);
     document->SetDocumentURI(newURI);
+    SetCurrentURI(newURI, nullptr, true, LOCATION_CHANGE_SAME_DOCUMENT);
 
     AddURIVisit(newURI, oldURI, oldURI, 0);
 
@@ -14042,6 +14055,32 @@ nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNavigate,
   nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   if (!swm) {
     return NS_OK;
+  }
+
+  nsresult result;
+  nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil =
+    do_GetService(THIRDPARTYUTIL_CONTRACTID, &result);
+  NS_ENSURE_SUCCESS(result, result);
+
+  if (mCurrentURI) {
+    nsAutoCString uriSpec;
+    mCurrentURI->GetSpec(uriSpec);
+    if (!(uriSpec.EqualsLiteral("about:blank"))) {
+      // Reject the interception of third-party iframes if the cookie behaviour
+      // is set to reject all third-party cookies (1). In case that this pref
+      // is not set or can't be read, we default to allow all cookies (0) as
+      // this is the default value in all.js.
+      bool isThirdPartyURI = true;
+      result = thirdPartyUtil->IsThirdPartyURI(mCurrentURI, aURI,
+                                               &isThirdPartyURI);
+      NS_ENSURE_SUCCESS(result, result);
+      if (isThirdPartyURI &&
+          (Preferences::GetInt("network.cookie.cookieBehavior",
+                               COOKIE_BEHAVIOR_ACCEPT) ==
+                               COOKIE_BEHAVIOR_REJECT_FOREIGN)) {
+        return NS_OK;
+      }
+    }
   }
 
   if (aIsNavigate) {

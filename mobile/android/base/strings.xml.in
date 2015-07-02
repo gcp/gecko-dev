@@ -321,7 +321,7 @@
   <string name="site_settings_clear">&site_settings_clear;</string>
   <string name="site_settings_no_settings">&site_settings_no_settings;</string>
 
-  <string name="reading_list_added">&reading_list_added;</string>
+  <string name="reading_list_added">&reading_list_added2;</string>
   <string name="reading_list_removed">&reading_list_removed;</string>
   <string name="reading_list_remove">&reading_list_remove;</string>
   <string name="reading_list_duplicate">&reading_list_duplicate;</string>
@@ -385,7 +385,6 @@
   <string name="button_clear">&button_clear;</string>
   <string name="button_yes">&button_yes;</string>
   <string name="button_no">&button_no;</string>
-  <string name="button_remember">&button_remember;</string>
   <string name="button_copy">&button_copy;</string>
 
   <string name="firstrun_panel_title_welcome">&firstrun_panel_title_welcome;</string>
@@ -419,11 +418,6 @@
   <string name="home_remote_tabs_many_hidden_devices">&home_remote_tabs_many_hidden_devices;</string>
   <string name="home_remote_tabs_hidden_devices_title">&home_remote_tabs_hidden_devices_title;</string>
   <string name="home_remote_tabs_unhide_selected_devices">&home_remote_tabs_unhide_selected_devices;</string>
-  <string name="private_browsing_title">&private_browsing_title;</string>
-  <string name="private_tabs_panel_empty_desc">&private_tabs_panel_empty_desc;</string>
-  <string name="private_tabs_panel_learn_more">&private_tabs_panel_learn_more;</string>
-  <!-- https://support.mozilla.org/%LOCALE%/kb/mobile-private-browsing-browse-web-without-saving-syncing-info -->
-  <string name="private_tabs_panel_learn_more_link">https://support.mozilla.org/&formatS1;/kb/mobile-private-browsing-browse-web-without-saving-syncing-info</string>
   <string name="pin_site_dialog_hint">&pin_site_dialog_hint;</string>
 
   <string name="remote_tabs_panel_moved_title">&remote_tabs_panel_moved_title;</string>
@@ -458,6 +452,7 @@
   <string name="identity_run_by">&identity_run_by;</string>
   <string name="identity_no_info">&identity_no_info;</string>
   <string name="identity_not_encrypted">&identity_not_encrypted;</string>
+  <string name="identity_encrypted">&identity_encrypted;</string>
   <string name="loaded_mixed_content_message">&loaded_mixed_content_message;</string>
   <string name="blocked_mixed_content_message_top">&blocked_mixed_content_message_top;</string>
   <string name="blocked_mixed_content_message_bottom">&blocked_mixed_content_message_bottom;</string>
@@ -543,4 +538,6 @@
   <string name="percent">&percent;</string>
 
   <string name="remote_tabs_last_synced">&remote_tabs_last_synced;</string>
+
+  <string name="intent_uri_cannot_open">&intent_uri_cannot_open;</string>
 </resources>

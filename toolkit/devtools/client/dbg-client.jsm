@@ -1360,10 +1360,11 @@ TabClient.prototype = {
 eventSource(TabClient.prototype);
 
 function WorkerClient(aClient, aForm) {
-  this._client = aClient;
+  this.client = aClient;
   this._actor = aForm.from;
   this._isClosed = false;
   this._isFrozen = aForm.isFrozen;
+  this._url = aForm.url;
 
   this._onClose = this._onClose.bind(this);
   this._onFreeze = this._onFreeze.bind(this);
@@ -1376,15 +1377,19 @@ function WorkerClient(aClient, aForm) {
 
 WorkerClient.prototype = {
   get _transport() {
-    return this._client._transport;
+    return this.client._transport;
   },
 
   get request() {
-    return this._client.request;
+    return this.client.request;
   },
 
   get actor() {
     return this._actor;
+  },
+
+  get url() {
+    return this._url;
   },
 
   get isClosed() {
@@ -1397,19 +1402,41 @@ WorkerClient.prototype = {
 
   detach: DebuggerClient.requester({ type: "detach" }, {
     after: function (aResponse) {
-      this._client.unregisterClient(this);
+      this.client.unregisterClient(this);
       return aResponse;
     },
 
     telemetry: "WORKERDETACH"
   }),
 
+  attachThread: function(aOptions = {}, aOnResponse = noop) {
+    if (this.thread) {
+      DevToolsUtils.executeSoon(() => aOnResponse({
+        type: "connected",
+        threadActor: this.thread._actor,
+      }, this.thread));
+      return;
+    }
+
+    this.request({
+      to: this._actor,
+      type: "connect",
+      options: aOptions,
+    }, (aResponse) => {
+      if (!aResponse.error) {
+        this.thread = new ThreadClient(this, aResponse.threadActor);
+        this.client.registerClient(this.thread);
+      }
+      aOnResponse(aResponse, this.thread);
+    });
+  },
+
   _onClose: function () {
     this.removeListener("close", this._onClose);
     this.removeListener("freeze", this._onFreeze);
     this.removeListener("thaw", this._onThaw);
 
-    this._client.unregisterClient(this);
+    this.client.unregisterClient(this);
     this._closed = true;
   },
 

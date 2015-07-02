@@ -1053,6 +1053,25 @@ typedef void (*JS_ICUFreeFn)(const void*, void* p);
 extern JS_PUBLIC_API(bool)
 JS_SetICUMemoryFunctions(JS_ICUAllocFn allocFn, JS_ICUReallocFn reallocFn, JS_ICUFreeFn freeFn);
 
+typedef double (*JS_CurrentEmbedderTimeFunction)();
+
+/*
+ * The embedding can specify a time function that will be used in some
+ * situations.  The function can return the time however it likes; but
+ * the norm is to return times in units of milliseconds since an
+ * arbitrary, but consistent, epoch.  If the time function is not set,
+ * a built-in default will be used.
+ */
+JS_PUBLIC_API(void)
+JS_SetCurrentEmbedderTimeFunction(JS_CurrentEmbedderTimeFunction timeFn);
+
+/*
+ * Return the time as computed using the current time function, or a
+ * suitable default if one has not been set.
+ */
+JS_PUBLIC_API(double)
+JS_GetCurrentEmbedderTime();
+
 JS_PUBLIC_API(void*)
 JS_GetRuntimePrivate(JSRuntime* rt);
 
@@ -3956,6 +3975,12 @@ extern JS_PUBLIC_API(bool)
 Construct(JSContext* cx, JS::HandleValue fun,
           const JS::HandleValueArray& args,
           MutableHandleValue rval);
+
+extern JS_PUBLIC_API(bool)
+Construct(JSContext* cx, JS::HandleValue fun,
+          HandleObject newTarget, const JS::HandleValueArray &args,
+          MutableHandleValue rval);
+
 } /* namespace JS */
 
 extern JS_PUBLIC_API(bool)
@@ -4018,6 +4043,9 @@ namespace JS {
  *
  * The provided chain of SavedFrame objects can live in any compartment,
  * although it will be copied to the compartment where the stack is captured.
+ *
+ * See also `js/src/doc/SavedFrame/SavedFrame.md` for documentation on async
+ * stack frames.
  */
 class MOZ_STACK_CLASS JS_PUBLIC_API(AutoSetAsyncStackForNewCalls)
 {
@@ -5301,6 +5329,8 @@ CaptureCurrentStack(JSContext* cx, MutableHandleObject stackp, unsigned maxFrame
  * caller's principals do not subsume any of the chained SavedFrame object's
  * principals, `SavedFrameResult::AccessDenied` is returned and a (hopefully)
  * sane default value is chosen for the out param.
+ *
+ * See also `js/src/doc/SavedFrame/SavedFrame.md`.
  */
 
 enum class SavedFrameResult {
@@ -5443,6 +5473,9 @@ struct PerformanceGroup {
     // Performance data for this group.
     PerformanceData data;
 
+    // An id unique to this runtime.
+    const uint64_t uid;
+
     // `true` if an instance of `AutoStopwatch` is already monitoring
     // the performance of this performance group for this iteration
     // of the event loop, `false` otherwise.
@@ -5467,12 +5500,7 @@ struct PerformanceGroup {
         stopwatch_ = nullptr;
     }
 
-    explicit PerformanceGroup(void* key)
-      : stopwatch_(nullptr)
-      , iteration_(0)
-      , key_(key)
-      , refCount_(0)
-    { }
+    explicit PerformanceGroup(JSContext* cx, void* key);
     ~PerformanceGroup()
     {
         MOZ_ASSERT(refCount_ == 0);
@@ -5561,11 +5589,19 @@ ResetStopwatches(JSRuntime*);
 /**
  * Turn on/off stopwatch-based CPU monitoring.
  *
- * `SetStopwatchActive` may return `false` if monitoring could not be
- * activated, which may happen if we are out of memory.
+ * `SetStopwatchIsMonitoringCPOW` or `SetStopwatchIsMonitoringJank`
+ * may return `false` if monitoring could not be activated, which may
+ * happen if we are out of memory.
  */
 extern JS_PUBLIC_API(bool)
-SetStopwatchActive(JSRuntime*, bool);
+SetStopwatchIsMonitoringCPOW(JSRuntime*, bool);
+extern JS_PUBLIC_API(bool)
+GetStopwatchIsMonitoringCPOW(JSRuntime*);
+extern JS_PUBLIC_API(bool)
+SetStopwatchIsMonitoringJank(JSRuntime*, bool);
+extern JS_PUBLIC_API(bool)
+GetStopwatchIsMonitoringJank(JSRuntime*);
+
 extern JS_PUBLIC_API(bool)
 IsStopwatchActive(JSRuntime*);
 
@@ -5576,7 +5612,7 @@ extern JS_PUBLIC_API(PerformanceData*)
 GetPerformanceData(JSRuntime*);
 
 typedef bool
-(PerformanceStatsWalker)(JSContext* cx, const PerformanceData& stats, void* closure);
+(PerformanceStatsWalker)(JSContext* cx, const PerformanceData& stats, uint64_t uid, void* closure);
 
 /**
  * Extract the performance statistics.

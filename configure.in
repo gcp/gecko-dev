@@ -338,6 +338,12 @@ else
     esac
 fi
 
+case "$target" in
+*-apple-darwin*)
+    MOZ_IOS_SDK
+    ;;
+esac
+
 AC_SUBST(ANDROID_SOURCE)
 AC_SUBST(ANDROID_PACKAGE_NAME)
 AC_SUBST(OBJCOPY)
@@ -1818,7 +1824,12 @@ Linux)
         MOZ_ENABLE_PROFILER_SPS=
     esac
     ;;
-WINNT|Darwin) ;;
+WINNT) ;;
+Darwin)
+    if test -n "$MOZ_IOS"; then
+        MOZ_ENABLE_PROFILER_SPS=
+    fi
+    ;;
 *)
     MOZ_ENABLE_PROFILER_SPS=
     ;;
@@ -1948,9 +1959,14 @@ MOZILLA_SYMBOLVERSION=`$PYTHON $srcdir/python/mozbuild/mozbuild/milestone.py --t
 
 dnl Get version of various core apps from the version files.
 FIREFOX_VERSION=`cat $_topsrcdir/browser/config/version.txt`
+FIREFOX_VERSION_ABOUT=`cat $_topsrcdir/browser/config/version_about.txt`
 
 if test -z "$FIREFOX_VERSION"; then
     AC_MSG_ERROR([FIREFOX_VERSION is unexpectedly blank.])
+fi
+
+if test -z "$FIREFOX_VERSION_ABOUT"; then
+    AC_MSG_ERROR([FIREFOX_VERSION_ABOUT is unexpectedly blank.])
 fi
 
 AC_DEFINE_UNQUOTED(MOZILLA_VERSION,"$MOZILLA_VERSION")
@@ -2031,7 +2047,7 @@ case "$target" in
     DLL_SUFFIX=".dylib"
     DSO_LDOPTS=''
     STRIP_FLAGS="$STRIP_FLAGS -x -S"
-    # Check whether we're targeting OS X or iOS
+    # Ensure that if we're targeting iOS an SDK was provided.
     AC_CACHE_CHECK(for iOS target,
                    ac_cv_ios_target,
                    [AC_TRY_COMPILE([#include <TargetConditionals.h>
@@ -2041,7 +2057,10 @@ case "$target" in
                                    [],
                                    ac_cv_ios_target="yes",
                                    ac_cv_ios_target="no")])
-    if test "$ac_cv_ios_target" = "yes"; then
+    if test "$ac_cv_ios_target" = "yes" -a -z $MOZ_IOS; then
+       AC_MSG_ERROR([targeting iOS but not using an iOS SDK?])
+    fi
+    if test -n "$MOZ_IOS"; then
         AC_DEFINE(XP_IOS)
         AC_DEFINE(XP_DARWIN)
         _PLATFORM_DEFAULT_TOOLKIT='cairo-uikit'
@@ -3560,7 +3579,7 @@ MOZ_ARG_WITH_BOOL(system-nss,
     _USE_SYSTEM_NSS=1 )
 
 if test -n "$_USE_SYSTEM_NSS"; then
-    AM_PATH_NSS(3.19.1, [MOZ_NATIVE_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
+    AM_PATH_NSS(3.19.2, [MOZ_NATIVE_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
 fi
 
 if test -n "$MOZ_NATIVE_NSS"; then
@@ -3806,6 +3825,9 @@ MOZ_OFFICIAL_BRANDING=
 MOZ_FEEDS=1
 MOZ_WEBAPP_RUNTIME=
 MOZ_AUTH_EXTENSION=1
+if test "$MOZ_IOS"; then
+   MOZ_AUTH_EXTENSION=
+fi
 MOZ_RAW=
 MOZ_VORBIS=
 MOZ_TREMOR=
@@ -3863,6 +3885,9 @@ MOZ_URL_CLASSIFIER=
 MOZ_XUL=1
 MOZ_ZIPWRITER=1
 NS_PRINTING=1
+if test "$MOZ_IOS"; then
+   NS_PRINTING=
+fi
 MOZ_PDF_PRINTING=
 MOZ_NO_SMART_CARDS=
 NSS_DISABLE_DBM=
@@ -4311,7 +4336,10 @@ cairo-cocoa)
     CXXFLAGS="$CXXFLAGS $TK_CFLAGS"
     MOZ_USER_DIR="Mozilla"
     MOZ_FS_LAYOUT=bundle
-    MOZ_INSTRUMENT_EVENT_LOOP=1
+    # skip event loop instrumentation on UIKit for now
+    if test "$MOZ_WIDGET_TOOLKIT" == "cocoa"; then
+      MOZ_INSTRUMENT_EVENT_LOOP=1
+    fi
     ;;
 
 cairo-uikit)
@@ -4319,7 +4347,7 @@ cairo-uikit)
     AC_DEFINE(MOZ_WIDGET_UIKIT)
     LDFLAGS="$LDFLAGS -framework UIKit -lobjc"
     TK_CFLAGS="-DNO_X11"
-    TK_LIBS='-Wl,-framework,Foundation -Wl,-framework,CoreFoundation -Wl,-framework,CoreGraphics -Wl,-framework,CoreText'
+    TK_LIBS='-Wl,-framework,Foundation -Wl,-framework,CoreFoundation -Wl,-framework,CoreGraphics -Wl,-framework,CoreText -Wl,-framework,AVFoundation -Wl,-framework,AudioToolbox -Wl,-framework,CoreMedia -Wl,-framework,CoreVideo -Wl,-framework,OpenGLES -Wl,-framework,QuartzCore'
     CFLAGS="$CFLAGS $TK_CFLAGS"
     CXXFLAGS="$CXXFLAGS $TK_CFLAGS"
     MOZ_USER_DIR="Mozilla"
@@ -4442,6 +4470,10 @@ MOZ_ARG_DISABLE_BOOL(printing,
 [  --disable-printing      Disable printing support],
     NS_PRINTING=,
     NS_PRINTING=1)
+
+if test -n "$MOZ_IOS" -a -n "$NS_PRINTING"; then
+   AC_MSG_ERROR([Printing is not supported on iOS.])
+fi
 
 if test "$NS_PRINTING"; then
     AC_DEFINE(NS_PRINTING)
@@ -4952,6 +4984,13 @@ if test -n "$MOZ_ANDROID_SHARE_OVERLAY"; then
     AC_DEFINE(MOZ_ANDROID_SHARE_OVERLAY)
 fi
 
+dnl ========================================================
+dnl = Show Firefox Account profile details on Android
+dnl ========================================================
+if test -n "$MOZ_ANDROID_FIREFOX_ACCOUNT_PROFILES"; then
+    AC_DEFINE(MOZ_ANDROID_FIREFOX_ACCOUNT_PROFILES)
+fi
+
 dnl = Include Tab Queue on Android
 dnl = Temporary build flag to allow development in Nightly
 dnl ========================================================
@@ -5125,11 +5164,6 @@ fi
 dnl ========================================================
 dnl = Disable Speech API pocketsphinx backend
 dnl ========================================================
-MOZ_ARG_DISABLE_BOOL(webspeechpocketsphinx,
-[  --disable-webspeechpocketsphinx        Disable support for HTML Speech API Pocketsphinx Backend],
-    MOZ_WEBSPEECH_POCKETSPHINX=,
-    MOZ_WEBSPEECH_POCKETSPHINX=1)
-
 if test -n "$MOZ_WEBSPEECH_POCKETSPHINX"; then
     AC_DEFINE(MOZ_WEBSPEECH_POCKETSPHINX)
 fi
@@ -5171,11 +5205,6 @@ AC_SUBST(MOZ_WEBSPEECH_TEST_BACKEND)
 dnl ========================================================
 dnl = Disable Speech API models
 dnl ========================================================
-MOZ_ARG_DISABLE_BOOL(webspeechmodels,
-[  --disable-webspeechmodels        Disable support for HTML Speech API Models],
-    MOZ_WEBSPEECH_MODELS=,
-    MOZ_WEBSPEECH_MODELS=1)
-
 if test -z "$MOZ_WEBSPEECH"; then
 MOZ_WEBSPEECH_MODELS=
 fi
@@ -5746,10 +5775,15 @@ AC_SUBST(MOZ_CHILD_PERMISSIONS)
 dnl ========================================================
 dnl NegotiateAuth
 dnl ========================================================
+
 MOZ_ARG_DISABLE_BOOL(negotiateauth,
 [  --disable-negotiateauth Disable GSS-API negotiation ],
     MOZ_AUTH_EXTENSION=,
     MOZ_AUTH_EXTENSION=1 )
+
+if test -n "$MOZ_IOS" -a -n "$MOZ_AUTH_EXTENSION"; then
+   AC_MSG_ERROR([negotiateauth is not supported on iOS.])
+fi
 
 dnl ========================================================
 dnl Pref extensions (autoconfig)
@@ -6026,8 +6060,13 @@ MOZ_GAMEPAD_BACKEND=stub
 
 # Gamepad DOM is built on supported platforms by default.
 case "$OS_TARGET" in
-     Darwin|WINNT|Linux)
+     WINNT|Linux)
        MOZ_GAMEPAD=1
+       ;;
+     Darwin)
+       if test -z "$MOZ_IOS"; then
+         MOZ_GAMEPAD=1
+       fi
        ;;
      Android)
        if test "$MOZ_WIDGET_TOOLKIT" != "gonk"; then
@@ -6046,7 +6085,9 @@ MOZ_ARG_DISABLE_BOOL(gamepad,
 if test "$MOZ_GAMEPAD"; then
     case "$OS_TARGET" in
     Darwin)
-        MOZ_GAMEPAD_BACKEND=cocoa
+        if test -z "$MOZ_IOS"; then
+            MOZ_GAMEPAD_BACKEND=cocoa
+        fi
         ;;
     WINNT)
         MOZ_GAMEPAD_BACKEND=windows
@@ -6079,7 +6120,9 @@ i?86-*-mingw*|x86_64-*-mingw*)
   MOZ_CRASHREPORTER=1
   ;;
 i?86-apple-darwin*|x86_64-apple-darwin*)
-  MOZ_CRASHREPORTER=1
+  if test -z "$MOZ_IOS"; then
+    MOZ_CRASHREPORTER=1
+  fi
   ;;
 i?86-*-linux*|x86_64-*-linux*|arm-*-linux*)
   if test "$MOZ_ENABLE_GTK"; then
@@ -6162,6 +6205,8 @@ if test -n "$MOZ_LIBJPEG_TURBO"; then
   ;;
   Darwin:x86_64)
     LIBJPEG_TURBO_ASFLAGS="-f macho64 -rnasm -pnasm -D__x86_64__ -DPIC -DMACHO"
+  ;;
+  Darwin:arm*)
   ;;
   WINNT:x86)
     LIBJPEG_TURBO_ASFLAGS="-f win32 -rnasm -pnasm -DPIC -DWIN32"
@@ -6452,6 +6497,10 @@ fi
 dnl ========================================================
 dnl Updater
 dnl ========================================================
+
+if test "$MOZ_IOS"; then
+  MOZ_UPDATER=
+fi
 
 MOZ_ARG_DISABLE_BOOL(updater,
 [  --disable-updater       Disable building of updater],
@@ -8320,7 +8369,12 @@ case "$OS_TARGET" in
       NECKO_WIFI=1
     fi
     ;;
-  Darwin|DragonFly|FreeBSD|SunOS|WINNT)
+  Darwin)
+    if test -z "$MOZ_IOS"; then
+      NECKO_WIFI=1
+    fi
+    ;;
+  DragonFly|FreeBSD|SunOS|WINNT)
     NECKO_WIFI=1
     ;;
   Linux)
@@ -8540,6 +8594,7 @@ AC_SUBST(MOZ_ANDROID_GECKOLIBS_AAR)
 AC_SUBST(MOZ_ANDROID_READING_LIST_SERVICE)
 AC_SUBST(MOZ_ANDROID_SEARCH_ACTIVITY)
 AC_SUBST(MOZ_ANDROID_SHARE_OVERLAY)
+AC_SUBST(MOZ_ANDROID_FIREFOX_ACCOUNT_PROFILES)
 AC_SUBST(MOZ_ANDROID_TAB_QUEUE)
 AC_SUBST(MOZ_ANDROID_MLS_STUMBLER)
 AC_SUBST(MOZ_ANDROID_DOWNLOADS_INTEGRATION)
@@ -8640,6 +8695,8 @@ AC_SUBST(MOZ_CHILD_PROCESS_BUNDLE)
 # Mac Bundle name, Updater, Installer), it is typically used for nightly
 # builds (e.g. Aurora for Firefox).
 # - MOZ_APP_VERSION: Defines the application version number.
+# - MOZ_APP_VERSION_ABOUT: Defines the application version number. Used
+# in the "About" window. If not set, defaults to MOZ_APP_VERSION.
 # - MOZ_APP_NAME: Used for e.g. the binary program file name. If not set,
 # defaults to a lowercase form of MOZ_APP_BASENAME.
 # - MOZ_APP_REMOTINGNAME: Used for the internal program name, which affects
@@ -8656,6 +8713,10 @@ fi
 
 if test -z "$MOZ_APP_REMOTINGNAME"; then
    MOZ_APP_REMOTINGNAME=$MOZ_APP_NAME
+fi
+
+if test -z "$MOZ_APP_VERSION_ABOUT"; then
+   MOZ_APP_VERSION_ABOUT=$MOZ_APP_VERSION
 fi
 
 # For extensions and langpacks, we require a max version that is compatible
@@ -8694,6 +8755,7 @@ AC_DEFINE_UNQUOTED(MOZ_APP_UA_NAME, "$MOZ_APP_UA_NAME")
 AC_SUBST(MOZ_APP_UA_NAME)
 AC_DEFINE_UNQUOTED(MOZ_APP_UA_VERSION, "$MOZ_APP_VERSION")
 AC_SUBST(MOZ_APP_VERSION)
+AC_SUBST(MOZ_APP_VERSION_ABOUT)
 AC_SUBST(MOZ_APP_MAXVERSION)
 AC_DEFINE_UNQUOTED(FIREFOX_VERSION,$FIREFOX_VERSION)
 AC_SUBST(FIREFOX_VERSION)

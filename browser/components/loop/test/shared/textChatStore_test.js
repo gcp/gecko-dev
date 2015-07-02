@@ -25,6 +25,11 @@ describe("loop.store.TextChatStore", function () {
     store = new loop.store.TextChatStore(dispatcher, {
       sdkDriver: fakeSdkDriver
     });
+
+    sandbox.stub(window, "dispatchEvent");
+    sandbox.stub(window, "CustomEvent", function(name) {
+      this.name = name;
+    });
   });
 
   afterEach(function() {
@@ -32,10 +37,30 @@ describe("loop.store.TextChatStore", function () {
   });
 
   describe("#dataChannelsAvailable", function() {
-    it("should set textChatEnabled to true", function() {
-      store.dataChannelsAvailable();
+    it("should set textChatEnabled to the supplied state", function() {
+      store.dataChannelsAvailable(new sharedActions.DataChannelsAvailable({
+        available: true
+      }));
 
       expect(store.getStoreState("textChatEnabled")).eql(true);
+    });
+
+    it("should dispatch a LoopChatEnabled event", function() {
+      store.dataChannelsAvailable(new sharedActions.DataChannelsAvailable({
+        available: true
+      }));
+
+      sinon.assert.calledOnce(window.dispatchEvent);
+      sinon.assert.calledWithExactly(window.dispatchEvent,
+        new CustomEvent("LoopChatEnabled"));
+    });
+
+    it("should not dispatch a LoopChatEnabled event if available is false", function() {
+      store.dataChannelsAvailable(new sharedActions.DataChannelsAvailable({
+        available: false
+      }));
+
+      sinon.assert.notCalled(window.dispatchEvent);
     });
   });
 
@@ -51,7 +76,8 @@ describe("loop.store.TextChatStore", function () {
       expect(store.getStoreState("messageList")).eql([{
         type: CHAT_MESSAGE_TYPES.RECEIVED,
         contentType: CHAT_CONTENT_TYPES.TEXT,
-        message: message
+        message: message,
+        extraData: undefined
       }]);
     });
 
@@ -62,6 +88,17 @@ describe("loop.store.TextChatStore", function () {
       });
 
       expect(store.getStoreState("messageList").length).eql(0);
+    });
+
+    it("should dispatch a LoopChatMessageAppended event", function() {
+      store.receivedTextChatMessage({
+        contentType: CHAT_CONTENT_TYPES.TEXT,
+        message: "Hello!"
+      });
+
+      sinon.assert.calledOnce(window.dispatchEvent);
+      sinon.assert.calledWithExactly(window.dispatchEvent,
+        new CustomEvent("LoopChatMessageAppended"));
     });
   });
 
@@ -89,8 +126,77 @@ describe("loop.store.TextChatStore", function () {
       expect(store.getStoreState("messageList")).eql([{
         type: CHAT_MESSAGE_TYPES.SENT,
         contentType: messageData.contentType,
-        message: messageData.message
+        message: messageData.message,
+        extraData: undefined
       }]);
+    });
+
+    it("should dipatch a LoopChatMessageAppended event", function() {
+      store.sendTextChatMessage({
+        contentType: CHAT_CONTENT_TYPES.TEXT,
+        message: "Hello!"
+      });
+
+      sinon.assert.calledOnce(window.dispatchEvent);
+      sinon.assert.calledWithExactly(window.dispatchEvent,
+        new CustomEvent("LoopChatMessageAppended"));
+    });
+  });
+
+  describe("#updateRoomInfo", function() {
+    it("should add the room name to the list", function() {
+      store.updateRoomInfo(new sharedActions.UpdateRoomInfo({
+        roomName: "Let's share!",
+        roomOwner: "Mark",
+        roomUrl: "fake"
+      }));
+
+      expect(store.getStoreState("messageList")).eql([{
+        type: CHAT_MESSAGE_TYPES.SPECIAL,
+        contentType: CHAT_CONTENT_TYPES.ROOM_NAME,
+        message: "Let's share!",
+        extraData: undefined
+      }]);
+    });
+
+    it("should add the context to the list", function() {
+      store.updateRoomInfo(new sharedActions.UpdateRoomInfo({
+        roomName: "Let's share!",
+        roomOwner: "Mark",
+        roomUrl: "fake",
+        urls: [{
+          description: "A wonderful event",
+          location: "http://wonderful.invalid",
+          thumbnail: "fake"
+        }]
+      }));
+
+      expect(store.getStoreState("messageList")).eql([
+        {
+          type: CHAT_MESSAGE_TYPES.SPECIAL,
+          contentType: CHAT_CONTENT_TYPES.ROOM_NAME,
+          message: "Let's share!",
+          extraData: undefined
+        }, {
+          type: CHAT_MESSAGE_TYPES.SPECIAL,
+          contentType: CHAT_CONTENT_TYPES.CONTEXT,
+          message: "A wonderful event",
+          extraData: {
+            location: "http://wonderful.invalid",
+            thumbnail: "fake"
+          }
+        }
+      ]);
+    });
+
+    it("should not dispatch a LoopChatMessageAppended event", function() {
+      store.updateRoomInfo(new sharedActions.UpdateRoomInfo({
+        roomName: "Let's share!",
+        roomOwner: "Mark",
+        roomUrl: "fake"
+      }));
+
+      sinon.assert.notCalled(window.dispatchEvent);
     });
   });
 });

@@ -523,6 +523,11 @@ class PerThreadData : public PerThreadDataFriendFields
     // Whether this thread is actively Ion compiling.
     bool ionCompiling;
 
+    // Whether this thread is actively Ion compiling in a context where a minor
+    // GC could happen simultaneously. If this is true, this thread cannot use
+    // any pointers into the nursery.
+    bool ionCompilingSafeForMinorGC;
+
     // Whether this thread is currently sweeping GC things.
     bool gcSweeping;
 #endif
@@ -565,7 +570,7 @@ class PerThreadData : public PerThreadDataFriendFields
     js::jit::AutoFlushICache* autoFlushICache() const;
     void setAutoFlushICache(js::jit::AutoFlushICache* afc);
 
-#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
+#ifdef JS_SIMULATOR
     js::jit::Simulator* simulator() const;
 #endif
 };
@@ -1018,12 +1023,12 @@ struct JSRuntime : public JS::shadow::Runtime,
         gc.unlockGC();
     }
 
-#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
+#ifdef JS_SIMULATOR
     js::jit::Simulator* simulator_;
 #endif
 
   public:
-#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
+#ifdef JS_SIMULATOR
     js::jit::Simulator* simulator() const;
     uintptr_t* addressOfSimulatorStackLimit();
 #endif
@@ -1381,6 +1386,8 @@ struct JSRuntime : public JS::shadow::Runtime,
     bool offthreadIonCompilationEnabled_;
     bool parallelParsingEnabled_;
 
+    bool autoWritableJitCodeActive_;
+
   public:
 
     // Note: these values may be toggled dynamically (in response to about:config
@@ -1396,6 +1403,12 @@ struct JSRuntime : public JS::shadow::Runtime,
     }
     bool canUseParallelParsing() const {
         return parallelParsingEnabled_;
+    }
+
+    void toggleAutoWritableJitCodeActive(bool b) {
+        MOZ_ASSERT(autoWritableJitCodeActive_ != b, "AutoWritableJitCode should not be nested.");
+        MOZ_ASSERT(CurrentThreadCanAccessRuntime(this));
+        autoWritableJitCodeActive_ = b;
     }
 
     const JS::RuntimeOptions& options() const {
@@ -1502,7 +1515,9 @@ struct JSRuntime : public JS::shadow::Runtime,
           : iteration(0)
           , isEmpty(true)
           , currentPerfGroupCallback(nullptr)
-          , isActive_(false)
+          , isMonitoringJank_(false)
+          , isMonitoringCPOW_(false)
+          , idCounter_(0)
         { }
 
         /**
@@ -1516,9 +1531,8 @@ struct JSRuntime : public JS::shadow::Runtime,
             ++iteration;
             isEmpty = true;
         }
-
         /**
-         * Activate/deactivate stopwatch measurement.
+         * Activate/deactivate stopwatch measurement of jank.
          *
          * Noop if `value` is `true` and the stopwatch is already active,
          * or if `value` is `false` and the stopwatch is already inactive.
@@ -1528,8 +1542,8 @@ struct JSRuntime : public JS::shadow::Runtime,
          *
          * May return `false` if the underlying hashtable cannot be allocated.
          */
-        bool setIsActive(bool value) {
-            if (isActive_ != value)
+        bool setIsMonitoringJank(bool value) {
+            if (isMonitoringJank_ != value)
                 reset();
 
             if (value && !groups_.initialized()) {
@@ -1537,15 +1551,31 @@ struct JSRuntime : public JS::shadow::Runtime,
                     return false;
             }
 
-            isActive_ = value;
+            isMonitoringJank_ = value;
+            return true;
+        }
+        bool isMonitoringJank() const {
+            return isMonitoringJank_;
+        }
+
+
+        /**
+         * Activate/deactivate stopwatch measurement of CPOW.
+         */
+        bool setIsMonitoringCPOW(bool value) {
+            isMonitoringCPOW_ = value;
             return true;
         }
 
+        bool isMonitoringCPOW() const {
+            return isMonitoringCPOW_;
+        }
+
         /**
-         * `true` if the stopwatch is currently monitoring, `false` otherwise.
+         * Return a identifier for a group, unique to the runtime.
          */
-        bool isActive() const {
-            return isActive_;
+        uint64_t uniqueId() {
+            return idCounter_++;
         }
 
         // Some systems have non-monotonic clocks. While we cannot
@@ -1596,7 +1626,13 @@ struct JSRuntime : public JS::shadow::Runtime,
         /**
          * `true` if stopwatch monitoring is active, `false` otherwise.
          */
-        bool isActive_;
+        bool isMonitoringJank_;
+        bool isMonitoringCPOW_;
+
+        /**
+         * A counter used to generate unique identifiers for groups.
+         */
+        uint64_t idCounter_;
     };
     Stopwatch stopwatch;
 };
@@ -1915,13 +1951,16 @@ extern const JSSecurityCallbacks NullSecurityCallbacks;
 class AutoEnterIonCompilation
 {
   public:
-    explicit AutoEnterIonCompilation(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM) {
+    explicit AutoEnterIonCompilation(bool safeForMinorGC
+                                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM) {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
 
 #ifdef DEBUG
         PerThreadData* pt = js::TlsPerThreadData.get();
         MOZ_ASSERT(!pt->ionCompiling);
+        MOZ_ASSERT(!pt->ionCompilingSafeForMinorGC);
         pt->ionCompiling = true;
+        pt->ionCompilingSafeForMinorGC = safeForMinorGC;
 #endif
     }
 
@@ -1930,6 +1969,7 @@ class AutoEnterIonCompilation
         PerThreadData* pt = js::TlsPerThreadData.get();
         MOZ_ASSERT(pt->ionCompiling);
         pt->ionCompiling = false;
+        pt->ionCompilingSafeForMinorGC = false;
 #endif
     }
 

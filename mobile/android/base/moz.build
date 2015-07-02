@@ -44,6 +44,8 @@ if CONFIG['MOZ_NATIVE_DEVICES']:
     resjar.generated_sources += ['android/support/v7/appcompat/R.java']
     resjar.generated_sources += ['android/support/v7/mediarouter/R.java']
 
+resjar.generated_sources += ['android/support/v7/recyclerview/R.java']
+
 resjar.javac_flags += ['-Xlint:all']
 
 mgjar = add_java_jar('gecko-mozglue')
@@ -355,7 +357,8 @@ gbjar.sources += [
     'home/TwoLinePageRow.java',
     'InputMethods.java',
     'IntentHelper.java',
-    'JavaAddonManager.java',
+    'javaaddons/JavaAddonManager.java',
+    'javaaddons/JavaAddonManagerV1.java',
     'LayoutInterceptor.java',
     'LocaleManager.java',
     'Locales.java',
@@ -595,6 +598,7 @@ if CONFIG['MOZ_ANDROID_READING_LIST_SERVICE']:
 
 gbjar.sources += sync_java_files
 gbjar.extra_jars += [
+    OBJDIR + '/../javaaddons/javaaddons-1.0.jar',
     'gecko-R.jar',
     'gecko-mozglue.jar',
     'gecko-thirdparty.jar',
@@ -616,6 +620,7 @@ moz_native_devices_sources = [
 if CONFIG['MOZ_NATIVE_DEVICES']:
     gbjar.extra_jars += moz_native_devices_jars
     gbjar.sources += moz_native_devices_sources
+gbjar.extra_jars += [CONFIG['ANDROID_RECYCLERVIEW_LIB']]
 
 gbjar.javac_flags += ['-Xlint:all,-deprecation,-fallthrough', '-J-Xmx512m', '-J-Xms128m']
 
@@ -744,7 +749,7 @@ ANDROID_GENERATED_RESFILES += [
 for var in ('MOZ_ANDROID_ANR_REPORTER', 'MOZ_LINKER_EXTRACT', 'MOZILLA_OFFICIAL', 'MOZ_DEBUG',
             'MOZ_ANDROID_SEARCH_ACTIVITY', 'MOZ_NATIVE_DEVICES', 'MOZ_ANDROID_MLS_STUMBLER',
             'MOZ_ANDROID_SHARE_OVERLAY', 'MOZ_ANDROID_DOWNLOADS_INTEGRATION', 'MOZ_INSTALL_TRACKING',
-            'MOZ_ANDROID_TAB_QUEUE'):
+            'MOZ_ANDROID_TAB_QUEUE', 'MOZ_ANDROID_FIREFOX_ACCOUNT_PROFILES'):
     if CONFIG[var]:
         DEFINES[var] = 1
 

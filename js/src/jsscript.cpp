@@ -2651,6 +2651,7 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     script->funHasExtensibleScope_ = funbox ? funbox->hasExtensibleScope() : false;
     script->funNeedsDeclEnvObject_ = funbox ? funbox->needsDeclEnvObject() : false;
     script->needsHomeObject_       = funbox ? funbox->needsHomeObject() : false;
+    script->isDerivedClassConstructor_ = funbox ? funbox->isDerivedClassConstructor() : false;
     script->hasSingletons_ = bce->hasSingletons;
 
     if (funbox) {
@@ -3087,13 +3088,7 @@ js::CloneScript(JSContext* cx, HandleObject enclosingScope, HandleFunction fun, 
                     clone = CloneFunctionAndScript(cx, enclosingScope, innerFun, polluted);
                 }
             } else {
-                /*
-                 * Clone object literals emitted for the JSOP_NEWOBJECT opcode. We only emit that
-                 * instead of the less-optimized JSOP_NEWINIT for self-hosted code or code compiled
-                 * with JSOPTION_COMPILE_N_GO set. As we don't clone the latter type of code, this
-                 * case should only ever be hit when cloning objects from self-hosted code.
-                 */
-                clone = CloneObjectLiteral(cx, obj);
+                clone = DeepCloneObjectLiteral(cx, obj, TenuredObject);
             }
             if (!clone || !objects.append(clone))
                 return nullptr;
@@ -3843,6 +3838,7 @@ LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
     p.hasDirectEval = false;
     p.directlyInsideEval = false;
     p.usesArgumentsApplyAndThis = false;
+    p.isDerivedClassConstructor = false;
 
     LazyScript* res = LazyScript::CreateRaw(cx, fun, packedFields, begin, end, lineno, column);
     MOZ_ASSERT_IF(res, res->version() == version);

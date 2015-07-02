@@ -56,10 +56,6 @@
 #include "RtspOmxDecoder.h"
 #include "RtspOmxReader.h"
 #endif
-#ifdef MOZ_WMF
-#include "WMFDecoder.h"
-#include "WMFReader.h"
-#endif
 #ifdef MOZ_DIRECTSHOW
 #include "DirectShowDecoder.h"
 #include "DirectShowReader.h"
@@ -191,8 +187,8 @@ static char const *const gWebMCodecs[7] = {
   nullptr
 };
 
-static bool
-IsWebMType(const nsACString& aType)
+/* static */ bool
+DecoderTraits::IsWebMType(const nsACString& aType)
 {
   if (!MediaDecoder::IsWebMEnabled()) {
     return false;
@@ -210,7 +206,7 @@ IsGStreamerSupportedType(const nsACString& aMimeType)
     return false;
 
 #ifdef MOZ_WEBM
-  if (IsWebMType(aMimeType) && !Preferences::GetBool("media.prefer-gstreamer", false))
+  if (DecoderTraits::IsWebMType(aMimeType) && !Preferences::GetBool("media.prefer-gstreamer", false))
     return false;
 #endif
   if (IsOggType(aMimeType) && !Preferences::GetBool("media.prefer-gstreamer", false))
@@ -331,14 +327,6 @@ IsAndroidMediaType(const nsACString& aType)
     "audio/mpeg", "audio/mp4", "video/mp4", nullptr
   };
   return CodecListContains(supportedTypes, aType);
-}
-#endif
-
-#ifdef MOZ_WMF
-static bool
-IsWMFSupportedType(const nsACString& aType)
-{
-  return WMFDecoder::CanPlayType(aType, NS_LITERAL_STRING(""));
 }
 #endif
 
@@ -481,21 +469,8 @@ DecoderTraits::CanHandleMediaType(const char* aMIMEType,
   }
 #endif
 #ifdef MOZ_DIRECTSHOW
-  // Note: DirectShow should come before WMF, so that we prefer DirectShow's
-  // MP3 support over WMF's.
   if (DirectShowDecoder::GetSupportedCodecs(nsDependentCString(aMIMEType), &codecList)) {
     result = CANPLAY_MAYBE;
-  }
-#endif
-#ifdef MOZ_WMF
-  if (!Preferences::GetBool("media.fragmented-mp4.exposed", false) &&
-      IsWMFSupportedType(nsDependentCString(aMIMEType))) {
-    if (!aHaveRequestedCodecs) {
-      return CANPLAY_MAYBE;
-    }
-    return WMFDecoder::CanPlayType(nsDependentCString(aMIMEType),
-                                   aRequestedCodecs)
-           ? CANPLAY_YES : CANPLAY_NO;
   }
 #endif
 #ifdef MOZ_APPLEMEDIA
@@ -624,7 +599,7 @@ InstantiateDecoder(const nsACString& aType, MediaDecoderOwner* aOwner)
   }
 #endif
 #ifdef MOZ_WEBM
-  if (IsWebMType(aType)) {
+  if (DecoderTraits::IsWebMType(aType)) {
     decoder = new WebMDecoder();
     return decoder.forget();
   }
@@ -634,12 +609,6 @@ InstantiateDecoder(const nsACString& aType, MediaDecoderOwner* aOwner)
   // MP3 support over WMF's.
   if (IsDirectShowSupportedType(aType)) {
     decoder = new DirectShowDecoder();
-    return decoder.forget();
-  }
-#endif
-#ifdef MOZ_WMF
-  if (IsWMFSupportedType(aType)) {
-    decoder = new WMFDecoder();
     return decoder.forget();
   }
 #endif
@@ -727,15 +696,8 @@ MediaDecoderReader* DecoderTraits::CreateReader(const nsACString& aType, Abstrac
   } else
 #endif
 #ifdef MOZ_DIRECTSHOW
-  // Note: DirectShowReader is preferred for MP3, but if it's disabled we
-  // fallback to the WMFReader.
   if (IsDirectShowSupportedType(aType)) {
     decoderReader = new DirectShowReader(aDecoder);
-  } else
-#endif
-#ifdef MOZ_WMF
-  if (IsWMFSupportedType(aType)) {
-    decoderReader = new WMFReader(aDecoder);
   } else
 #endif
 #ifdef MOZ_APPLEMEDIA
@@ -781,9 +743,6 @@ bool DecoderTraits::IsSupportedInVideoDocument(const nsACString& aType)
     IsMP4SupportedType(aType) ||
 #endif
     IsMP3SupportedType(aType) ||
-#ifdef MOZ_WMF
-    IsWMFSupportedType(aType) ||
-#endif
 #ifdef MOZ_DIRECTSHOW
     IsDirectShowSupportedType(aType) ||
 #endif

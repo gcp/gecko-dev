@@ -104,7 +104,7 @@ GetBuildConfiguration(JSContext* cx, unsigned argc, jsval* vp)
     if (!JS_SetProperty(cx, info, "x64", value))
         return false;
 
-#ifdef JS_ARM_SIMULATOR
+#ifdef JS_SIMULATOR_ARM
     value = BooleanValue(true);
 #else
     value = BooleanValue(false);
@@ -808,8 +808,8 @@ class HasChildTracer : public JS::CallbackTracer
     RootedValue child_;
     bool found_;
 
-    void trace(void** thingp, JS::TraceKind kind) {
-        if (*thingp == child_.toGCThing())
+    void onChild(const JS::GCCellPtr& thing) override {
+        if (thing.asCell() == child_.toGCThing())
             found_ = true;
     }
 

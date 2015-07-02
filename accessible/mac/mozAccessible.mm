@@ -516,7 +516,7 @@ GetClosestInterestingAccessible(id anObject)
 struct RoleDescrMap
 {
   NSString* role;
-  const nsString& description;
+  const nsString description;
 };
 
 static const RoleDescrMap sRoleDescrMap[] = {
@@ -600,12 +600,13 @@ struct RoleDescrComparator
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
 
-  AccessibleWrap* accWrap = [self getGeckoAccessible];
-  if (accWrap->IsDefunct())
-    return nil;
-
   nsAutoString desc;
-  accWrap->Description(desc);
+  if (AccessibleWrap* accWrap = [self getGeckoAccessible])
+    accWrap->Description(desc);
+  else if (ProxyAccessible* proxy = [self getProxyAccessible])
+    proxy->Description(desc);
+  else
+    return nil;
 
   return nsCocoaUtils::ToNSString(desc);
 

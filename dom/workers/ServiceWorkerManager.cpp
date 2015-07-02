@@ -6,6 +6,8 @@
 
 #include "ServiceWorkerManager.h"
 
+#include "mozIApplication.h"
+#include "mozIApplicationClearPrivateDataParams.h"
 #include "nsIAppsService.h"
 #include "nsIDOMEventTarget.h"
 #include "nsIDocument.h"
@@ -34,6 +36,7 @@
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/ErrorEvent.h"
 #include "mozilla/dom/Headers.h"
+#include "mozilla/dom/indexedDB/IDBFactory.h"
 #include "mozilla/dom/InternalHeaders.h"
 #include "mozilla/dom/Navigator.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
@@ -77,6 +80,7 @@ BEGIN_WORKERS_NAMESPACE
 
 #define PURGE_DOMAIN_DATA "browser:purge-domain-data"
 #define PURGE_SESSION_HISTORY "browser:purge-session-history"
+#define WEBAPPS_CLEAR_DATA "webapps-clear-data"
 
 static_assert(nsIHttpChannelInternal::CORS_MODE_SAME_ORIGIN == static_cast<uint32_t>(RequestMode::Same_origin),
               "RequestMode enumeration value should match Necko CORS mode value.");
@@ -413,6 +417,8 @@ ServiceWorkerManager::Init()
       rv = obs->AddObserver(this, PURGE_SESSION_HISTORY, false /* ownsWeak */);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
       rv = obs->AddObserver(this, PURGE_DOMAIN_DATA, false /* ownsWeak */);
+      MOZ_ASSERT(NS_SUCCEEDED(rv));
+      rv = obs->AddObserver(this, WEBAPPS_CLEAR_DATA, false /* ownsWeak */);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
   }
@@ -874,7 +880,15 @@ public:
           mRegistration->mPendingUninstall = false;
           swm->StoreRegistration(mPrincipal, mRegistration);
           Succeed();
-          Done(NS_OK);
+
+          // Done() must always be called async from Start()
+          nsCOMPtr<nsIRunnable> runnable =
+            NS_NewRunnableMethodWithArg<nsresult>(
+              this,
+              &ServiceWorkerRegisterJob::Done,
+              NS_OK);
+          MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(runnable)));
+
           return;
         }
       } else {
@@ -1293,6 +1307,78 @@ ContinueInstallTask::ContinueAfterWorkerEvent(bool aSuccess, bool aActivateImmed
   mJob->ContinueAfterInstallEvent(aSuccess, aActivateImmediately);
 }
 
+static bool
+IsFromAuthenticatedOriginInternal(nsIDocument* aDoc)
+{
+  nsCOMPtr<nsIURI> documentURI = aDoc->GetDocumentURI();
+
+  bool authenticatedOrigin = false;
+  nsresult rv;
+  if (!authenticatedOrigin) {
+    nsAutoCString scheme;
+    rv = documentURI->GetScheme(scheme);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return false;
+    }
+
+    if (scheme.EqualsLiteral("https") ||
+        scheme.EqualsLiteral("file") ||
+        scheme.EqualsLiteral("app")) {
+      authenticatedOrigin = true;
+    }
+  }
+
+  if (!authenticatedOrigin) {
+    nsAutoCString host;
+    rv = documentURI->GetHost(host);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return false;
+    }
+
+    if (host.Equals("127.0.0.1") ||
+        host.Equals("localhost") ||
+        host.Equals("::1")) {
+      authenticatedOrigin = true;
+    }
+  }
+
+  if (!authenticatedOrigin) {
+    bool isFile;
+    rv = documentURI->SchemeIs("file", &isFile);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return false;
+    }
+
+    if (!isFile) {
+      bool isHttps;
+      rv = documentURI->SchemeIs("https", &isHttps);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return false;
+      }
+      authenticatedOrigin = isHttps;
+    }
+  }
+
+  return authenticatedOrigin;
+}
+
+// This function implements parts of the step 3 of the following algorithm:
+// https://w3c.github.io/webappsec/specs/powerfulfeatures/#settings-secure
+static bool
+IsFromAuthenticatedOrigin(nsIDocument* aDoc)
+{
+  MOZ_ASSERT(aDoc);
+  nsCOMPtr<nsIDocument> doc(aDoc);
+  while (doc && !nsContentUtils::IsChromeDoc(doc)) {
+    if (!IsFromAuthenticatedOriginInternal(doc)) {
+      return false;
+    }
+
+    doc = doc->GetParentDocument();
+  }
+  return true;
+}
+
 // If we return an error code here, the ServiceWorkerContainer will
 // automatically reject the Promise.
 NS_IMETHODIMP
@@ -1319,65 +1405,24 @@ ServiceWorkerManager::Register(nsIDOMWindow* aWindow,
   bool serviceWorkersTestingEnabled =
     outerWindow->GetServiceWorkersTestingEnabled();
 
-  nsCOMPtr<nsIURI> documentURI = doc->GetDocumentURI();
-
-  bool authenticatedOrigin = false;
+  bool authenticatedOrigin;
   if (Preferences::GetBool("dom.serviceWorkers.testing.enabled") ||
       serviceWorkersTestingEnabled) {
     authenticatedOrigin = true;
-  }
-
-  nsresult rv;
-  if (!authenticatedOrigin) {
-    nsAutoCString scheme;
-    rv = documentURI->GetScheme(scheme);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    if (scheme.EqualsLiteral("https") ||
-        scheme.EqualsLiteral("file") ||
-        scheme.EqualsLiteral("app")) {
-      authenticatedOrigin = true;
-    }
+  } else {
+    authenticatedOrigin = IsFromAuthenticatedOrigin(doc);
   }
 
   if (!authenticatedOrigin) {
-    nsAutoCString host;
-    rv = documentURI->GetHost(host);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    if (host.Equals("127.0.0.1") ||
-        host.Equals("localhost") ||
-        host.Equals("::1")) {
-      authenticatedOrigin = true;
-    }
-  }
-
-  if (!authenticatedOrigin) {
-    bool isFile;
-    rv = documentURI->SchemeIs("file", &isFile);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    if (!isFile) {
-      bool isHttps;
-      rv = documentURI->SchemeIs("https", &isHttps);
-      if (NS_WARN_IF(NS_FAILED(rv)) || !isHttps) {
-        NS_WARNING("ServiceWorker registration from insecure websites is not allowed.");
-        return NS_ERROR_DOM_SECURITY_ERR;
-      }
-    }
+    NS_WARNING("ServiceWorker registration from insecure websites is not allowed.");
+    return NS_ERROR_DOM_SECURITY_ERR;
   }
 
   // Data URLs are not allowed.
   nsCOMPtr<nsIPrincipal> documentPrincipal = doc->NodePrincipal();
 
-  rv = documentPrincipal->CheckMayLoad(aScriptURI, true /* report */,
-                                       false /* allowIfInheritsPrincipal */);
+  nsresult rv = documentPrincipal->CheckMayLoad(aScriptURI, true /* report */,
+                                                false /* allowIfInheritsPrincipal */);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return NS_ERROR_DOM_SECURITY_ERR;
   }
@@ -2670,7 +2715,7 @@ ServiceWorkerManager::GetServiceWorkerRegistrationInfo(nsIPrincipal* aPrincipal,
 
   nsAutoCString originAttributesSuffix;
   nsresult rv = PrincipalToScopeKey(aPrincipal, originAttributesSuffix);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  if (NS_FAILED(rv)) {
     return nullptr;
   }
 
@@ -2732,7 +2777,7 @@ ServiceWorkerManager::PrincipalToScopeKey(nsIPrincipal* aPrincipal,
 {
   MOZ_ASSERT(aPrincipal);
 
-  if (NS_WARN_IF(!BasePrincipal::Cast(aPrincipal)->IsCodebasePrincipal())) {
+  if (!BasePrincipal::Cast(aPrincipal)->IsCodebasePrincipal()) {
     return NS_ERROR_FAILURE;
   }
 
@@ -3532,6 +3577,27 @@ ServiceWorkerManager::CreateServiceWorker(nsIPrincipal* aPrincipal,
 
   info.mPrincipal = aPrincipal;
 
+  info.mIndexedDBAllowed =
+    indexedDB::IDBFactory::AllowedForPrincipal(aPrincipal);
+
+  nsCOMPtr<nsIContentSecurityPolicy> csp;
+  rv = aPrincipal->GetCsp(getter_AddRefs(csp));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  info.mCSP = csp;
+  if (info.mCSP) {
+    rv = info.mCSP->GetAllowsEval(&info.mReportCSPViolations,
+                                  &info.mEvalAllowed);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  } else {
+    info.mEvalAllowed = true;
+    info.mReportCSPViolations = false;
+  }
+
   // NOTE: this defaults the SW load context to:
   //  - private browsing = false
   //  - content = true
@@ -3675,14 +3741,16 @@ EnumControlledDocuments(nsISupports* aKey,
                         void* aData)
 {
   FilterRegistrationData* data = static_cast<FilterRegistrationData*>(aData);
-  if (data->mRegistration != aRegistration) {
+  MOZ_ASSERT(data->mRegistration);
+  MOZ_ASSERT(aRegistration);
+  if (!data->mRegistration->mScope.Equals(aRegistration->mScope)) {
     return PL_DHASH_NEXT;
   }
 
   nsCOMPtr<nsIDocument> document = do_QueryInterface(aKey);
 
   if (!document || !document->GetWindow()) {
-      return PL_DHASH_NEXT;
+    return PL_DHASH_NEXT;
   }
 
   ServiceWorkerClientInfo clientInfo(document);
@@ -4020,9 +4088,9 @@ HasRootDomain(nsIURI* aURI, const nsACString& aDomain)
   return prevChar == '.';
 }
 
-struct UnregisterIfMatchesHostData
+struct UnregisterIfMatchesHostOrPrincipalData
 {
-  UnregisterIfMatchesHostData(
+  UnregisterIfMatchesHostOrPrincipalData(
     ServiceWorkerManager::RegistrationDataPerPrincipal* aRegistrationData,
     void* aUserData)
     : mRegistrationData(aRegistrationData)
@@ -4039,8 +4107,8 @@ UnregisterIfMatchesHost(const nsACString& aScope,
                         ServiceWorkerRegistrationInfo* aReg,
                         void* aPtr)
 {
-  UnregisterIfMatchesHostData* data =
-    static_cast<UnregisterIfMatchesHostData*>(aPtr);
+  UnregisterIfMatchesHostOrPrincipalData* data =
+    static_cast<UnregisterIfMatchesHostOrPrincipalData*>(aPtr);
 
   // We avoid setting toRemove = aReg by default since there is a possibility
   // of failure when data->mUserData is passed, in which case we don't want to
@@ -4072,8 +4140,44 @@ UnregisterIfMatchesHostPerPrincipal(const nsACString& aKey,
                                     ServiceWorkerManager::RegistrationDataPerPrincipal* aData,
                                     void* aUserData)
 {
-  UnregisterIfMatchesHostData data(aData, aUserData);
+  UnregisterIfMatchesHostOrPrincipalData data(aData, aUserData);
   aData->mInfos.EnumerateRead(UnregisterIfMatchesHost, &data);
+  return PL_DHASH_NEXT;
+}
+
+PLDHashOperator
+UnregisterIfMatchesPrincipal(const nsACString& aScope,
+                             ServiceWorkerRegistrationInfo* aReg,
+                             void* aPtr)
+{
+  UnregisterIfMatchesHostOrPrincipalData* data =
+    static_cast<UnregisterIfMatchesHostOrPrincipalData*>(aPtr);
+
+  if (data->mUserData) {
+    nsIPrincipal *principal = static_cast<nsIPrincipal*>(data->mUserData);
+    MOZ_ASSERT(principal);
+    MOZ_ASSERT(aReg->mPrincipal);
+    bool equals;
+    aReg->mPrincipal->Equals(principal, &equals);
+    if (equals) {
+      nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+      swm->ForceUnregister(data->mRegistrationData, aReg);
+    }
+  }
+
+  return PL_DHASH_NEXT;
+}
+
+PLDHashOperator
+UnregisterIfMatchesPrincipal(const nsACString& aKey,
+                             ServiceWorkerManager::RegistrationDataPerPrincipal* aData,
+                             void* aUserData)
+{
+  UnregisterIfMatchesHostOrPrincipalData data(aData, aUserData);
+  // We can use EnumerateRead because ForceUnregister (and Unregister) are async.
+  // Otherwise doing some R/W operations on an hashtable during an EnumerateRead
+  // will crash.
+  aData->mInfos.EnumerateRead(UnregisterIfMatchesPrincipal, &data);
   return PL_DHASH_NEXT;
 }
 
@@ -4245,6 +4349,17 @@ UpdateEachRegistration(const nsACString& aKey,
   return PL_DHASH_NEXT;
 }
 
+void
+ServiceWorkerManager::RemoveAllRegistrations(nsIPrincipal* aPrincipal)
+{
+  AssertIsOnMainThread();
+
+  MOZ_ASSERT(aPrincipal);
+
+  mRegistrationInfos.EnumerateRead(UnregisterIfMatchesPrincipal,
+                                   aPrincipal);
+}
+
 static PLDHashOperator
 UpdateEachRegistrationPerPrincipal(const nsACString& aKey,
                                    ServiceWorkerManager::RegistrationDataPerPrincipal* aData,
@@ -4286,12 +4401,43 @@ ServiceWorkerManager::Observe(nsISupports* aSubject,
     }
 
     Remove(NS_ConvertUTF16toUTF8(domain));
+  } else if (strcmp(aTopic, WEBAPPS_CLEAR_DATA) == 0) {
+    nsCOMPtr<mozIApplicationClearPrivateDataParams> params =
+      do_QueryInterface(aSubject);
+    if (NS_WARN_IF(!params)) {
+      return NS_OK;
+    }
+
+    uint32_t appId;
+    nsresult rv = params->GetAppId(&appId);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    nsCOMPtr<nsIAppsService> appsService =
+      do_GetService(APPS_SERVICE_CONTRACTID);
+    if (NS_WARN_IF(!appsService)) {
+      return NS_OK;
+    }
+
+    nsCOMPtr<mozIApplication> app;
+    appsService->GetAppByLocalId(appId, getter_AddRefs(app));
+    if (NS_WARN_IF(!app)) {
+      return NS_OK;
+    }
+
+    nsCOMPtr<nsIPrincipal> principal;
+    app->GetPrincipal(getter_AddRefs(principal));
+    if (NS_WARN_IF(!principal)) {
+      return NS_OK;
+    }
+
+    RemoveAllRegistrations(principal);
   } else if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
     if (obs) {
       obs->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
       obs->RemoveObserver(this, PURGE_SESSION_HISTORY);
       obs->RemoveObserver(this, PURGE_DOMAIN_DATA);
+      obs->RemoveObserver(this, WEBAPPS_CLEAR_DATA);
     }
   } else {
     MOZ_CRASH("Received message we aren't supposed to be registered for!");

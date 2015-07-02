@@ -17,6 +17,9 @@ Cu.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AboutHome",
                                   "resource:///modules/AboutHome.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "AboutNewTab",
+                                  "resource:///modules/AboutNewTab.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "UITour",
                                   "resource:///modules/UITour.jsm");
 
@@ -690,6 +693,7 @@ BrowserGlue.prototype = {
 #endif
     webrtcUI.init();
     AboutHome.init();
+    AboutNewTab.init();
     SessionStore.init();
     BrowserUITelemetry.init();
     ContentSearch.init();
@@ -981,12 +985,14 @@ BrowserGlue.prototype = {
     this._checkForOldBuildUpdates();
 
     let disabledAddons = AddonManager.getStartupChanges(AddonManager.STARTUP_CHANGE_DISABLED);
-    for (let id of disabledAddons) {
-      if (AddonManager.getAddonByID(id).signedState <= AddonManager.SIGNEDSTATE_MISSING) {
-        this._notifyUnsignedAddonsDisabled();
-        break;
+    AddonManager.getAddonsByIDs(disabledAddons, (addons) => {
+      for (let addon of addons) {
+        if (addon.signedState <= AddonManager.SIGNEDSTATE_MISSING) {
+          this._notifyUnsignedAddonsDisabled();
+          break;
+        }
       }
-    }
+    });
 
     this._firstWindowTelemetry(aWindow);
   },
@@ -1013,6 +1019,7 @@ BrowserGlue.prototype = {
 
     CustomizationTabPreloader.uninit();
     WebappManager.uninit();
+    AboutNewTab.uninit();
 #ifdef NIGHTLY_BUILD
     if (Services.prefs.getBoolPref("dom.identity.enabled")) {
       SignInToWebsiteUX.uninit();

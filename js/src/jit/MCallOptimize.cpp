@@ -530,6 +530,11 @@ IonBuilder::inlineArray(CallInfo& callInfo)
         return InliningStatus_NotInlined;
     }
 
+    if (templateObject->is<UnboxedArrayObject>()) {
+        if (templateObject->group()->unboxedLayout().nativeGroup())
+            return InliningStatus_NotInlined;
+    }
+
     // Multiple arguments imply array initialization, not just construction.
     if (callInfo.argc() >= 2) {
         initLength = callInfo.argc();
@@ -586,7 +591,7 @@ IonBuilder::inlineArray(CallInfo& callInfo)
 
     callInfo.setImplicitlyUsedUnchecked();
 
-    MConstant* templateConst = MConstant::NewConstraintlessObject(alloc(), templateObject);
+    MConstant* templateConst = MConstant::NewConstraintlessObject(alloc(), templateObject, this);
     current->add(templateConst);
 
     MNewArray* ins = MNewArray::New(alloc(), constraints(), initLength, templateConst,
@@ -760,7 +765,7 @@ IonBuilder::inlineArrayPush(CallInfo& callInfo)
 
     MDefinition* obj = callInfo.thisArg();
     MDefinition* value = callInfo.getArg(0);
-    if (PropertyWriteNeedsTypeBarrier(alloc(), constraints(), current,
+    if (PropertyWriteNeedsTypeBarrier(this, constraints(), current,
                                       &obj, nullptr, &value, /* canModify = */ false))
     {
         trackOptimizationOutcome(TrackedOutcome::NeedsTypeBarrier);
@@ -1015,6 +1020,16 @@ IonBuilder::inlineArraySlice(CallInfo& callInfo)
     JSObject* templateObj = inspector->getTemplateObjectForNative(pc, js::array_slice);
     if (!templateObj)
         return InliningStatus_NotInlined;
+
+    if (unboxedType == JSVAL_TYPE_MAGIC) {
+        if (!templateObj->is<ArrayObject>())
+            return InliningStatus_NotInlined;
+    } else {
+        if (!templateObj->is<UnboxedArrayObject>())
+            return InliningStatus_NotInlined;
+        if (templateObj->as<UnboxedArrayObject>().elementType() != unboxedType)
+            return InliningStatus_NotInlined;
+    }
 
     callInfo.setImplicitlyUsedUnchecked();
 
@@ -1686,7 +1701,7 @@ IonBuilder::inlineConstantStringSplit(CallInfo& callInfo)
     if (conversion == TemporaryTypeSet::AlwaysConvertToDoubles)
         return InliningStatus_NotInlined;
 
-    MConstant* templateConst = MConstant::NewConstraintlessObject(alloc(), templateObject);
+    MConstant* templateConst = MConstant::NewConstraintlessObject(alloc(), templateObject, this);
     current->add(templateConst);
 
     MNewArray* ins = MNewArray::New(alloc(), constraints(), initLength, templateConst,
@@ -1756,7 +1771,8 @@ IonBuilder::inlineStringSplit(CallInfo& callInfo)
     }
 
     callInfo.setImplicitlyUsedUnchecked();
-    MConstant* templateObjectDef = MConstant::New(alloc(), ObjectValue(*templateObject), constraints());
+    MConstant* templateObjectDef = MConstant::New(alloc(), ObjectValue(*templateObject),
+                                                  constraints(), this);
     current->add(templateObjectDef);
 
     MStringSplit* ins = MStringSplit::New(alloc(), constraints(), callInfo.thisArg(),
@@ -2081,7 +2097,7 @@ IonBuilder::inlineObjectCreate(CallInfo& callInfo)
 
     callInfo.setImplicitlyUsedUnchecked();
 
-    MConstant* templateConst = MConstant::NewConstraintlessObject(alloc(), templateObject);
+    MConstant* templateConst = MConstant::NewConstraintlessObject(alloc(), templateObject, this);
     current->add(templateConst);
     MNewObject* ins = MNewObject::New(alloc(), constraints(), templateConst,
                                       templateObject->group()->initialHeap(constraints()),

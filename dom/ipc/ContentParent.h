@@ -37,6 +37,9 @@ class nsIWidget;
 
 namespace mozilla {
 class PRemoteSpellcheckEngineParent;
+#ifdef MOZ_ENABLE_PROFILER_SPS
+class ProfileGatherer;
+#endif
 
 namespace ipc {
 class OptionalURIParams;
@@ -643,6 +646,9 @@ private:
     virtual bool RecvPVoicemailConstructor(PVoicemailParent* aActor) override;
     virtual bool DeallocPVoicemailParent(PVoicemailParent* aActor) override;
 
+    virtual PMediaParent* AllocPMediaParent() override;
+    virtual bool DeallocPMediaParent(PMediaParent* aActor) override;
+
     virtual bool DeallocPStorageParent(PStorageParent* aActor) override;
 
     virtual PBluetoothParent* AllocPBluetoothParent() override;
@@ -856,6 +862,7 @@ private:
 
     virtual bool RecvGamepadListenerAdded() override;
     virtual bool RecvGamepadListenerRemoved() override;
+    virtual bool RecvProfile(const nsCString& aProfile) override;
 
     // If you add strong pointers to cycle collected objects here, be sure to
     // release these objects in ShutDownProcess.  See the comment there for more
@@ -931,6 +938,10 @@ private:
 #endif
 
     PProcessHangMonitorParent* mHangMonitorActor;
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    nsRefPtr<mozilla::ProfileGatherer> mGatherer;
+#endif
+    nsCString mProfile;
 };
 
 } // namespace dom

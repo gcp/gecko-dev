@@ -49,7 +49,7 @@ interface nsIJSRAIIHelper;
 interface nsIContentPermissionRequest;
 interface nsIObserver;
 
-[scriptable, uuid(a01d5bb4-3e81-4529-b139-2f4ebb78f717)]
+[scriptable, uuid(42c529d8-54cf-4158-8b09-13ca89d7a88c)]
 interface nsIDOMWindowUtils : nsISupports {
 
   /**
@@ -1446,6 +1446,16 @@ interface nsIDOMWindowUtils : nsISupports {
   void setAsyncZoom(in nsIDOMNode aRootElement, in float aValue);
 
   /**
+   * Do a round-trip to the compositor to ensure any pending APZ repaint requests
+   * get flushed to the main thread. If the function returns true, the flush was
+   * triggered and an "apz-repaints-flushed" notification will be dispatched via
+   * the observer service once the flush is complete. If the function returns
+   * false, an error occurred or a flush is not needed, and the notification
+   * will not fire. This is intended to be used by test code only!
+   */
+  bool flushApzRepaints();
+
+  /**
    * Method for testing StyleAnimationValue::ComputeDistance.
    *
    * Returns the distance between the two values as reported by
@@ -1704,9 +1714,11 @@ interface nsIDOMWindowUtils : nsISupports {
    attribute boolean paintFlashing;
 
    /**
-    * Allows running of a "synchronous section", in the form of an nsIRunnable
-    * once the event loop has reached a "stable state". We've reached a stable
-    * state when the currently executing task/event has finished, see:
+    * Add a "synchronous section", in the form of an nsIRunnable run once the
+    * event loop has reached a "stable state". |runnable| must not cause any
+    * queued events to be processed (i.e. must not spin the event loop).
+    * We've reached a stable state when the currently executing task/event has
+    * finished, see:
     * http://www.whatwg.org/specs/web-apps/current-work/multipage/webappapis.html#synchronous-section
     * In practice this runs aRunnable once the currently executing event
     * finishes. If called multiple times per task/event, all the runnables will

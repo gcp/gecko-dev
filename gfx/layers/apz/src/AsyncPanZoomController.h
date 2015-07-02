@@ -184,6 +184,11 @@ public:
   void NotifyLayersUpdated(const FrameMetrics& aLayerMetrics, bool aIsFirstPaint);
 
   /**
+   * Flush any pending repaint request.
+   */
+  void FlushRepaintIfPending();
+
+  /**
    * The platform implementation must set the compositor parent so that we can
    * request composites.
    */
@@ -899,8 +904,7 @@ public:
   }
 
   /* Returns true if there is no APZC higher in the tree with the same
-   * layers id. Deprecated. New code shouldn't use this. Old code should be
-   * updated to not use this.
+   * layers id.
    */
   bool HasNoParentWithSameLayersId() const {
     return !mParent || (mParent->mLayersId != mLayersId);
@@ -909,6 +913,11 @@ public:
   bool IsRootForLayersId() const {
     ReentrantMonitorAutoEnter lock(mMonitor);
     return mFrameMetrics.IsLayersIdRoot();
+  }
+
+  bool IsRootContent() const {
+    ReentrantMonitorAutoEnter lock(mMonitor);
+    return mFrameMetrics.IsRootContent();
   }
 
 private:

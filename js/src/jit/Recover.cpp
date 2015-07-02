@@ -24,6 +24,7 @@
 #include "jit/MIRGraph.h"
 #include "jit/VMFunctions.h"
 #include "vm/Interpreter.h"
+#include "vm/String.h"
 
 #include "vm/Interpreter-inl.h"
 #include "vm/NativeObject-inl.h"
@@ -1253,24 +1254,20 @@ MCreateThisWithTemplate::writeRecoverData(CompactBufferWriter& writer) const
 {
     MOZ_ASSERT(canRecoverOnBailout());
     writer.writeUnsigned(uint32_t(RInstruction::Recover_CreateThisWithTemplate));
-    writer.writeByte(bool(initialHeap() == gc::TenuredHeap));
     return true;
 }
 
 RCreateThisWithTemplate::RCreateThisWithTemplate(CompactBufferReader& reader)
 {
-    tenuredHeap_ = reader.readByte();
 }
 
 bool
 RCreateThisWithTemplate::recover(JSContext* cx, SnapshotIterator& iter) const
 {
-    RootedPlainObject templateObject(cx, &iter.read().toObject().as<PlainObject>());
+    RootedObject templateObject(cx, &iter.read().toObject());
 
     // See CodeGenerator::visitCreateThisWithTemplate
-    gc::AllocKind allocKind = templateObject->asTenured().getAllocKind();
-    gc::InitialHeap initialHeap = tenuredHeap_ ? gc::TenuredHeap : gc::DefaultHeap;
-    JSObject* resultObject = NativeObject::copy(cx, allocKind, initialHeap, templateObject);
+    JSObject* resultObject = NewObjectOperationWithTemplate(cx, templateObject);
     if (!resultObject)
         return false;
 
@@ -1373,13 +1370,48 @@ RObjectState::RObjectState(CompactBufferReader& reader)
 bool
 RObjectState::recover(JSContext* cx, SnapshotIterator& iter) const
 {
-    RootedNativeObject object(cx, &iter.read().toObject().as<NativeObject>());
-    MOZ_ASSERT(object->slotSpan() == numSlots());
-
+    RootedObject object(cx, &iter.read().toObject());
     RootedValue val(cx);
-    for (size_t i = 0; i < numSlots(); i++) {
-        val = iter.read();
-        object->setSlot(i, val);
+
+    if (object->is<UnboxedPlainObject>()) {
+        const UnboxedLayout& layout = object->as<UnboxedPlainObject>().layout();
+
+        RootedId id(cx);
+        RootedValue receiver(cx, ObjectValue(*object));
+        const UnboxedLayout::PropertyVector& properties = layout.properties();
+        for (size_t i = 0; i < properties.length(); i++) {
+            val = iter.read();
+
+            // This is the default placeholder value of MObjectState, when no
+            // properties are defined yet.
+            if (val.isUndefined())
+                continue;
+
+            // In order to simplify the code, we do not have a
+            // MStoreUnboxedBoolean, but we reuse the MStoreUnboxedScalar code.
+            // This has a nasty side-effect of add a MTruncate which coerce the
+            // boolean into an Int32. The following code check that if the
+            // property was expected to be a boolean, then we coerce it here.
+            if (properties[i].type == JSVAL_TYPE_BOOLEAN)
+                val.setBoolean(val.toInt32() != 0);
+
+            id = NameToId(properties[i].name);
+            ObjectOpResult result;
+
+            // SetProperty can only fail due to OOM.
+            if (!SetProperty(cx, object, id, val, receiver, result))
+                return false;
+            if (!result)
+                return result.reportError(cx, object, id);
+        }
+    } else {
+        RootedNativeObject nativeObject(cx, &object->as<NativeObject>());
+        MOZ_ASSERT(nativeObject->slotSpan() == numSlots());
+
+        for (size_t i = 0; i < numSlots(); i++) {
+            val = iter.read();
+            nativeObject->setSlot(i, val);
+        }
     }
 
     val.setObject(*object);

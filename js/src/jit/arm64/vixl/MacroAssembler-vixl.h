@@ -27,8 +27,7 @@
 #ifndef VIXL_A64_MACRO_ASSEMBLER_A64_H_
 #define VIXL_A64_MACRO_ASSEMBLER_A64_H_
 
-// TODO: Re-enable once landed.
-// #include "jit/arm64/Assembler-arm64.h"
+#include "jit/arm64/Assembler-arm64.h"
 
 #include "jit/arm64/vixl/Debugger-vixl.h"
 #include "jit/arm64/vixl/Globals-vixl.h"
@@ -927,7 +926,7 @@ class MacroAssembler : public js::jit::Assembler {
     umsubl(rd, rn, rm, ra);
   }
   void Unreachable() {
-#ifdef JS_ARM64_SIMULATOR
+#ifdef JS_SIMULATOR_ARM64
     hlt(kUnreachableOpcode);
 #else
     // Branch to 0 to generate a segfault.

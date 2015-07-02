@@ -350,7 +350,7 @@ Tester.prototype = {
         this.dumper.structuredLogger.testEnd("browser-test.js",
                                              "FAIL",
                                              "PASS",
-                                             "No tests to run. Did you pass an invalid --test-path?");
+                                             "No tests to run. Did you pass invalid test_paths?");
       }
       this.dumper.structuredLogger.info("*** End BrowserChrome Test Results ***");
 
@@ -766,8 +766,10 @@ Tester.prototype = {
         var result = this.currentTest.scope.generatorTest();
         this.currentTest.scope.__generator = result;
         result.next();
-      } else {
+      } else if (typeof this.currentTest.scope.test == "function") {
         this.currentTest.scope.test();
+      } else {
+        throw "This test didn't call add_task, nor did it define a generatorTest() function, nor did it define a test() function, so we don't know how to run it.";
       }
     } catch (ex) {
       let isExpected = !!this.SimpleTest.isExpectingUncaughtException();

@@ -89,7 +89,6 @@ public:
   explicit RemoteContentController(RenderFrameParent* aRenderFrame)
     : mUILoop(MessageLoop::current())
     , mRenderFrame(aRenderFrame)
-    , mHaveZoomConstraints(false)
   { }
 
   virtual void RequestContentRepaint(const FrameMetrics& aFrameMetrics) override
@@ -198,7 +197,7 @@ public:
 
   void ClearRenderFrame() { mRenderFrame = nullptr; }
 
-  virtual void SendAsyncScrollDOMEvent(bool aIsRoot,
+  virtual void SendAsyncScrollDOMEvent(bool aIsRootContent,
                                        const CSSRect& aContentRect,
                                        const CSSSize& aContentSize) override
   {
@@ -207,10 +206,10 @@ public:
         FROM_HERE,
         NewRunnableMethod(this,
                           &RemoteContentController::SendAsyncScrollDOMEvent,
-                          aIsRoot, aContentRect, aContentSize));
+                          aIsRootContent, aContentRect, aContentSize));
       return;
     }
-    if (mRenderFrame && aIsRoot) {
+    if (mRenderFrame && aIsRootContent) {
       TabParent* browser = TabParent::GetFrom(mRenderFrame->Manager());
       BrowserElementParent::DispatchAsyncScrollEvent(browser, aContentRect,
                                                      aContentSize);
@@ -220,14 +219,6 @@ public:
   virtual void PostDelayedTask(Task* aTask, int aDelayMs) override
   {
     MessageLoop::current()->PostDelayedTask(FROM_HERE, aTask, aDelayMs);
-  }
-
-  virtual bool GetRootZoomConstraints(ZoomConstraints* aOutConstraints) override
-  {
-    if (mHaveZoomConstraints && aOutConstraints) {
-      *aOutConstraints = mZoomConstraints;
-    }
-    return mHaveZoomConstraints;
   }
 
   virtual bool GetTouchSensitiveRegion(CSSRect* aOutRegion) override
@@ -270,13 +261,15 @@ public:
     }
   }
 
-  // Methods used by RenderFrameParent to set fields stored here.
-
-  void SaveZoomConstraints(const ZoomConstraints& aConstraints)
-  {
-    mHaveZoomConstraints = true;
-    mZoomConstraints = aConstraints;
+  void NotifyFlushComplete() override {
+    MOZ_ASSERT(NS_IsMainThread());
+    if (mRenderFrame) {
+      TabParent* browser = TabParent::GetFrom(mRenderFrame->Manager());
+      browser->NotifyFlushComplete();
+    }
   }
+
+  // Methods used by RenderFrameParent to set fields stored here.
 
   void SetTouchSensitiveRegion(const nsRegion& aRegion)
   {
@@ -286,8 +279,6 @@ private:
   MessageLoop* mUILoop;
   RenderFrameParent* mRenderFrame;
 
-  bool mHaveZoomConstraints;
-  ZoomConstraints mZoomConstraints;
   nsRegion mTouchSensitiveRegion;
 };
 
@@ -578,12 +569,8 @@ RenderFrameParent::SetAllowedTouchBehavior(uint64_t aInputBlockId,
 void
 RenderFrameParent::UpdateZoomConstraints(uint32_t aPresShellId,
                                          ViewID aViewId,
-                                         bool aIsRoot,
-                                         const ZoomConstraints& aConstraints)
+                                         const Maybe<ZoomConstraints>& aConstraints)
 {
-  if (mContentController && aIsRoot) {
-    mContentController->SaveZoomConstraints(aConstraints);
-  }
   if (GetApzcTreeManager()) {
     GetApzcTreeManager()->UpdateZoomConstraints(ScrollableLayerGuid(mLayersId, aPresShellId, aViewId),
                                                 aConstraints);

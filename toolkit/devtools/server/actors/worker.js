@@ -1,6 +1,7 @@
 "use strict";
 
 let { Ci, Cu } = require("chrome");
+let { DebuggerServer } = require("devtools/server/main");
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -11,6 +12,9 @@ XPCOMUtils.defineLazyServiceGetter(
 );
 
 function matchWorkerDebugger(dbg, options) {
+  if ("type" in options && dbg.type !== options.type) {
+    return false;
+  }
   if ("window" in options) {
     let window = dbg.window;
     while (window !== null && window.parent !== window) {
@@ -28,6 +32,8 @@ function matchWorkerDebugger(dbg, options) {
 function WorkerActor(dbg) {
   this._dbg = dbg;
   this._isAttached = false;
+  this._threadActor = null;
+  this._transport = null;
 }
 
 WorkerActor.prototype = {
@@ -52,7 +58,8 @@ WorkerActor.prototype = {
 
     return {
       type: "attached",
-      isFrozen: this._dbg.isFrozen
+      isFrozen: this._dbg.isFrozen,
+      url: this._dbg.url
     };
   },
 
@@ -66,12 +73,43 @@ WorkerActor.prototype = {
     return { type: "detached" };
   },
 
+  onConnect: function (request) {
+    if (!this._isAttached) {
+      return { error: "wrongState" };
+    }
+
+    if (this._threadActor !== null) {
+      return {
+        type: "connected",
+        threadActor: this._threadActor
+      };
+    }
+
+    return DebuggerServer.connectToWorker(
+      this.conn, this._dbg, this.actorID, request.options
+    ).then(({ threadActor, transport }) => {
+      this._threadActor = threadActor;
+      this._transport = transport;
+
+      return {
+        type: "connected",
+        threadActor: this._threadActor
+      };
+    }, (error) => {
+      return { error: error.toString() };
+    });
+  },
+
   onClose: function () {
     if (this._isAttached) {
       this._detach();
     }
 
     this.conn.sendActorEvent(this.actorID, "close");
+  },
+
+  onError: function (filename, lineno, message) {
+    reportError("ERROR:" + filename + ":" + lineno + ":" + message + "\n");
   },
 
   onFreeze: function () {
@@ -83,6 +121,12 @@ WorkerActor.prototype = {
   },
 
   _detach: function () {
+    if (this._threadActor !== null) {
+      this._transport.close();
+      this._transport = null;
+      this._threadActor = null;
+    }
+
     this._dbg.removeListener(this);
     this._isAttached = false;
   }
@@ -90,7 +134,8 @@ WorkerActor.prototype = {
 
 WorkerActor.prototype.requestTypes = {
   "attach": WorkerActor.prototype.onAttach,
-  "detach": WorkerActor.prototype.onDetach
+  "detach": WorkerActor.prototype.onDetach,
+  "connect": WorkerActor.prototype.onConnect
 };
 
 exports.WorkerActor = WorkerActor;

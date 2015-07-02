@@ -396,12 +396,13 @@ struct AutoStopwatch final
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
 
         JSRuntime* runtime = JS_GetRuntime(cx_);
-        if (!runtime->stopwatch.isActive())
+        if (!runtime->stopwatch.isMonitoringJank())
             return;
 
         JSCompartment* compartment = cx_->compartment();
         if (compartment->scheduledForDestruction)
             return;
+
         iteration_ = runtime->stopwatch.iteration;
 
         PerformanceGroup *group = compartment->performanceMonitoring.getGroup(cx);
@@ -444,7 +445,7 @@ struct AutoStopwatch final
 
         MOZ_ASSERT(!compartment->scheduledForDestruction);
 
-        if (!runtime->stopwatch.isActive()) {
+        if (!runtime->stopwatch.isMonitoringJank()) {
             // Monitoring has been stopped while we were
             // executing the code. Drop everything.
             return;
@@ -698,6 +699,11 @@ js::Invoke(JSContext* cx, CallArgs args, MaybeConstruct construct)
 
     /* Invoke native functions. */
     JSFunction* fun = &args.callee().as<JSFunction>();
+    if (construct != CONSTRUCT && fun->isClassConstructor()) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_CANT_CALL_CLASS_CONSTRUCTOR);
+        return false;
+    }
+
     if (fun->isNative()) {
         MOZ_ASSERT_IF(construct, !fun->isConstructor());
         return CallJSNative(cx, fun->native(), args);
@@ -2946,7 +2952,9 @@ CASE(JSOP_FUNCALL)
     bool isFunction = IsFunctionObject(args.calleev(), &maybeFun);
 
     /* Don't bother trying to fast-path calls to scripted non-constructors. */
-    if (!isFunction || !maybeFun->isInterpreted() || !maybeFun->isConstructor()) {
+    if (!isFunction || !maybeFun->isInterpreted() || !maybeFun->isConstructor() ||
+        (!construct && maybeFun->isClassConstructor()))
+    {
         if (construct) {
             if (!InvokeConstructor(cx, args))
                 goto error;

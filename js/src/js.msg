@@ -102,6 +102,8 @@ MSG_DEF(JSMSG_CANT_SET_PROTO_CYCLE,    0, JSEXN_TYPEERR, "can't set prototype: i
 MSG_DEF(JSMSG_INVALID_ARG_TYPE,        3, JSEXN_TYPEERR, "Invalid type: {0} can't be a{1} {2}")
 MSG_DEF(JSMSG_TERMINATED,              1, JSEXN_ERR, "Script terminated by timeout at:\n{0}")
 MSG_DEF(JSMSG_PROTO_NOT_OBJORNULL,     1, JSEXN_TYPEERR, "{0}.prototype is not an object or null")
+MSG_DEF(JSMSG_CANT_CALL_CLASS_CONSTRUCTOR, 0, JSEXN_TYPEERR, "class constructors must be invoked with |new|")
+MSG_DEF(JSMSG_DISABLED_DERIVED_CLASS,  1, JSEXN_INTERNALERR, "{0} temporarily disallowed in derived class constructors")
 
 // JSON
 MSG_DEF(JSMSG_JSON_BAD_PARSE,          3, JSEXN_SYNTAXERR, "JSON.parse: {0} at line {1} column {2} of the JSON data")
@@ -311,7 +313,7 @@ MSG_DEF(JSMSG_SEMI_AFTER_FOR_COND,     0, JSEXN_SYNTAXERR, "missing ; after for-
 MSG_DEF(JSMSG_SEMI_AFTER_FOR_INIT,     0, JSEXN_SYNTAXERR, "missing ; after for-loop initializer")
 MSG_DEF(JSMSG_SEMI_BEFORE_STMNT,       0, JSEXN_SYNTAXERR, "missing ; before statement")
 MSG_DEF(JSMSG_SOURCE_TOO_LONG,         0, JSEXN_RANGEERR, "source is too long")
-MSG_DEF(JSMSG_STMT_AFTER_RETURN,       0, JSEXN_SYNTAXERR, "unreachable code after return statement")
+MSG_DEF(JSMSG_STMT_AFTER_RETURN,       0, JSEXN_NONE, "unreachable code after return statement")
 MSG_DEF(JSMSG_STRICT_CODE_WITH,        0, JSEXN_SYNTAXERR, "strict mode code may not contain 'with' statements")
 MSG_DEF(JSMSG_STRICT_FUNCTION_STATEMENT, 0, JSEXN_SYNTAXERR, "in strict mode code, functions may be declared only at top level or immediately within another function")
 MSG_DEF(JSMSG_TEMPLSTR_UNTERM_EXPR,    0, JSEXN_SYNTAXERR, "missing } in template string")

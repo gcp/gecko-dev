@@ -25,12 +25,14 @@ using class IPC::Principal from "mozilla/dom/PermissionMessageUtils.h";
 using class mozilla::gfx::Matrix from "mozilla/gfx/Matrix.h";
 using struct gfxSize from "gfxPoint.h";
 using CSSRect from "Units.h";
+using CSSSize from "Units.h";
 using LayoutDeviceIntRect from "Units.h";
 using mozilla::LayoutDeviceIntPoint from "Units.h";
 using ScreenIntSize from "Units.h";
 using struct mozilla::layers::FrameMetrics from "FrameMetrics.h";
 using struct mozilla::layers::ScrollableLayerGuid from "FrameMetrics.h";
 using struct mozilla::layers::ZoomConstraints from "FrameMetrics.h";
+using mozilla::layers::MaybeZoomConstraints from "FrameMetrics.h";
 using FrameMetrics::ViewID from "FrameMetrics.h";
 using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
 using mozilla::WindowsHandle from "ipc/IPCMessageUtils.h";
@@ -309,7 +311,7 @@ parent:
      *
      * aPoint offset values in device pixels.
      */
-    sync GetTabOffset() returns (LayoutDeviceIntPoint aPoint);
+    prio(high) sync GetTabOffset() returns (LayoutDeviceIntPoint aPoint);
 
     /**
      * Gets the DPI of the screen corresponding to this browser.
@@ -445,8 +447,8 @@ parent:
      * The zoom controller code lives on the parent side and so this allows it to
      * have up-to-date zoom constraints.
      */
-    UpdateZoomConstraints(uint32_t aPresShellId, ViewID aViewId, bool aIsRoot,
-                          ZoomConstraints aConstraints);
+    UpdateZoomConstraints(uint32_t aPresShellId, ViewID aViewId,
+                          MaybeZoomConstraints aConstraints);
 
     /**
      * Brings up the auth prompt dialog.
@@ -548,7 +550,7 @@ child:
 
     CacheFileDescriptor(nsString path, FileDescriptor fd);
 
-    UpdateDimensions(IntRect rect, ScreenIntSize size, ScreenOrientation orientation,
+    UpdateDimensions(CSSRect rect, CSSSize size, ScreenOrientation orientation,
                      LayoutDeviceIntPoint chromeDisp) compressall;
 
     UpdateFrame(FrameMetrics frame);
@@ -562,6 +564,7 @@ child:
     HandleSingleTap(CSSPoint aPoint, Modifiers aModifiers, ScrollableLayerGuid aGuid);
     HandleLongTap(CSSPoint point, Modifiers aModifiers, ScrollableLayerGuid aGuid, uint64_t aInputBlockId);
     NotifyAPZStateChange(ViewID aViewId, APZStateChange aChange, int aArg);
+    NotifyFlushComplete();
 
 
     /**

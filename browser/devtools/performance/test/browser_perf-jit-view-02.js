@@ -19,7 +19,7 @@ function* spawnTest() {
 
   let profilerData = { threads: [gThread] };
 
-  is(Services.prefs.getBoolPref(JIT_PREF), false, "show JIT Optimizations pref off by default");
+  Services.prefs.setBoolPref(JIT_PREF, true);
 
   // Make two recordings, so we have one to switch to later, as the
   // second one will have fake sample data
@@ -33,7 +33,6 @@ function* spawnTest() {
 
   yield injectAndRenderProfilerData();
 
-  Services.prefs.setBoolPref(JIT_PREF, true);
   // Click the frame
   let rendered = once(JITOptimizationsView, EVENTS.OPTIMIZATIONS_RENDERED);
   mousedown(window, $$(".call-tree-item")[2]);
@@ -61,14 +60,11 @@ function* spawnTest() {
 
     // Force a rerender
     let rendered = once(JsCallTreeView, EVENTS.JS_CALL_TREE_RENDERED);
-    JsCallTreeView.render();
+    JsCallTreeView.render(OverviewView.getTimeInterval());
     yield rendered;
 
-    Services.prefs.setBoolPref(JIT_PREF, true);
     ok($("#jit-optimizations-view").classList.contains("empty"),
       "JIT Optimizations view has empty message when no frames selected.");
-
-     Services.prefs.setBoolPref(JIT_PREF, false);
   }
 }
 

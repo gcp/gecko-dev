@@ -17,44 +17,47 @@ const FRAME_TITLE = `Subframe for test browser_compartments.js ${Math.random()}`
 
 // This function is injected as source as a frameScript
 function frameScript() {
-  "use strict";
+  try {
+    "use strict";
 
-  const { utils: Cu, classes: Cc, interfaces: Ci } = Components;
-  Cu.import("resource://gre/modules/PerformanceStats.jsm");
+    const { utils: Cu, classes: Cc, interfaces: Ci } = Components;
+    Cu.import("resource://gre/modules/PerformanceStats.jsm");
 
-  let performanceStatsService =
-    Cc["@mozilla.org/toolkit/performance-stats-service;1"].
-    getService(Ci.nsIPerformanceStatsService);
+    let performanceStatsService =
+      Cc["@mozilla.org/toolkit/performance-stats-service;1"].
+      getService(Ci.nsIPerformanceStatsService);
 
-  // Make sure that the stopwatch is now active.
-  performanceStatsService.isStopwatchActive = true;
+    // Make sure that the stopwatch is now active.
+    let monitor = PerformanceStats.getMonitor(["jank", "cpow", "ticks"]);
 
-  let monitor = PerformanceStats.getMonitor(["jank", "cpow", "ticks"]);
-
-  addMessageListener("compartments-test:getStatistics", () => {
-    try {
-      monitor.promiseSnapshot().then(snapshot => {
-        sendAsyncMessage("compartments-test:getStatistics", snapshot);
-      });
-    } catch (ex) {
-      Cu.reportError("Error in content: " + ex);
-      Cu.reportError(ex.stack);
-    }
-  });
-
-  addMessageListener("compartments-test:setTitles", titles => {
-    try {
-      content.document.title = titles.data.parent;
-      for (let i = 0; i < content.frames.length; ++i) {
-        content.frames[i].postMessage({title: titles.data.frames}, "*");
+    addMessageListener("compartments-test:getStatistics", () => {
+      try {
+        monitor.promiseSnapshot().then(snapshot => {
+          sendAsyncMessage("compartments-test:getStatistics", snapshot);
+        });
+      } catch (ex) {
+        Cu.reportError("Error in content (getStatistics): " + ex);
+        Cu.reportError(ex.stack);
       }
-      console.log("content", "Done setting titles", content.document.title);
-      sendAsyncMessage("compartments-test:setTitles");
-    } catch (ex) {
-      Cu.reportError("Error in content: " + ex);
-      Cu.reportError(ex.stack);
-    }
-  });
+    });
+
+    addMessageListener("compartments-test:setTitles", titles => {
+      try {
+        content.document.title = titles.data.parent;
+        for (let i = 0; i < content.frames.length; ++i) {
+          content.frames[i].postMessage({title: titles.data.frames}, "*");
+        }
+        console.log("content", "Done setting titles", content.document.title);
+        sendAsyncMessage("compartments-test:setTitles");
+      } catch (ex) {
+        Cu.reportError("Error in content (setTitles): " + ex);
+        Cu.reportError(ex.stack);
+      }
+    });
+  } catch (ex) {
+    Cu.reportError("Error in content (setup): " + ex);
+    Cu.reportError(ex.stack);    
+  }
 }
 
 // A variant of `Assert` that doesn't spam the logs
@@ -100,8 +103,8 @@ function monotinicity_tester(source, testName) {
     if (prev == null) {
       return;
     }
-    for (let k of ["name", "addonId", "isSystem"]) {
-      SilentAssert.equal(prev[k], next[k], `Sanity check (${testName}): ${k} hasn't changed.`);
+    for (let k of ["groupId", "addonId", "isSystem"]) {
+      SilentAssert.equal(prev[k], next[k], `Sanity check (${testName}): ${k} hasn't changed (${prev.name}).`);
     }
     for (let [probe, k] of [
       ["jank", "totalUserTime"],
@@ -144,10 +147,9 @@ function monotinicity_tester(source, testName) {
     previous.procesData = snapshot.processData;
 
     // Sanity check on components data.
-    let set = new Set();
     let map = new Map();
     for (let item of snapshot.componentsData) {
-	 for (let [probe, k] of [
+      for (let [probe, k] of [
         ["jank", "totalUserTime"],
         ["jank", "totalSystemTime"],
         ["cpow", "totalCPOWTime"]
@@ -156,24 +158,13 @@ function monotinicity_tester(source, testName) {
           `Sanity check (${testName}): component has a lower ${k} than process`);
       }
 
-      let key = `{name: ${item.name}, window: ${item.windowId}, addonId: ${item.addonId}, isSystem: ${item.isSystem}}`;
-      if (set.has(key)) {
-        // There are at least two components with the same name (e.g. about:blank).
-        // Don't perform sanity checks on that name until we know how to make
-        // the difference.
-        map.delete(key);
-        continue;
-      }
+      let key = item.groupId;
+      SilentAssert.ok(!map.has(key), "The component hasn't been seen yet.");
       map.set(key, item);
-      set.add(key);
     }
     for (let [key, item] of map) {
       sanityCheck(previous.componentsMap.get(key), item);
       previous.componentsMap.set(key, item);
-    }
-    info(`Deactivating deduplication check (Bug 1150045)`);
-    if (false) {
-      SilentAssert.equal(set.size, snapshot.componentsData.length);
     }
   });
   let interval = window.setInterval(frameCheck, 300);

@@ -354,6 +354,7 @@ MediaEngineWebRTC::Shutdown()
   mVideoSources.Clear();
   mAudioSources.Clear();
 
+  mozilla::camera::Shutdown();
 
   if (mThread) {
     mThread->Shutdown();

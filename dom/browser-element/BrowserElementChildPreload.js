@@ -154,8 +154,8 @@ BrowserElementChild.prototype = {
                      /* useCapture = */ true,
                      /* wantsUntrusted = */ false);
 
-    addEventListener("MozDOMFullscreen:Exited",
-                     this._mozExitedDomFullscreen.bind(this),
+    addEventListener("MozDOMFullscreen:Exit",
+                     this._mozExitDomFullscreen.bind(this),
                      /* useCapture = */ true,
                      /* wantsUntrusted = */ false);
 
@@ -229,7 +229,10 @@ BrowserElementChild.prototype = {
       "activate-next-paint-listener": this._activateNextPaintListener.bind(this),
       "set-input-method-active": this._recvSetInputMethodActive.bind(this),
       "deactivate-next-paint-listener": this._deactivateNextPaintListener.bind(this),
-      "do-command": this._recvDoCommand
+      "do-command": this._recvDoCommand,
+      "find-all": this._recvFindAll.bind(this),
+      "find-next": this._recvFindNext.bind(this),
+      "clear-match": this._recvClearMatch.bind(this),
     }
 
     addMessageListener("browser-element-api:call", function(aMessage) {
@@ -447,7 +450,7 @@ BrowserElementChild.prototype = {
       // If we don't actually have any pending fullscreen request
       // to handle, neither we have been in fullscreen, tell the
       // parent to just exit.
-      sendAsyncMsg("exited-dom-fullscreen");
+      sendAsyncMsg("exit-dom-fullscreen");
     }
   },
 
@@ -544,8 +547,9 @@ BrowserElementChild.prototype = {
     debug('Got metaChanged: (' + e.target.name + ') ' + e.target.content);
 
     let handlers = {
-      'viewmode': this._viewmodeChangedHandler,
-      'theme-color': this._themeColorChangedHandler,
+      'viewmode': this._genericMetaHandler.bind(null, 'viewmode'),
+      'theme-color': this._genericMetaHandler.bind(null, 'theme-color'),
+      'theme-group': this._genericMetaHandler.bind(null, 'theme-group'),
       'application-name': this._applicationNameChangedHandler
     };
 
@@ -717,19 +721,9 @@ BrowserElementChild.prototype = {
     sendAsyncMsg('selectionstatechanged', detail);
   },
 
-
-  _viewmodeChangedHandler: function(eventType, target) {
+  _genericMetaHandler: function(name, eventType, target) {
     let meta = {
-      name: 'viewmode',
-      content: target.content,
-      type: eventType.replace('DOMMeta', '').toLowerCase()
-    };
-    sendAsyncMsg('metachange', meta);
-  },
-
-  _themeColorChangedHandler: function(eventType, target) {
-    let meta = {
-      name: 'theme-color',
+      name: name,
       content: target.content,
       type: eventType.replace('DOMMeta', '').toLowerCase()
     };
@@ -994,8 +988,8 @@ BrowserElementChild.prototype = {
     });
   },
 
-  _mozExitedDomFullscreen: function(e) {
-    sendAsyncMsg("exited-dom-fullscreen");
+  _mozExitDomFullscreen: function(e) {
+    sendAsyncMsg("exit-dom-fullscreen");
   },
 
   _getContentDimensions: function() {
@@ -1238,6 +1232,57 @@ BrowserElementChild.prototype = {
       this._selectionStateChangedTarget = null;
       docShell.doCommand(COMMAND_MAP[data.json.command]);
     }
+  },
+
+  _initFinder: function() {
+    if (!this._finder) {
+      try {
+        this._findLimit = Services.prefs.getIntPref("accessibility.typeaheadfind.matchesCountLimit");
+      } catch (e) {
+        // Pref not available, assume 0, no match counting.
+        this._findLimit = 0;
+      }
+
+      let {Finder} = Components.utils.import("resource://gre/modules/Finder.jsm", {});
+      this._finder = new Finder(docShell);
+      this._finder.addResultListener({
+        onMatchesCountResult: (data) => {
+          sendAsyncMsg('findchange', {
+            active: true,
+            searchString: this._finder.searchString,
+            searchLimit: this._findLimit,
+            activeMatchOrdinal: data.current,
+            numberOfMatches: data.total
+          });
+        }
+      });
+    }
+  },
+
+  _recvFindAll: function(data) {
+    this._initFinder();
+    let searchString = data.json.searchString;
+    this._finder.caseSensitive = data.json.caseSensitive;
+    this._finder.fastFind(searchString, false, false);
+    this._finder.requestMatchesCount(searchString, this._findLimit, false);
+  },
+
+  _recvFindNext: function(data) {
+    if (!this._finder) {
+      debug("findNext() called before findAll()");
+      return;
+    }
+    this._finder.findAgain(data.json.backward, false, false);
+    this._finder.requestMatchesCount(this._finder.searchString, this._findLimit, false);
+  },
+
+  _recvClearMatch: function(data) {
+    if (!this._finder) {
+      debug("clearMach() called before findAll()");
+      return;
+    }
+    this._finder.removeSelection();
+    sendAsyncMsg('findchange', {active: false});
   },
 
   _recvSetInputMethodActive: function(data) {

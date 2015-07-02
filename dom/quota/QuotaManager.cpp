@@ -669,9 +669,8 @@ class MOZ_STACK_CLASS OriginParser final
     eExpectingEmptyToken3,
     eExpectingHost,
     eExpectingPort,
-    eExpectingDriveLetterOrPathnameComponent,
+    eExpectingEmptyTokenOrDriveLetterOrPathnameComponent,
     eExpectingEmptyTokenOrPathnameComponent,
-    eExpectingPathnameComponent,
     eComplete,
     eHandledTrailingSeparator
   };
@@ -4548,20 +4547,37 @@ StorageDirectoryHelper::CreateOrUpgradeMetadataFiles(bool aCreate)
     nsCOMPtr<nsIFile> originDir = do_QueryInterface(entry);
     MOZ_ASSERT(originDir);
 
+    nsString leafName;
+    rv = originDir->GetLeafName(leafName);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
     bool isDirectory;
     rv = originDir->IsDirectory(&isDirectory);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
-    if (!isDirectory) {
-      nsString leafName;
-      rv = originDir->GetLeafName(leafName);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-      }
 
+    if (isDirectory) {
+      if (leafName.EqualsLiteral("moz-safe-about+++home")) {
+        // This directory was accidentally created by a buggy nightly and can
+        // be safely removed.
+
+        QM_WARNING("Deleting accidental moz-safe-about+++home directory!");
+
+        rv = originDir->Remove(/* aRecursive */ true);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
+
+        continue;
+      }
+    } else {
       if (!leafName.EqualsLiteral(DSSTORE_FILE_NAME)) {
-        NS_WARNING("Something in the storage directory that doesn't belong!");
+        QM_WARNING("Something (%s) in the storage directory that doesn't belong!",
+                   NS_ConvertUTF16toUTF8(leafName).get());
+
       }
       continue;
     }
@@ -4979,14 +4995,14 @@ void
 OriginParser::HandlePathnameComponent(const nsDependentCSubstring& aToken)
 {
   MOZ_ASSERT(!aToken.IsEmpty());
-  MOZ_ASSERT(mState == eExpectingDriveLetterOrPathnameComponent ||
-             mState == eExpectingEmptyTokenOrPathnameComponent ||
-             mState == eExpectingPathnameComponent);
+  MOZ_ASSERT(mState == eExpectingEmptyTokenOrDriveLetterOrPathnameComponent ||
+             mState == eExpectingEmptyTokenOrPathnameComponent);
   MOZ_ASSERT(mSchemaType == eFile);
 
   mPathnameComponents.AppendElement(aToken);
 
-  mState = mTokenizer.hasMoreTokens() ? eExpectingPathnameComponent : eComplete;
+  mState = mTokenizer.hasMoreTokens() ? eExpectingEmptyTokenOrPathnameComponent
+                                      : eComplete;
 }
 
 void
@@ -5098,9 +5114,9 @@ OriginParser::HandleToken(const nsDependentCSubstring& aToken)
         return;
       }
 
-      mState =
-        mTokenizer.hasMoreTokens() ? eExpectingDriveLetterOrPathnameComponent
-                                   : eComplete;
+      mState = mTokenizer.hasMoreTokens()
+                 ? eExpectingEmptyTokenOrDriveLetterOrPathnameComponent
+                 : eComplete;
 
       return;
     }
@@ -5149,14 +5165,16 @@ OriginParser::HandleToken(const nsDependentCSubstring& aToken)
       return;
     }
 
-    case eExpectingDriveLetterOrPathnameComponent: {
+    case eExpectingEmptyTokenOrDriveLetterOrPathnameComponent: {
       MOZ_ASSERT(mSchemaType == eFile);
 
       if (aToken.IsEmpty()) {
-        QM_WARNING("Expected a drive letter or pathname component "
-                   "(not an empty string)!");
+        mPathnameComponents.AppendElement(EmptyCString());
 
-        mError = true;
+        mState =
+          mTokenizer.hasMoreTokens() ? eExpectingEmptyTokenOrPathnameComponent
+                                     : eComplete;
+
         return;
       }
 
@@ -5180,28 +5198,22 @@ OriginParser::HandleToken(const nsDependentCSubstring& aToken)
     case eExpectingEmptyTokenOrPathnameComponent: {
       MOZ_ASSERT(mSchemaType == eFile);
 
-      if (mMaybeDriveLetter && aToken.IsEmpty()) {
-        MOZ_ASSERT(mPathnameComponents.Length() == 1);
-
-        nsCString& pathnameComponent = mPathnameComponents[0];
-        pathnameComponent.Append(':');
-
-        mState = mTokenizer.hasMoreTokens() ? eExpectingPathnameComponent
-                                            : eComplete;
-
-        return;
-      }
-
-      HandlePathnameComponent(aToken);
-
-      return;
-    }
-
-    case eExpectingPathnameComponent: {
       if (aToken.IsEmpty()) {
-        QM_WARNING("Expected a pathname component (not an empty string)!");
+        if (mMaybeDriveLetter) {
+          MOZ_ASSERT(mPathnameComponents.Length() == 1);
 
-        mError = true;
+          nsCString& pathnameComponent = mPathnameComponents[0];
+          pathnameComponent.Append(':');
+
+          mMaybeDriveLetter = false;
+        } else {
+          mPathnameComponents.AppendElement(EmptyCString());
+        }
+
+        mState =
+          mTokenizer.hasMoreTokens() ? eExpectingEmptyTokenOrPathnameComponent
+                                     : eComplete;
+
         return;
       }
 

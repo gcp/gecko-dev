@@ -328,167 +328,6 @@ UploadLastDir::ContentPrefCallback::HandleError(nsresult error)
 namespace {
 
 /**
- * This enumerator returns File objects after wrapping a single
- * nsIFile representing a directory. It enumerates the files under that
- * directory and its subdirectories as a flat list of files, ignoring/skipping
- * over symbolic links.
- *
- * The enumeration involves I/O, so this class must NOT be used on the main
- * thread or else the main thread could be blocked for a very long time.
- *
- * This enumerator does not walk the directory tree breadth-first, but it also
- * is not guaranteed to walk it depth-first either (since it uses
- * nsIFile::GetDirectoryEntries, which is not guaranteed to group a directory's
- * subdirectories at the beginning of the list that it returns).
- */
-class DirPickerRecursiveFileEnumerator final
-  : public nsISimpleEnumerator
-{
-  ~DirPickerRecursiveFileEnumerator() {}
-
-public:
-  NS_DECL_ISUPPORTS
-
-  explicit DirPickerRecursiveFileEnumerator(nsIFile* aTopDir)
-    : mTopDir(aTopDir)
-  {
-    MOZ_ASSERT(!NS_IsMainThread(), "This class blocks on I/O!");
-
-#ifdef DEBUG
-    {
-      bool isDir;
-      aTopDir->IsDirectory(&isDir);
-      MOZ_ASSERT(isDir);
-    }
-#endif
-
-    if (NS_FAILED(aTopDir->GetParent(getter_AddRefs(mTopDirsParent)))) {
-      // This just means that the name of the picked directory won't be
-      // included in the File.path string.
-      mTopDirsParent = aTopDir;
-    }
-
-    nsCOMPtr<nsISimpleEnumerator> entries;
-    if (NS_SUCCEEDED(mTopDir->GetDirectoryEntries(getter_AddRefs(entries))) &&
-        entries) {
-      mDirEnumeratorStack.AppendElement(entries);
-      LookupAndCacheNext();
-    }
-  }
-
-  NS_IMETHOD
-  GetNext(nsISupports** aResult) override
-  {
-    MOZ_ASSERT(!NS_IsMainThread(),
-               "Walking the directory tree involves I/O, so using this "
-               "enumerator can block a thread for a long time!");
-
-    if (!mNextFile) {
-      return NS_ERROR_FAILURE;
-    }
-
-    // The parent for this object will be set on the main thread.
-    nsRefPtr<File> domFile = File::CreateFromFile(nullptr, mNextFile);
-    nsCString relDescriptor;
-    nsresult rv =
-      mNextFile->GetRelativeDescriptor(mTopDirsParent, relDescriptor);
-    NS_ENSURE_SUCCESS(rv, rv);
-    NS_ConvertUTF8toUTF16 path(relDescriptor);
-    nsAutoString leafName;
-    mNextFile->GetLeafName(leafName);
-    MOZ_ASSERT(leafName.Length() <= path.Length());
-    int32_t length = path.Length() - leafName.Length();
-    MOZ_ASSERT(length >= 0);
-    if (length > 0) {
-      // Note that we leave the trailing "/" on the path.
-      BlobImplFile* blobImpl = static_cast<BlobImplFile*>(domFile->Impl());
-      MOZ_ASSERT(blobImpl);
-      blobImpl->SetPath(Substring(path, 0, uint32_t(length)));
-    }
-
-    nsCOMPtr<nsIDOMBlob> blob = domFile.get();
-    blob.forget(aResult);
-    LookupAndCacheNext();
-    return NS_OK;
-  }
-
-  NS_IMETHOD
-  HasMoreElements(bool* aResult) override
-  {
-    *aResult = !!mNextFile;
-    return NS_OK;
-  }
-
-private:
-
-  void
-  LookupAndCacheNext()
-  {
-    for (;;) {
-      if (mDirEnumeratorStack.IsEmpty()) {
-        mNextFile = nullptr;
-        break;
-      }
-
-      nsISimpleEnumerator* currentDirEntries =
-        mDirEnumeratorStack.LastElement();
-
-      bool hasMore;
-      DebugOnly<nsresult> rv = currentDirEntries->HasMoreElements(&hasMore);
-      MOZ_ASSERT(NS_SUCCEEDED(rv));
-
-      if (!hasMore) {
-        mDirEnumeratorStack.RemoveElementAt(mDirEnumeratorStack.Length() - 1);
-        continue;
-      }
-
-      nsCOMPtr<nsISupports> entry;
-      rv = currentDirEntries->GetNext(getter_AddRefs(entry));
-      MOZ_ASSERT(NS_SUCCEEDED(rv));
-
-      nsCOMPtr<nsIFile> file = do_QueryInterface(entry);
-      MOZ_ASSERT(file);
-
-      bool isLink, isSpecial;
-      file->IsSymlink(&isLink);
-      file->IsSpecial(&isSpecial);
-      if (isLink || isSpecial) {
-        continue;
-      }
-
-      bool isDir;
-      file->IsDirectory(&isDir);
-      if (isDir) {
-        nsCOMPtr<nsISimpleEnumerator> subDirEntries;
-        rv = file->GetDirectoryEntries(getter_AddRefs(subDirEntries));
-        MOZ_ASSERT(NS_SUCCEEDED(rv) && subDirEntries);
-        mDirEnumeratorStack.AppendElement(subDirEntries);
-        continue;
-      }
-
-#ifdef DEBUG
-      {
-        bool isFile;
-        file->IsFile(&isFile);
-        MOZ_ASSERT(isFile);
-      }
-#endif
-
-      mNextFile.swap(file);
-      return;
-    }
-  }
-
-private:
-  nsCOMPtr<nsIFile> mTopDir;
-  nsCOMPtr<nsIFile> mTopDirsParent; // May be mTopDir if no parent
-  nsCOMPtr<nsIFile> mNextFile;
-  nsTArray<nsCOMPtr<nsISimpleEnumerator> > mDirEnumeratorStack;
-};
-
-NS_IMPL_ISUPPORTS(DirPickerRecursiveFileEnumerator, nsISimpleEnumerator)
-
-/**
  * This may return nullptr if aDomFile's implementation of
  * File::mozFullPathInternal does not successfully return a non-empty
  * string that is a valid path. This can happen on Firefox OS, for example,
@@ -518,119 +357,6 @@ DOMFileToLocalFile(File* aDomFile)
 
 } // anonymous namespace
 
-class DirPickerFileListBuilderTask final
-  : public nsRunnable
-{
-public:
-  DirPickerFileListBuilderTask(HTMLInputElement* aInput, nsIFile* aTopDir)
-    : mPreviousFileListLength(0)
-    , mInput(aInput)
-    , mTopDir(aTopDir)
-    , mFileListLength(0)
-    , mCanceled(false)
-  {}
-
-  NS_IMETHOD Run() {
-    if (!NS_IsMainThread()) {
-      // Build up list of File objects on this dedicated thread:
-      nsCOMPtr<nsISimpleEnumerator> iter =
-        new DirPickerRecursiveFileEnumerator(mTopDir);
-      bool hasMore = true;
-      nsCOMPtr<nsISupports> tmp;
-      while (NS_SUCCEEDED(iter->HasMoreElements(&hasMore)) && hasMore) {
-        iter->GetNext(getter_AddRefs(tmp));
-        nsCOMPtr<nsIDOMBlob> domBlob = do_QueryInterface(tmp);
-        MOZ_ASSERT(domBlob);
-        mFileList.AppendElement(static_cast<File*>(domBlob.get()));
-        mFileListLength = mFileList.Length();
-        if (mCanceled) {
-          MOZ_ASSERT(!mInput, "This is bad - how did this happen?");
-          // There's no point dispatching to the main thread (that doesn't
-          // guarantee that we'll be destroyed there).
-          return NS_OK;
-        }
-      }
-      return NS_DispatchToMainThread(this);
-    }
-
-    // Now back on the main thread, set the list on our HTMLInputElement:
-    if (mCanceled || mFileList.IsEmpty()) {
-      return NS_OK;
-    }
-    MOZ_ASSERT(mInput->mDirPickerFileListBuilderTask,
-               "But we aren't canceled!");
-    if (mInput->mProgressTimer) {
-      mInput->mProgressTimerIsActive = false;
-      mInput->mProgressTimer->Cancel();
-    }
-
-    mInput->MaybeDispatchProgressEvent(true);        // Last progress event.
-    mInput->mDirPickerFileListBuilderTask = nullptr; // Now null out.
-
-    if (mCanceled) { // The last progress event may have canceled us
-      return NS_OK;
-    }
-
-    // Recreate File with the correct parent object.
-    nsCOMPtr<nsIGlobalObject> global = mInput->OwnerDoc()->GetScopeObject();
-    for (uint32_t i = 0; i < mFileList.Length(); ++i) {
-      MOZ_ASSERT(!mFileList[i]->GetParentObject());
-      mFileList[i] = File::Create(global, mFileList[i]->Impl());
-      MOZ_ASSERT(mFileList[i]);
-    }
-
-    // The text control frame (if there is one) isn't going to send a change
-    // event because it will think this is done by a script.
-    // So, we can safely send one by ourself.
-    mInput->SetFiles(mFileList, true);
-    nsresult rv =
-      nsContentUtils::DispatchTrustedEvent(mInput->OwnerDoc(),
-                                           static_cast<nsIDOMHTMLInputElement*>(mInput.get()),
-                                           NS_LITERAL_STRING("change"), true,
-                                           false);
-    // Clear mInput to make sure that it can't lose its last strong ref off the
-    // main thread (which may happen if our dtor runs off the main thread)!
-    mInput = nullptr;
-    return rv;
-  }
-
-  void Cancel()
-  {
-    MOZ_ASSERT(NS_IsMainThread() && !mCanceled);
-    // Clear mInput to make sure that it can't lose its last strong ref off the
-    // main thread (which may happen if our dtor runs off the main thread)!
-    mInput = nullptr;
-    mCanceled = true;
-  }
-
-  uint32_t GetFileListLength() const
-  {
-    return mFileListLength;
-  }
-
-  /**
-   * The number of files added to the FileList at the time the last progress
-   * event was fired.
-   *
-   * This is only read/set by HTMLInputElement on the main thread. The reason
-   * that this member is stored here rather than on HTMLInputElement is so that
-   * we don't increase the size of HTMLInputElement for something that's rarely
-   * used.
-   */
-  uint32_t mPreviousFileListLength;
-
-private:
-  nsRefPtr<HTMLInputElement> mInput;
-  nsCOMPtr<nsIFile> mTopDir;
-  nsTArray<nsRefPtr<File>> mFileList;
-
-  // We access the list length on both threads, so we need the indirection of
-  // this atomic member to make the access thread safe:
-  mozilla::Atomic<uint32_t> mFileListLength;
-
-  mozilla::Atomic<bool> mCanceled;
-};
-
 
 NS_IMETHODIMP
 HTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
@@ -641,46 +367,8 @@ HTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
     return NS_OK;
   }
 
-  mInput->CancelDirectoryPickerScanIfRunning();
-
   int16_t mode;
   mFilePicker->GetMode(&mode);
-
-  if (mode == static_cast<int16_t>(nsIFilePicker::modeGetFolder)) {
-    // Directory picking is different, since we still need to do more I/O to
-    // build up the list of File objects. Since this may block for a
-    // long time, we need to build the list off on another dedicated thread to
-    // avoid blocking any other activities that the browser is carrying out.
-
-    // The user selected this directory, so we always save this dir, even if
-    // no files are found under it.
-    nsCOMPtr<nsIFile> pickedDir;
-    mFilePicker->GetFile(getter_AddRefs(pickedDir));
-
-#ifdef DEBUG
-    {
-      bool isDir;
-      pickedDir->IsDirectory(&isDir);
-      MOZ_ASSERT(isDir);
-    }
-#endif
-
-    HTMLInputElement::gUploadLastDir->StoreLastUsedDirectory(
-      mInput->OwnerDoc(), pickedDir);
-
-    nsCOMPtr<nsIEventTarget> target
-      = do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID);
-    NS_ASSERTION(target, "Must have stream transport service");
-
-    mInput->StartProgressEventTimer();
-
-    // DirPickerFileListBuilderTask takes care of calling SetFiles() and
-    // dispatching the "change" event.
-    mInput->mDirPickerFileListBuilderTask =
-      new DirPickerFileListBuilderTask(mInput.get(), pickedDir.get());
-    return target->Dispatch(mInput->mDirPickerFileListBuilderTask,
-                            NS_DISPATCH_NORMAL);
-  }
 
   // Collect new selected filenames
   nsTArray<nsRefPtr<File>> newFiles;
@@ -1117,6 +805,9 @@ UploadLastDir::StoreLastUsedDirectory(nsIDocument* aDoc, nsIFile* aDir)
     return NS_ERROR_OUT_OF_MEMORY;
   prefValue->SetAsAString(unicodePath);
 
+  // Use the document's current load context to ensure that the content pref
+  // service doesn't persistently store this directory for this domain if the
+  // user is using private browsing:
   nsCOMPtr<nsILoadContext> loadContext = aDoc->GetLoadContext();
   return contentPrefService->Set(spec, CPS_PREF_NAME, prefValue, loadContext, nullptr);
 }
@@ -1164,7 +855,6 @@ HTMLInputElement::HTMLInputElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
   , mCanShowInvalidUI(true)
   , mHasRange(false)
   , mIsDraggingRange(false)
-  , mProgressTimerIsActive(false)
   , mNumberControlSpinnerIsSpinning(false)
   , mNumberControlSpinnerSpinsUp(false)
   , mPickerRunning(false)
@@ -1268,7 +958,6 @@ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLInputElement)
                                nsIImageLoadingContent,
                                imgIOnloadBlocker,
                                nsIDOMNSEditableElement,
-                               nsITimerCallback,
                                nsIConstraintValidation)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLFormElementWithState)
 
@@ -1296,7 +985,7 @@ HTMLInputElement::Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) co
         nsAutoString value;
         GetValueInternal(value);
         // SetValueInternal handles setting the VALUE_CHANGED bit for us
-        rv = it->SetValueInternal(value, false, true);
+        rv = it->SetValueInternal(value, nsTextEditorState::eSetValue_Notify);
         NS_ENSURE_SUCCESS(rv, rv);
       }
       break;
@@ -1481,7 +1170,8 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
         // if @max in the example above were to change from 1 to -1.
         nsAutoString value;
         GetValue(value);
-        nsresult rv = SetValueInternal(value, false, false);
+        nsresult rv =
+          SetValueInternal(value, nsTextEditorState::eSetValue_Internal);
         NS_ENSURE_SUCCESS(rv, rv);
         MOZ_ASSERT(!GetValidityState(VALIDITY_STATE_RANGE_UNDERFLOW),
                    "HTML5 spec does not allow this");
@@ -1494,7 +1184,8 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
         // See @max comment
         nsAutoString value;
         GetValue(value);
-        nsresult rv = SetValueInternal(value, false, false);
+        nsresult rv =
+          SetValueInternal(value, nsTextEditorState::eSetValue_Internal);
         NS_ENSURE_SUCCESS(rv, rv);
         MOZ_ASSERT(!GetValidityState(VALIDITY_STATE_RANGE_UNDERFLOW),
                    "HTML5 spec does not allow this");
@@ -1505,7 +1196,8 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
         // See @max comment
         nsAutoString value;
         GetValue(value);
-        nsresult rv = SetValueInternal(value, false, false);
+        nsresult rv =
+          SetValueInternal(value, nsTextEditorState::eSetValue_Internal);
         NS_ENSURE_SUCCESS(rv, rv);
         MOZ_ASSERT(!GetValidityState(VALIDITY_STATE_RANGE_UNDERFLOW),
                    "HTML5 spec does not allow this");
@@ -1893,7 +1585,9 @@ HTMLInputElement::SetValue(const nsAString& aValue, ErrorResult& aRv)
       nsAutoString currentValue;
       GetValue(currentValue);
 
-      nsresult rv = SetValueInternal(aValue, false, true);
+      nsresult rv =
+        SetValueInternal(aValue, nsTextEditorState::eSetValue_ByContent |
+                                 nsTextEditorState::eSetValue_Notify);
       if (NS_FAILED(rv)) {
         aRv.Throw(rv);
         return;
@@ -1903,7 +1597,9 @@ HTMLInputElement::SetValue(const nsAString& aValue, ErrorResult& aRv)
         GetValue(mFocusedValue);
       }
     } else {
-      nsresult rv = SetValueInternal(aValue, false, true);
+      nsresult rv =
+        SetValueInternal(aValue, nsTextEditorState::eSetValue_ByContent |
+                                 nsTextEditorState::eSetValue_Notify);
       if (NS_FAILED(rv)) {
         aRv.Throw(rv);
         return;
@@ -2515,7 +2211,9 @@ HTMLInputElement::SetUserInput(const nsAString& aValue)
     MozSetFileNameArray(list, rv);
     return rv.StealNSResult();
   } else {
-    nsresult rv = SetValueInternal(aValue, true, true);
+    nsresult rv =
+      SetValueInternal(aValue, nsTextEditorState::eSetValue_BySetUserInput |
+                               nsTextEditorState::eSetValue_Notify);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -2785,58 +2483,6 @@ HTMLInputElement::GetFiles()
   return mFileList;
 }
 
-void
-HTMLInputElement::OpenDirectoryPicker(ErrorResult& aRv)
-{
-  if (mType != NS_FORM_INPUT_FILE) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-  }
-  InitFilePicker(FILE_PICKER_DIRECTORY);
-}
-
-void
-HTMLInputElement::CancelDirectoryPickerScanIfRunning()
-{
-  if (!mDirPickerFileListBuilderTask) {
-    return;
-  }
-  if (mProgressTimer) {
-    mProgressTimerIsActive = false;
-    mProgressTimer->Cancel();
-  }
-  mDirPickerFileListBuilderTask->Cancel();
-  mDirPickerFileListBuilderTask = nullptr;
-}
-
-void
-HTMLInputElement::StartProgressEventTimer()
-{
-  if (!mProgressTimer) {
-    mProgressTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
-  }
-  if (mProgressTimer) {
-    mProgressTimerIsActive = true;
-    mProgressTimer->Cancel();
-    mProgressTimer->InitWithCallback(this, kProgressEventInterval,
-                                           nsITimer::TYPE_ONE_SHOT);
-  }
-}
-
-// nsITimerCallback's only method
-NS_IMETHODIMP
-HTMLInputElement::Notify(nsITimer* aTimer)
-{
-  if (mProgressTimer == aTimer) {
-    mProgressTimerIsActive = false;
-    MaybeDispatchProgressEvent(false);
-    return NS_OK;
-  }
-
-  // Just in case some JS user wants to QI to nsITimerCallback and play with us...
-  NS_WARNING("Unexpected timer!");
-  return NS_ERROR_INVALID_POINTER;
-}
-
 /* static */ void
 HTMLInputElement::HandleNumberControlSpin(void* aData)
 {
@@ -2854,65 +2500,6 @@ HTMLInputElement::HandleNumberControlSpin(void* aData)
     input->StopNumberControlSpinnerSpin();
   } else {
     input->StepNumberControlForUserEvent(input->mNumberControlSpinnerSpinsUp ? 1 : -1);
-  }
-}
-
-void
-HTMLInputElement::MaybeDispatchProgressEvent(bool aFinalProgress)
-{
-  nsRefPtr<HTMLInputElement> kungFuDeathGrip;
-
-  if (aFinalProgress && mProgressTimerIsActive) {
-    // mProgressTimer may hold the last reference to us, so take another strong
-    // ref to make sure we don't die under Cancel() and leave this method
-    // running on deleted memory.
-    kungFuDeathGrip = this;
-
-    mProgressTimerIsActive = false;
-    mProgressTimer->Cancel();
-  }
-
-  uint32_t fileListLength = mDirPickerFileListBuilderTask->GetFileListLength();
-
-  if (mProgressTimerIsActive ||
-      fileListLength == mDirPickerFileListBuilderTask->mPreviousFileListLength) {
-    return;
-  }
-
-  if (!aFinalProgress) {
-    StartProgressEventTimer();
-  }
-
-  mDirPickerFileListBuilderTask->mPreviousFileListLength = fileListLength;
-
-  DispatchProgressEvent(NS_LITERAL_STRING(PROGRESS_STR),
-                        false,
-                        mDirPickerFileListBuilderTask->mPreviousFileListLength,
-                        0);
-}
-
-void
-HTMLInputElement::DispatchProgressEvent(const nsAString& aType,
-                                        bool aLengthComputable,
-                                        uint64_t aLoaded, uint64_t aTotal)
-{
-  NS_ASSERTION(!aType.IsEmpty(), "missing event type");
-
-  ProgressEventInit init;
-  init.mBubbles = false;
-  init.mCancelable = true; // XXXkhuey why?
-  init.mLengthComputable = aLengthComputable;
-  init.mLoaded = aLoaded;
-  init.mTotal = (aTotal == UINT64_MAX) ? 0 : aTotal;
-
-  nsRefPtr<ProgressEvent> event =
-    ProgressEvent::Constructor(this, aType, init);
-  event->SetTrusted(true);
-
-  bool doDefaultAction;
-  nsresult rv = DispatchEvent(event, &doDefaultAction);
-  if (NS_SUCCEEDED(rv) && !doDefaultAction) {
-    CancelDirectoryPickerScanIfRunning();
   }
 }
 
@@ -2934,9 +2521,7 @@ HTMLInputElement::UpdateFileList()
 }
 
 nsresult
-HTMLInputElement::SetValueInternal(const nsAString& aValue,
-                                   bool aUserInput,
-                                   bool aSetValueChanged)
+HTMLInputElement::SetValueInternal(const nsAString& aValue, uint32_t aFlags)
 {
   NS_PRECONDITION(GetValueMode() != VALUE_MODE_FILENAME,
                   "Don't call SetValueInternal for file inputs");
@@ -2954,12 +2539,13 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue,
       }
       // else DoneCreatingElement calls us again once mParserCreating is false
 
-      if (aSetValueChanged) {
+      bool setValueChanged = !!(aFlags & nsTextEditorState::eSetValue_Notify);
+      if (setValueChanged) {
         SetValueChanged(true);
       }
 
       if (IsSingleLineTextControl(false)) {
-        if (!mInputData.mState->SetValue(value, aUserInput, aSetValueChanged)) {
+        if (!mInputData.mState->SetValue(value, aFlags)) {
           return NS_ERROR_OUT_OF_MEMORY;
         }
         if (mType == NS_FORM_INPUT_EMAIL) {
@@ -2968,7 +2554,7 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue,
       } else {
         free(mInputData.mValue);
         mInputData.mValue = ToNewUnicode(value);
-        if (aSetValueChanged) {
+        if (setValueChanged) {
           SetValueChanged(true);
         }
         if (mType == NS_FORM_INPUT_NUMBER) {
@@ -3576,7 +3162,8 @@ HTMLInputElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
     if (IsExperimentalMobileType(mType)) {
       nsAutoString aValue;
       GetValueInternal(aValue);
-      nsresult rv = SetValueInternal(aValue, false, false);
+      nsresult rv =
+        SetValueInternal(aValue, nsTextEditorState::eSetValue_Internal);
       NS_ENSURE_SUCCESS(rv, rv);
     }
     FireChangeEventIfNeeded();
@@ -3697,7 +3284,9 @@ HTMLInputElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
         numberControlFrame->GetValueOfAnonTextControl(value);
         numberControlFrame->HandlingInputEvent(true);
         nsWeakFrame weakNumberControlFrame(numberControlFrame);
-        rv = SetValueInternal(value, true, true);
+        rv = SetValueInternal(value,
+                              nsTextEditorState::eSetValue_BySetUserInput |
+                              nsTextEditorState::eSetValue_Notify);
         NS_ENSURE_SUCCESS(rv, rv);
         if (weakNumberControlFrame.IsAlive()) {
           numberControlFrame->HandlingInputEvent(false);
@@ -3774,7 +3363,8 @@ HTMLInputElement::CancelRangeThumbDrag(bool aIsForUserEvent)
     ConvertNumberToString(mRangeThumbDragStartValue, val);
     // TODO: What should we do if SetValueInternal fails?  (The allocation
     // is small, so we should be fine here.)
-    SetValueInternal(val, true, true);
+    SetValueInternal(val, nsTextEditorState::eSetValue_BySetUserInput |
+                          nsTextEditorState::eSetValue_Notify);
     nsRangeFrame* frame = do_QueryFrame(GetPrimaryFrame());
     if (frame) {
       frame->UpdateForValueChange();
@@ -3794,7 +3384,8 @@ HTMLInputElement::SetValueOfRangeForUserEvent(Decimal aValue)
   ConvertNumberToString(aValue, val);
   // TODO: What should we do if SetValueInternal fails?  (The allocation
   // is small, so we should be fine here.)
-  SetValueInternal(val, true, true);
+  SetValueInternal(val, nsTextEditorState::eSetValue_BySetUserInput |
+                        nsTextEditorState::eSetValue_Notify);
   nsRangeFrame* frame = do_QueryFrame(GetPrimaryFrame());
   if (frame) {
     frame->UpdateForValueChange();
@@ -3887,7 +3478,8 @@ HTMLInputElement::StepNumberControlForUserEvent(int32_t aDirection)
   ConvertNumberToString(newValue, newVal);
   // TODO: What should we do if SetValueInternal fails?  (The allocation
   // is small, so we should be fine here.)
-  SetValueInternal(newVal, true, true);
+  SetValueInternal(newVal, nsTextEditorState::eSetValue_BySetUserInput |
+                           nsTextEditorState::eSetValue_Notify);
 
   nsContentUtils::DispatchTrustedEvent(OwnerDoc(),
                                        static_cast<nsIDOMHTMLInputElement*>(this),
@@ -4701,7 +4293,7 @@ HTMLInputElement::HandleTypeChange(uint8_t aNewType)
         // TODO: What should we do if SetValueInternal fails?  (The allocation
         // may potentially be big, but most likely we've failed to allocate
         // before the type change.)
-        SetValueInternal(value, false, false);
+        SetValueInternal(value, nsTextEditorState::eSetValue_Internal);
       }
       break;
     case VALUE_MODE_FILENAME:
@@ -5384,7 +4976,8 @@ HTMLInputElement::SetRangeText(const nsAString& aReplacement, uint32_t aStart,
 
   if (aStart <= aEnd) {
     value.Replace(aStart, aEnd - aStart, aReplacement);
-    nsresult rv = SetValueInternal(value, false, false);
+    nsresult rv =
+      SetValueInternal(value, nsTextEditorState::eSetValue_ByContent);
     if (NS_FAILED(rv)) {
       aRv.Throw(rv);
       return;
@@ -5709,7 +5302,7 @@ HTMLInputElement::SetDefaultValueAsValue()
   GetDefaultValue(resetVal);
 
   // SetValueInternal is going to sanitize the value.
-  return SetValueInternal(resetVal, false, false);
+  return SetValueInternal(resetVal, nsTextEditorState::eSetValue_Internal);
 }
 
 void
@@ -5950,7 +5543,7 @@ HTMLInputElement::DoneCreatingElement()
     // TODO: What should we do if SetValueInternal fails?  (The allocation
     // may potentially be big, but most likely we've failed to allocate
     // before the type change.)
-    SetValueInternal(aValue, false, false);
+    SetValueInternal(aValue, nsTextEditorState::eSetValue_Internal);
   }
 
   mShouldInitChecked = false;
@@ -6109,7 +5702,8 @@ HTMLInputElement::RestoreState(nsPresState* aState)
         // TODO: What should we do if SetValueInternal fails?  (The allocation
         // may potentially be big, but most likely we've failed to allocate
         // before the type change.)
-        SetValueInternal(inputState->GetValue(), false, true);
+        SetValueInternal(inputState->GetValue(),
+                         nsTextEditorState::eSetValue_Notify);
         break;
     }
   }

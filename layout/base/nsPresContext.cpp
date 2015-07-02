@@ -67,6 +67,7 @@
 #include "mozilla/Preferences.h"
 #include "gfxTextRun.h"
 #include "nsFontFaceUtils.h"
+#include "nsLayoutStylesheetCache.h"
 
 #if defined(MOZ_WIDGET_GTK)
 #include "gfxPlatformGtk.h" // xxx - for UseFcFontList
@@ -929,6 +930,12 @@ nsPresContext::PreferenceChanged(const char* aPrefName)
     mPrefChangedTimer = do_CreateInstance("@mozilla.org/timer;1");
     if (!mPrefChangedTimer)
       return;
+    // We will end up calling InvalidatePreferenceSheets one from each pres
+    // context, but all it's doing is clearing its cached sheet pointers,
+    // so it won't be wastefully recreating the sheet multiple times.
+    // The first pres context that has its mPrefChangedTimer called will
+    // be the one to cause the reconstruction of the pref style sheet.
+    nsLayoutStylesheetCache::InvalidatePreferenceSheets();
     mPrefChangedTimer->InitWithFuncCallback(nsPresContext::PrefChangedUpdateTimerCallback, (void*)this, 0, nsITimer::TYPE_ONE_SHOT);
   }
   if (prefName.EqualsLiteral("nglayout.debug.paint_flashing") ||
@@ -953,7 +960,7 @@ nsPresContext::UpdateAfterPreferencesChanged()
 
   // update the presShell: tell it to set the preference style rules up
   if (mShell) {
-    mShell->SetPreferenceStyleRules(true);
+    mShell->UpdatePreferenceStyles();
   }
 
   InvalidatePaintedLayers();
@@ -1798,6 +1805,15 @@ nsPresContext::UIResolutionChanged()
   }
 }
 
+void
+nsPresContext::UIResolutionChangedSync()
+{
+  if (!mPendingUIResolutionChanged) {
+    mPendingUIResolutionChanged = true;
+    UIResolutionChangedInternal();
+  }
+}
+
 /*static*/ bool
 nsPresContext::UIResolutionChangedSubdocumentCallback(nsIDocument* aDocument,
                                                       void* aData)
@@ -1813,9 +1829,24 @@ nsPresContext::UIResolutionChangedSubdocumentCallback(nsIDocument* aDocument,
 }
 
 static void
-NotifyUIResolutionChanged(TabParent* aTabParent, void* aArg)
+NotifyTabUIResolutionChanged(TabParent* aTab, void *aArg)
 {
-  aTabParent->UIResolutionChanged();
+  aTab->UIResolutionChanged();
+}
+
+static void
+NotifyChildrenUIResolutionChanged(nsIDOMWindow* aWindow)
+{
+  nsCOMPtr<nsPIDOMWindow> piWin = do_QueryInterface(aWindow);
+  if (!piWin) {
+    return;
+  }
+  nsCOMPtr<nsIDocument> doc = piWin->GetExtantDoc();
+  nsRefPtr<nsPIWindowRoot> topLevelWin = nsContentUtils::GetWindowRoot(doc);
+  if (!topLevelWin) {
+    return;
+  }
+  topLevelWin->EnumerateBrowsers(NotifyTabUIResolutionChanged, nullptr);
 }
 
 void
@@ -1828,10 +1859,8 @@ nsPresContext::UIResolutionChangedInternal()
     AppUnitsPerDevPixelChanged();
   }
 
-  // Recursively notify all remote leaf descendants that the
-  // resolution of the user interface has changed.
-  nsContentUtils::CallOnAllRemoteChildren(mDocument->GetWindow(),
-                                          NotifyUIResolutionChanged, nullptr);
+  // Recursively notify all remote leaf descendants of the change.
+  NotifyChildrenUIResolutionChanged(mDocument->GetWindow());
 
   mDocument->EnumerateSubDocuments(UIResolutionChangedSubdocumentCallback,
                                    nullptr);

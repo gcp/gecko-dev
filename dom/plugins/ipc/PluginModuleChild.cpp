@@ -38,6 +38,7 @@
 #include "mozilla/plugins/BrowserStreamChild.h"
 #include "mozilla/plugins/PluginStreamChild.h"
 #include "mozilla/dom/CrashReporterChild.h"
+#include "mozilla/unused.h"
 
 #include "nsNPAPIPlugin.h"
 
@@ -279,7 +280,7 @@ PluginModuleChild::InitForChrome(const std::string& aPluginFilename,
 
     nsPluginFile pluginFile(localFile);
 
-#if defined(MOZ_X11) || defined(OS_MACOSX)
+#if defined(MOZ_X11) || defined(XP_MACOSX)
     nsPluginInfo info = nsPluginInfo();
     if (NS_FAILED(pluginFile.GetPluginInfo(info, &mLibrary))) {
         return false;
@@ -290,7 +291,7 @@ PluginModuleChild::InitForChrome(const std::string& aPluginFilename,
     if (StringBeginsWith(nsDependentCString(info.fDescription), flash10Head)) {
         AddQuirk(QUIRK_FLASH_EXPOSE_COORD_TRANSLATION);
     }
-#else // defined(OS_MACOSX)
+#else // defined(XP_MACOSX)
     const char* namePrefix = "Plugin Content";
     char nameBuffer[80];
     snprintf(nameBuffer, sizeof(nameBuffer), "%s (%s)", namePrefix, info.fName);
@@ -1328,17 +1329,12 @@ void
 _memfree(void* aPtr)
 {
     PLUGIN_LOG_DEBUG_FUNCTION;
-    // Only assert plugin thread here for consistency with in-process plugins.
-    AssertPluginThread();
     free(aPtr);
 }
 
 uint32_t
 _memflush(uint32_t aSize)
 {
-    PLUGIN_LOG_DEBUG_FUNCTION;
-    // Only assert plugin thread here for consistency with in-process plugins.
-    AssertPluginThread();
     return 0;
 }
 
@@ -1397,8 +1393,6 @@ void*
 _memalloc(uint32_t aSize)
 {
     PLUGIN_LOG_DEBUG_FUNCTION;
-    // Only assert plugin thread here for consistency with in-process plugins.
-    AssertPluginThread();
     return moz_xmalloc(aSize);
 }
 
@@ -2570,13 +2564,16 @@ PluginModuleChild::RecvStopProfiler()
 }
 
 bool
-PluginModuleChild::AnswerGetProfile(nsCString* aProfile)
+PluginModuleChild::RecvGatherProfile()
 {
+    nsCString profileCString;
     UniquePtr<char[]> profile = profiler_get_profile();
     if (profile != nullptr) {
-        *aProfile = nsCString(profile.get(), strlen(profile.get()));
+        profileCString = nsCString(profile.get(), strlen(profile.get()));
     } else {
-        *aProfile = nsCString("", 0);
+        profileCString = nsCString("", 0);
     }
+
+    unused << SendProfile(profileCString);
     return true;
 }

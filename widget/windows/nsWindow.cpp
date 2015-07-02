@@ -369,6 +369,7 @@ nsWindow::nsWindow() : nsWindowBase()
 #endif
   DWORD background      = ::GetSysColor(COLOR_BTNFACE);
   mBrush                = ::CreateSolidBrush(NSRGB_2_COLOREF(background));
+  mSendingSetText       = false;
 
   mTaskbarPreview = nullptr;
 
@@ -455,6 +456,16 @@ NS_IMPL_ISUPPORTS_INHERITED0(nsWindow, nsBaseWidget)
 int32_t nsWindow::GetHeight(int32_t aProposedHeight)
 {
   return aProposedHeight;
+}
+
+static bool
+ShouldCacheTitleBarInfo(nsWindowType aWindowType, nsBorderStyle aBorderStyle)
+{
+  return (aWindowType == eWindowType_toplevel)  &&
+         (aBorderStyle == eBorderStyle_default  ||
+            aBorderStyle == eBorderStyle_all)   &&
+      (!nsUXThemeData::sTitlebarInfoPopulatedThemed ||
+       !nsUXThemeData::sTitlebarInfoPopulatedAero);
 }
 
 // Create the proper widget
@@ -644,10 +655,8 @@ nsWindow::Create(nsIWidget *aParent,
   }
 
   // Query for command button metric data for rendering the titlebar. We
-  // only do this once on the first window.
-  if (mWindowType == eWindowType_toplevel &&
-      (!nsUXThemeData::sTitlebarInfoPopulatedThemed ||
-       !nsUXThemeData::sTitlebarInfoPopulatedAero)) {
+  // only do this once on the first window that has an actual titlebar
+  if (ShouldCacheTitleBarInfo(mWindowType, mBorderStyle)) {
     nsUXThemeData::UpdateTitlebarInfo(mWnd);
   }
 
@@ -2963,6 +2972,29 @@ void* nsWindow::GetNativeData(uint32_t aDataType)
   return nullptr;
 }
 
+void
+nsWindow::SetNativeData(uint32_t aDataType, uintptr_t aVal)
+{
+  switch (aDataType) {
+    case NS_NATIVE_CHILD_WINDOW:
+      {
+        HWND childWindow = reinterpret_cast<HWND>(aVal);
+
+        // Make sure the window is styled to be a child window.
+        LONG_PTR style = GetWindowLongPtr(childWindow, GWL_STYLE);
+        style |= WS_CHILD;
+        style &= ~WS_POPUP;
+        SetWindowLongPtr(childWindow, GWL_STYLE, style);
+
+        // Do the reparenting.
+        ::SetParent(childWindow, mWnd);
+        break;
+      }
+    default:
+      NS_ERROR("SetNativeData called with unsupported data type.");
+  }
+}
+
 // Free some native data according to aDataType
 void nsWindow::FreeNativeData(void * data, uint32_t aDataType)
 {
@@ -2996,6 +3028,8 @@ void nsWindow::FreeNativeData(void * data, uint32_t aDataType)
 NS_METHOD nsWindow::SetTitle(const nsAString& aTitle)
 {
   const nsString& strTitle = PromiseFlatString(aTitle);
+  AutoRestore<bool> sendingText(mSendingSetText);
+  mSendingSetText = true;
   ::SendMessageW(mWnd, WM_SETTEXT, (WPARAM)0, (LPARAM)(LPCWSTR)strTitle.get());
   return NS_OK;
 }
@@ -4685,10 +4719,12 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
     case WM_SETTEXT:
       /*
        * WM_SETTEXT paints the titlebar area. Avoid this if we have a
-       * custom titlebar we paint ourselves.
+       * custom titlebar we paint ourselves, or if we're the ones
+       * sending the message with an updated title
        */
 
-      if (!mCustomNonClient || mNonClientMargins.top == -1)
+      if ((mSendingSetText && nsUXThemeData::CheckForCompositor()) ||
+          !mCustomNonClient || mNonClientMargins.top == -1)
         break;
 
       {
@@ -4927,6 +4963,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       DispatchMouseEvent(NS_MOUSE_EXIT_WIDGET, wParam, pos, false,
                          WidgetMouseEvent::eLeftButton,
                          nsIDOMMouseEvent::MOZ_SOURCE_PEN);
+      InkCollector::sInkCollector->ClearTarget();
     }
     break;
 
@@ -7566,7 +7603,7 @@ bool nsWindow::CaptureWidgetOnScreen(RefPtr<DrawTarget> aDT)
 
   nsRefPtr<gfxASurface> surf = new gfxWindowsSurface(dc, flags);
   IntSize size(surf->GetSize().width, surf->GetSize().height);
-  if (size.width < 0 || size.height < 0) {
+  if (size.width <= 0 || size.height <= 0) {
     ::ReleaseDC(mWnd, dc);
     return false;
   }

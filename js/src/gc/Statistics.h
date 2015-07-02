@@ -8,6 +8,7 @@
 #define gc_Statistics_h
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/IntegerRange.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/UniquePtr.h"
 
@@ -151,7 +152,11 @@ struct Statistics
      * the few hundred bytes of savings. If we want to extend things to full
      * DAGs, this decision should be reconsidered.
      */
-    static const size_t MAX_MULTIPARENT_PHASES = 6;
+    static const size_t MaxMultiparentPhases = 6;
+    static const size_t NumTimingArrays = MaxMultiparentPhases + 1;
+
+    /* Create a convenient type for referring to tables of phase times. */
+    using PhaseTimeTable = int64_t[NumTimingArrays][PHASE_LIMIT];
 
     explicit Statistics(JSRuntime* rt);
     ~Statistics();
@@ -206,12 +211,14 @@ struct Statistics
     static const size_t MAX_NESTING = 20;
 
     struct SliceData {
-        SliceData(SliceBudget budget, JS::gcreason::Reason reason, int64_t start, size_t startFaults)
+        SliceData(SliceBudget budget, JS::gcreason::Reason reason, int64_t start,
+                  double startTimestamp, size_t startFaults)
           : budget(budget), reason(reason),
             resetReason(nullptr),
-            start(start), startFaults(startFaults)
+            start(start), startTimestamp(startTimestamp),
+            startFaults(startFaults)
         {
-            for (size_t i = 0; i < MAX_MULTIPARENT_PHASES + 1; i++)
+            for (auto i : mozilla::MakeRange(NumTimingArrays))
                 mozilla::PodArrayZero(phaseTimes[i]);
         }
 
@@ -219,8 +226,9 @@ struct Statistics
         JS::gcreason::Reason reason;
         const char* resetReason;
         int64_t start, end;
+        double startTimestamp, endTimestamp;
         size_t startFaults, endFaults;
-        int64_t phaseTimes[MAX_MULTIPARENT_PHASES + 1][PHASE_LIMIT];
+        PhaseTimeTable phaseTimes;
 
         int64_t duration() const { return end - start; }
     };
@@ -230,9 +238,6 @@ struct Statistics
 
     SliceRange sliceRange() const { return slices.all(); }
     size_t slicesLength() const { return slices.length(); }
-
-    /* Create a convenient typedef for referring tables of phase times. */
-    typedef int64_t const (*PhaseTimeTable)[PHASE_LIMIT];
 
   private:
     JSRuntime* runtime;
@@ -264,10 +269,10 @@ struct Statistics
     int64_t timedGCTime;
 
     /* Total time in a given phase for this GC. */
-    int64_t phaseTimes[MAX_MULTIPARENT_PHASES + 1][PHASE_LIMIT];
+    PhaseTimeTable phaseTimes;
 
     /* Total time in a given phase over all GCs. */
-    int64_t phaseTotals[MAX_MULTIPARENT_PHASES + 1][PHASE_LIMIT];
+    PhaseTimeTable phaseTotals;
 
     /* Number of events of this type for this GC. */
     unsigned int counts[STAT_LIMIT];
@@ -312,16 +317,16 @@ struct Statistics
     void sccDurations(int64_t* total, int64_t* maxPause);
     void printStats();
 
-    UniqueChars formatCompactSlicePhaseTimes(PhaseTimeTable phaseTimes) const;
+    UniqueChars formatCompactSlicePhaseTimes(const PhaseTimeTable phaseTimes) const;
 
     UniqueChars formatDetailedDescription();
     UniqueChars formatDetailedSliceDescription(unsigned i, const SliceData& slice);
-    UniqueChars formatDetailedPhaseTimes(PhaseTimeTable phaseTimes);
+    UniqueChars formatDetailedPhaseTimes(const PhaseTimeTable phaseTimes);
     UniqueChars formatDetailedTotals();
 
     UniqueChars formatJsonDescription(uint64_t timestamp);
     UniqueChars formatJsonSliceDescription(unsigned i, const SliceData& slice);
-    UniqueChars formatJsonPhaseTimes(PhaseTimeTable phaseTimes);
+    UniqueChars formatJsonPhaseTimes(const PhaseTimeTable phaseTimes);
 
     double computeMMU(int64_t resolution) const;
 };

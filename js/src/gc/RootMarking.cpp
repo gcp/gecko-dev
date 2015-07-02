@@ -211,18 +211,6 @@ AutoGCRooter::trace(JSTracer* trc)
         return;
       }
 
-      case OBJOBJHASHMAP: {
-        AutoObjectObjectHashMap::HashMapImpl& map = static_cast<AutoObjectObjectHashMap*>(this)->map;
-        for (AutoObjectObjectHashMap::Enum e(map); !e.empty(); e.popFront()) {
-            TraceRoot(trc, &e.front().value(), "AutoObjectObjectHashMap value");
-            JSObject* key = e.front().key();
-            TraceRoot(trc, &key, "AutoObjectObjectHashMap key");
-            if (key != e.front().key())
-                e.rekeyFront(key);
-        }
-        return;
-      }
-
       case OBJU32HASHMAP: {
         AutoObjectUnsigned32HashMap* self = static_cast<AutoObjectUnsigned32HashMap*>(this);
         AutoObjectUnsigned32HashMap::HashMapImpl& map = self->map;
@@ -231,18 +219,6 @@ AutoGCRooter::trace(JSTracer* trc)
             TraceRoot(trc, &key, "AutoObjectUnsignedHashMap key");
             if (key != e.front().key())
                 e.rekeyFront(key);
-        }
-        return;
-      }
-
-      case OBJHASHSET: {
-        AutoObjectHashSet* self = static_cast<AutoObjectHashSet*>(this);
-        AutoObjectHashSet::HashSetImpl& set = self->set;
-        for (AutoObjectHashSet::Enum e(set); !e.empty(); e.popFront()) {
-            JSObject* obj = e.front();
-            TraceRoot(trc, &obj, "AutoObjectHashSet value");
-            if (obj != e.front())
-                e.rekeyFront(obj);
         }
         return;
       }
@@ -552,7 +528,7 @@ class BufferGrayRootsTracer : public JS::CallbackTracer
     // Set to false if we OOM while buffering gray roots.
     bool bufferingGrayRootsFailed;
 
-    void trace(void** thingp, JS::TraceKind kind) override;
+    void onChild(const JS::GCCellPtr& thing) override;
 
   public:
     explicit BufferGrayRootsTracer(JSRuntime* rt)
@@ -605,24 +581,24 @@ struct SetMaybeAliveFunctor {
 };
 
 void
-BufferGrayRootsTracer::trace(void** thingp, JS::TraceKind kind)
+BufferGrayRootsTracer::onChild(const JS::GCCellPtr& thing)
 {
     MOZ_ASSERT(runtime()->isHeapBusy());
 
     if (bufferingGrayRootsFailed)
         return;
 
-    gc::TenuredCell* thing = gc::TenuredCell::fromPointer(*thingp);
+    gc::TenuredCell* tenured = gc::TenuredCell::fromPointer(thing.asCell());
 
-    Zone* zone = thing->zone();
+    Zone* zone = tenured->zone();
     if (zone->isCollecting()) {
         // See the comment on SetMaybeAliveFlag to see why we only do this for
         // objects and scripts. We rely on gray root buffering for this to work,
         // but we only need to worry about uncollected dead compartments during
         // incremental GCs (when we do gray root buffering).
-        CallTyped(SetMaybeAliveFunctor(), thing, kind);
+        CallTyped(SetMaybeAliveFunctor(), tenured, thing.kind());
 
-        if (!zone->gcGrayRoots.append(thing))
+        if (!zone->gcGrayRoots.append(tenured))
             bufferingGrayRootsFailed = true;
     }
 }

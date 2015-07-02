@@ -20,6 +20,8 @@
 #include "webrtc/video_engine/include/vie_render.h"
 #include "CamerasChild.h"
 
+#include "base/thread.h"
+
 namespace mozilla {
 namespace camera {
 
@@ -118,7 +120,7 @@ private:
   nsIThread* mPBackgroundThread;
 
   // webrtc processing thread
-  nsCOMPtr<nsIThread> mWebRTCThread;
+  base::Thread* mWebRTCThread;
 
   // Shutdown handling
   bool mChildIsAlive;

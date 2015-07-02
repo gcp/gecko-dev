@@ -489,6 +489,7 @@
 @RESPATH@/browser/components/ChromeProfileMigrator.js
 @RESPATH@/browser/components/FirefoxProfileMigrator.js
 #ifdef XP_WIN
+@RESPATH@/browser/components/360seProfileMigrator.js
 @RESPATH@/browser/components/IEProfileMigrator.js
 @RESPATH@/browser/components/SafariProfileMigrator.js
 #endif
@@ -909,4 +910,10 @@ bin/libfreebl_32int64_3.so
 #ifdef MOZ_EME
 @RESPATH@/gmp-clearkey/0.1/@DLL_PREFIX@clearkey@DLL_SUFFIX@
 @RESPATH@/gmp-clearkey/0.1/clearkey.info
+#endif
+
+; gfx
+#ifdef XP_WIN
+@RESPATH@/components/GfxSanityTest.manifest
+@RESPATH@/components/SanityTest.js
 #endif

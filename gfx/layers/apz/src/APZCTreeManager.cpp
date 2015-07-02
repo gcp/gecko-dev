@@ -322,6 +322,8 @@ APZCTreeManager::PrepareNodeForLayer(const LayerMetricsWrapper& aLayer,
                                      HitTestingTreeNode* aNextSibling,
                                      TreeBuildingState& aState)
 {
+  mTreeLock.AssertCurrentThreadOwns();
+
   bool needsApzc = true;
   if (!aMetrics.IsScrollable()) {
     needsApzc = false;
@@ -464,21 +466,18 @@ APZCTreeManager::PrepareNodeForLayer(const LayerMetricsWrapper& aLayer,
     }
 
     if (newApzc) {
-      if (apzc->HasNoParentWithSameLayersId()) {
-        // If we just created a new apzc that is the root for its layers ID, then
-        // we need to update its zoom constraints which might have arrived before this
-        // was created
-        ZoomConstraints constraints;
-        if (state->mController->GetRootZoomConstraints(&constraints)) {
-          apzc->UpdateZoomConstraints(constraints);
-        }
-      } else {
-        // For an apzc that is not the root for its layers ID, we give it the
-        // same zoom constraints as its parent. This ensures that if e.g.
-        // user-scalable=no was specified, none of the APZCs allow double-tap
-        // to zoom.
+      auto it = mZoomConstraints.find(guid);
+      if (it != mZoomConstraints.end()) {
+        // We have a zoomconstraints for this guid, apply it.
+        apzc->UpdateZoomConstraints(it->second);
+      } else if (!apzc->HasNoParentWithSameLayersId()) {
+        // This is a sub-APZC, so inherit the zoom constraints from its parent.
+        // This ensures that if e.g. user-scalable=no was specified, none of the
+        // APZCs for that subtree allow double-tap to zoom.
         apzc->UpdateZoomConstraints(apzc->GetParent()->GetZoomConstraints());
       }
+      // Otherwise, this is the root of a layers id, but we didn't have a saved
+      // zoom constraints. Leave it empty for now.
     }
 
     // Add a guid -> APZC mapping for the newly created APZC.
@@ -553,6 +552,20 @@ APZCTreeManager::UpdateHitTestingTree(TreeBuildingState& aState,
   }
 
   return node;
+}
+
+void
+APZCTreeManager::FlushApzRepaints(uint64_t aLayersId)
+{
+  APZCTM_LOG("Flushing repaints for layers id %" PRIu64, aLayersId);
+  { // scope lock
+    MonitorAutoLock lock(mTreeLock);
+    FlushPendingRepaintRecursively(mRootNode, aLayersId);
+  }
+  const CompositorParent::LayerTreeState* state = CompositorParent::GetIndirectShadowTree(aLayersId);
+  MOZ_ASSERT(state && state->mController);
+  NS_DispatchToMainThread(NS_NewRunnableMethod(
+    state->mController.get(), &GeckoContentController::NotifyFlushComplete));
 }
 
 nsEventStatus
@@ -1027,16 +1040,24 @@ APZCTreeManager::SetTargetAPZC(uint64_t aInputBlockId, const ScrollableLayerGuid
 
 void
 APZCTreeManager::UpdateZoomConstraints(const ScrollableLayerGuid& aGuid,
-                                       const ZoomConstraints& aConstraints)
+                                       const Maybe<ZoomConstraints>& aConstraints)
 {
   MonitorAutoLock lock(mTreeLock);
   nsRefPtr<HitTestingTreeNode> node = GetTargetNode(aGuid, nullptr);
   MOZ_ASSERT(!node || node->GetApzc()); // any node returned must have an APZC
 
-  // For a given layers id, non-root APZCs inherit the zoom constraints
-  // of their root.
-  if (node && node->GetApzc()->HasNoParentWithSameLayersId()) {
-    UpdateZoomConstraintsRecursively(node.get(), aConstraints);
+  // Propagate the zoom constraints down to the subtree, stopping at APZCs
+  // which have their own zoom constraints or are in a different layers id.
+  if (aConstraints) {
+    APZCTM_LOG("Recording constraints %s for guid %s\n",
+      Stringify(aConstraints.value()).c_str(), Stringify(aGuid).c_str());
+    mZoomConstraints[aGuid] = aConstraints.ref();
+  } else {
+    APZCTM_LOG("Removing constraints for guid %s\n", Stringify(aGuid).c_str());
+    mZoomConstraints.erase(aGuid);
+  }
+  if (node && aConstraints) {
+    UpdateZoomConstraintsRecursively(node.get(), aConstraints.ref());
   }
 }
 
@@ -1051,9 +1072,13 @@ APZCTreeManager::UpdateZoomConstraintsRecursively(HitTestingTreeNode* aNode,
     aNode->GetApzc()->UpdateZoomConstraints(aConstraints);
   }
   for (HitTestingTreeNode* child = aNode->GetLastChild(); child; child = child->GetPrevSibling()) {
-    // We can have subtrees with their own layers id - leave those alone.
-    if (child->GetApzc() && child->GetApzc()->HasNoParentWithSameLayersId()) {
-      continue;
+    if (AsyncPanZoomController* childApzc = child->GetApzc()) {
+      // We can have subtrees with their own zoom constraints or separate layers
+      // id - leave those alone.
+      if (childApzc->HasNoParentWithSameLayersId() ||
+          mZoomConstraints.find(childApzc->GetGuid()) != mZoomConstraints.end()) {
+        continue;
+      }
     }
     UpdateZoomConstraintsRecursively(child, aConstraints);
   }
@@ -1096,6 +1121,23 @@ APZCTreeManager::FlushRepaintsRecursively(HitTestingTreeNode* aNode)
       node->GetApzc()->FlushRepaintForNewInputBlock();
     }
     FlushRepaintsRecursively(node->GetLastChild());
+  }
+}
+
+void
+APZCTreeManager::FlushPendingRepaintRecursively(HitTestingTreeNode* aNode, uint64_t aLayersId)
+{
+  mTreeLock.AssertCurrentThreadOwns();
+
+  for (HitTestingTreeNode* node = aNode; node; node = node->GetPrevSibling()) {
+    if (node->IsPrimaryHolder()) {
+      AsyncPanZoomController* apzc = node->GetApzc();
+      MOZ_ASSERT(apzc);
+      if (apzc->GetGuid().mLayersId == aLayersId) {
+        apzc->FlushRepaintIfPending();
+      }
+    }
+    FlushPendingRepaintRecursively(node->GetLastChild(), aLayersId);
   }
 }
 
@@ -1338,7 +1380,7 @@ APZCTreeManager::BuildOverscrollHandoffChain(const nsRefPtr<AsyncPanZoomControll
     result->Add(apzc);
 
     if (apzc->GetScrollHandoffParentId() == FrameMetrics::NULL_SCROLL_ID) {
-      if (!apzc->HasNoParentWithSameLayersId()) {
+      if (!apzc->IsRootForLayersId()) {
         // This probably indicates a bug or missed case in layout code
         NS_WARNING("Found a non-root APZ with no handoff parent");
       }
@@ -1351,9 +1393,9 @@ APZCTreeManager::BuildOverscrollHandoffChain(const nsRefPtr<AsyncPanZoomControll
     MOZ_ASSERT(apzc->GetScrollHandoffParentId() != apzc->GetGuid().mScrollId);
 
     // Find the AsyncPanZoomController instance with a matching layersId and
-    // the scroll id that matches apzc->GetScrollHandoffParentId(). To do this
-    // search the subtree with the same layersId for the apzc with the specified
-    // scroll id.
+    // the scroll id that matches apzc->GetScrollHandoffParentId().
+    // As an optimization, we start by walking up the APZC tree from 'apzc'
+    // until we reach the top of the layer subtree for this layers id.
     AsyncPanZoomController* scrollParent = nullptr;
     AsyncPanZoomController* parent = apzc;
     while (!parent->HasNoParentWithSameLayersId()) {
@@ -1366,6 +1408,7 @@ APZCTreeManager::BuildOverscrollHandoffChain(const nsRefPtr<AsyncPanZoomControll
         break;
       }
     }
+    // If that heuristic didn't turn up the scroll parent, do a full tree search.
     if (!scrollParent) {
       ScrollableLayerGuid guid(parent->GetGuid().mLayersId, 0, apzc->GetScrollHandoffParentId());
       nsRefPtr<HitTestingTreeNode> node = GetTargetNode(guid, &GuidComparatorIgnoringPresShell);
@@ -1477,26 +1520,30 @@ APZCTreeManager::GetAPZCAtPoint(HitTestingTreeNode* aNode,
   return nullptr;
 }
 
-AsyncPanZoomController*
-APZCTreeManager::FindRootApzcForLayersId(uint64_t aLayersId) const
+/*
+ * Do a breadth-first search of the tree rooted at |aRoot|, and return the
+ * first visited node that satisfies |aCondition|, or nullptr if no such node
+ * was found.
+ *
+ * |Node| should have methods GetLastChild() and GetPrevSibling().
+ */
+template <typename Node, typename Condition>
+static const Node* BreadthFirstSearch(const Node* aRoot, const Condition& aCondition)
 {
-  mTreeLock.AssertCurrentThreadOwns();
-
-  if (!mRootNode) {
+  if (!aRoot) {
     return nullptr;
   }
-  std::deque<const HitTestingTreeNode*> queue;
-  queue.push_back(mRootNode);
+  std::deque<const Node*> queue;
+  queue.push_back(aRoot);
   while (!queue.empty()) {
-    const HitTestingTreeNode* node = queue.front();
+    const Node* node = queue.front();
     queue.pop_front();
 
-    AsyncPanZoomController* apzc = node->GetApzc();
-    if (apzc && apzc->GetLayersId() == aLayersId && apzc->IsRootForLayersId()) {
-      return apzc;
+    if (aCondition(node)) {
+      return node;
     }
 
-    for (HitTestingTreeNode* child = node->GetLastChild();
+    for (const Node* child = node->GetLastChild();
          child;
          child = child->GetPrevSibling()) {
       queue.push_back(child);
@@ -1504,6 +1551,44 @@ APZCTreeManager::FindRootApzcForLayersId(uint64_t aLayersId) const
   }
 
   return nullptr;
+}
+
+AsyncPanZoomController*
+APZCTreeManager::FindRootApzcForLayersId(uint64_t aLayersId) const
+{
+  mTreeLock.AssertCurrentThreadOwns();
+
+  struct RootForLayersIdMatcher {
+    uint64_t mLayersId;
+    bool operator()(const HitTestingTreeNode* aNode) const {
+      AsyncPanZoomController* apzc = aNode->GetApzc();
+      return apzc
+          && apzc->GetLayersId() == mLayersId
+          && apzc->IsRootForLayersId();
+    }
+  };
+  const HitTestingTreeNode* resultNode = BreadthFirstSearch(mRootNode.get(),
+      RootForLayersIdMatcher{aLayersId});
+  return resultNode ? resultNode->GetApzc() : nullptr;
+}
+
+AsyncPanZoomController*
+APZCTreeManager::FindRootContentApzcForLayersId(uint64_t aLayersId) const
+{
+  mTreeLock.AssertCurrentThreadOwns();
+
+  struct RootContentForLayersIdMatcher {
+    uint64_t mLayersId;
+    bool operator()(const HitTestingTreeNode* aNode) const {
+      AsyncPanZoomController* apzc = aNode->GetApzc();
+      return apzc
+          && apzc->GetLayersId() == mLayersId
+          && apzc->IsRootContent();
+    }
+  };
+  const HitTestingTreeNode* resultNode = BreadthFirstSearch(mRootNode.get(),
+      RootContentForLayersIdMatcher{aLayersId});
+  return resultNode ? resultNode->GetApzc() : nullptr;
 }
 
 /* The methods GetScreenToApzcTransform() and GetApzcToGeckoTransform() return
@@ -1674,17 +1759,31 @@ APZCTreeManager::GetApzcToGeckoTransform(const AsyncPanZoomController *aApzc) co
 already_AddRefed<AsyncPanZoomController>
 APZCTreeManager::GetMultitouchTarget(AsyncPanZoomController* aApzc1, AsyncPanZoomController* aApzc2) const
 {
-  nsRefPtr<AsyncPanZoomController> apzc = CommonAncestor(aApzc1, aApzc2);
-  // For now, we only ever want to do pinching on the root APZC for a given layers id. So
-  // when we find the common ancestor of multiple points, also walk up to the root APZC.
-  apzc = RootAPZCForLayersId(apzc);
+  MonitorAutoLock lock(mTreeLock);
+  nsRefPtr<AsyncPanZoomController> apzc;
+  // For now, we only ever want to do pinching on the root-content APZC for
+  // a given layers id.
+  if (aApzc1 && aApzc2 && aApzc1->GetLayersId() == aApzc2->GetLayersId()) {
+    // If the two APZCs have the same layers id, find the root-content APZC
+    // for that layers id. Don't call CommonAncestor() because there may not
+    // be a common ancestor for the layers id (e.g. if one APZCs is inside a
+    // fixed-position element).
+    apzc = FindRootContentApzcForLayersId(aApzc1->GetLayersId());
+  } else {
+    // Otherwise, find the common ancestor (to reach a common layers id), and
+    // get the root-content APZC for that layers id.
+    apzc = CommonAncestor(aApzc1, aApzc2);
+    if (apzc) {
+      apzc = FindRootContentApzcForLayersId(apzc->GetLayersId());
+    }
+  }
   return apzc.forget();
 }
 
 already_AddRefed<AsyncPanZoomController>
 APZCTreeManager::CommonAncestor(AsyncPanZoomController* aApzc1, AsyncPanZoomController* aApzc2) const
 {
-  MonitorAutoLock lock(mTreeLock);
+  mTreeLock.AssertCurrentThreadOwns();
   nsRefPtr<AsyncPanZoomController> ancestor;
 
   // If either aApzc1 or aApzc2 is null, min(depth1, depth2) will be 0 and this function
@@ -1725,17 +1824,6 @@ APZCTreeManager::CommonAncestor(AsyncPanZoomController* aApzc1, AsyncPanZoomCont
     aApzc2 = aApzc2->GetParent();
   }
   return ancestor.forget();
-}
-
-already_AddRefed<AsyncPanZoomController>
-APZCTreeManager::RootAPZCForLayersId(AsyncPanZoomController* aApzc) const
-{
-  MonitorAutoLock lock(mTreeLock);
-  nsRefPtr<AsyncPanZoomController> apzc = aApzc;
-  while (apzc && !apzc->HasNoParentWithSameLayersId()) {
-    apzc = apzc->GetParent();
-  }
-  return apzc.forget();
 }
 
 }

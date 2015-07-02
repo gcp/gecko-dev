@@ -8,6 +8,7 @@
 #define AbstractMediaDecoder_h_
 
 #include "mozilla/Attributes.h"
+#include "StateMirroring.h"
 #include "MediaInfo.h"
 #include "nsISupports.h"
 #include "nsDataHashtable.h"
@@ -43,7 +44,7 @@ enum class MediaDecoderEventVisibility : int8_t {
  * The AbstractMediaDecoder class describes the public interface for a media decoder
  * and is used by the MediaReader classes.
  */
-class AbstractMediaDecoder : public nsISupports
+class AbstractMediaDecoder : public nsIObserver
 {
 public:
   // Returns the monitor for other threads to synchronise access to
@@ -71,8 +72,7 @@ public:
   virtual void NotifyDecodedFrames(uint32_t aParsed, uint32_t aDecoded,
                                    uint32_t aDropped) = 0;
 
-  // Return the duration of the media in microseconds.
-  virtual int64_t GetMediaDuration() = 0;
+  virtual AbstractCanonical<media::NullableTimeUnit>* CanonicalDurationOrNull() { return nullptr; };
 
   // Sets the duration of the media in microseconds. The MediaDecoder
   // fires a durationchange event to its owner (e.g., an HTML audio
@@ -145,6 +145,11 @@ public:
   private:
     AbstractMediaDecoder* mDecoder;
   };
+
+  // Classes directly inheriting from AbstractMediaDecoder do not support
+  // Observe and it should never be called directly.
+  NS_IMETHOD Observe(nsISupports *aSubject, const char * aTopic, const char16_t * aData) override
+  { MOZ_CRASH("Forbidden method"); return NS_OK; }
 
 #ifdef MOZ_EME
   virtual nsresult SetCDMProxy(CDMProxy* aProxy) { return NS_ERROR_NOT_IMPLEMENTED; }

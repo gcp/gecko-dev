@@ -6,7 +6,6 @@
 package org.mozilla.gecko;
 
 import com.nineoldandroids.animation.Animator;
-import com.nineoldandroids.animation.AnimatorListenerAdapter;
 import com.nineoldandroids.animation.ObjectAnimator;
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.DynamicToolbar.PinReason;
@@ -26,7 +25,11 @@ import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
 import org.mozilla.gecko.favicons.decoders.IconDirectoryEntry;
 import org.mozilla.gecko.firstrun.FirstrunPane;
 import org.mozilla.gecko.fxa.FirefoxAccounts;
+import org.mozilla.gecko.fxa.FxAccountConstants;
 import org.mozilla.gecko.fxa.activities.FxAccountGetStartedActivity;
+import org.mozilla.gecko.fxa.authenticator.AndroidFxAccount;
+import org.mozilla.gecko.fxa.login.Engaged;
+import org.mozilla.gecko.fxa.login.State;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
 import org.mozilla.gecko.gfx.LayerMarginsAnimator;
@@ -37,11 +40,13 @@ import org.mozilla.gecko.health.HealthRecorder;
 import org.mozilla.gecko.health.SessionInformation;
 import org.mozilla.gecko.home.BrowserSearch;
 import org.mozilla.gecko.home.HomeBanner;
+import org.mozilla.gecko.home.HomeConfig.PanelType;
 import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenInBackgroundListener;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.home.HomePanelsManager;
 import org.mozilla.gecko.home.SearchEngine;
+import org.mozilla.gecko.javaaddons.JavaAddonManager;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuItem;
 import org.mozilla.gecko.mozglue.ContextUtils;
@@ -52,6 +57,7 @@ import org.mozilla.gecko.preferences.ClearOnShutdownPref;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.prompts.Prompt;
 import org.mozilla.gecko.prompts.PromptListItem;
+import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.repositories.android.FennecTabsRepository;
 import org.mozilla.gecko.sync.setup.SyncAccounts;
 import org.mozilla.gecko.tabqueue.TabQueueHelper;
@@ -157,6 +163,7 @@ public class BrowserApp extends GeckoApp
                                    BrowserSearch.OnEditSuggestionListener,
                                    OnUrlOpenListener,
                                    OnUrlOpenInBackgroundListener,
+                                   ReadingListHelper.OnReadingListEventListener,
                                    AnchoredPopup.OnVisibilityChangeListener,
                                    ActionModeCompat.Presenter,
                                    LayoutInflater.Factory {
@@ -496,6 +503,12 @@ public class BrowserApp extends GeckoApp
             case BOOKMARK_REMOVED:
                 showBookmarkRemovedToast();
                 break;
+            case READING_LIST_ADDED:
+                onAddedToReadingList(tab.getURL());
+                break;
+            case READING_LIST_REMOVED:
+                onRemovedFromReadingList(tab.getURL());
+                break;
 
             case UNSELECTED:
                 // We receive UNSELECTED immediately after the SELECTED listeners run
@@ -572,6 +585,36 @@ public class BrowserApp extends GeckoApp
 
     private void showBookmarkRemovedToast() {
         Toast.makeText(this, R.string.bookmark_removed, Toast.LENGTH_SHORT).show();
+    }
+
+    private void showSwitchToReadingListToast(String message) {
+        getButtonToast().show(false,
+                message,
+                ButtonToast.LENGTH_SHORT,
+                getResources().getString(R.string.switch_button_message),
+                R.drawable.switch_button_icon,
+                new ButtonToast.ToastListener() {
+                    @Override
+                    public void onButtonClicked() {
+                        final String aboutPageUrl = AboutPages.getURLForBuiltinPanelType(PanelType.READING_LIST);
+                        Tabs.getInstance().loadUrlInTab(aboutPageUrl);
+                    }
+
+                    @Override
+                    public void onToastHidden(ButtonToast.ReasonHidden reason) { }
+                });
+    }
+
+    public void onAddedToReadingList(String url) {
+        showSwitchToReadingListToast(getResources().getString(R.string.reading_list_added));
+    }
+
+    public void onAlreadyInReadingList(String url) {
+        showSwitchToReadingListToast(getResources().getString(R.string.reading_list_duplicate));
+    }
+
+    public void onRemovedFromReadingList(String url) {
+        Toast.makeText(this, R.string.reading_list_removed, Toast.LENGTH_SHORT).show();
     }
 
     @Override
@@ -782,6 +825,7 @@ public class BrowserApp extends GeckoApp
 
         EventDispatcher.getInstance().registerGeckoThreadListener((NativeEventListener)this,
             "Accounts:Create",
+            "Accounts:CreateFirefoxAccountFromJSON",
             "CharEncoding:Data",
             "CharEncoding:State",
             "Favicon:CacheLoad",
@@ -808,7 +852,7 @@ public class BrowserApp extends GeckoApp
         mSharedPreferencesHelper = new SharedPreferencesHelper(appContext);
         mOrderedBroadcastHelper = new OrderedBroadcastHelper(appContext);
         mBrowserHealthReporter = new BrowserHealthReporter();
-        mReadingListHelper = new ReadingListHelper(appContext, getProfile());
+        mReadingListHelper = new ReadingListHelper(appContext, getProfile(), this);
 
         if (AppConstants.MOZ_ANDROID_BEAM) {
             NfcAdapter nfc = NfcAdapter.getDefaultAdapter(this);
@@ -979,7 +1023,7 @@ public class BrowserApp extends GeckoApp
             return;
         }
 
-        EventDispatcher.getInstance().unregisterGeckoThreadListener((GeckoEventListener)this,
+        EventDispatcher.getInstance().unregisterGeckoThreadListener((GeckoEventListener) this,
             "Prompt:ShowTop");
 
         processTabQueue();
@@ -989,7 +1033,7 @@ public class BrowserApp extends GeckoApp
     public void onPause() {
         super.onPause();
         // Register for Prompt:ShowTop so we can foreground this activity even if it's hidden.
-        EventDispatcher.getInstance().registerGeckoThreadListener((GeckoEventListener)this,
+        EventDispatcher.getInstance().registerGeckoThreadListener((GeckoEventListener) this,
             "Prompt:ShowTop");
     }
 
@@ -1347,7 +1391,7 @@ public class BrowserApp extends GeckoApp
             mZoomedView.destroy();
         }
 
-        EventDispatcher.getInstance().unregisterGeckoThreadListener((GeckoEventListener)this,
+        EventDispatcher.getInstance().unregisterGeckoThreadListener((GeckoEventListener) this,
             "Menu:Open",
             "Menu:Update",
             "LightweightTheme:Update",
@@ -1355,8 +1399,9 @@ public class BrowserApp extends GeckoApp
             "Prompt:ShowTop",
             "Accounts:Exist");
 
-        EventDispatcher.getInstance().unregisterGeckoThreadListener((NativeEventListener)this,
+        EventDispatcher.getInstance().unregisterGeckoThreadListener((NativeEventListener) this,
             "Accounts:Create",
+            "Accounts:CreateFirefoxAccountFromJSON",
             "CharEncoding:Data",
             "CharEncoding:State",
             "Favicon:CacheLoad",
@@ -1625,7 +1670,36 @@ public class BrowserApp extends GeckoApp
     @Override
     public void handleMessage(final String event, final NativeJSObject message,
                               final EventCallback callback) {
-        if ("Accounts:Create".equals(event)) {
+        if ("Accounts:CreateFirefoxAccountFromJSON".equals(event)) {
+            AndroidFxAccount fxAccount = null;
+            try {
+                final NativeJSObject json = message.getObject("json");
+                final String email = json.getString("email");
+                final String uid = json.getString("uid");
+                final boolean verified = json.optBoolean("verified", false);
+                final byte[] unwrapkB = Utils.hex2Byte(json.getString("unwrapBKey"));
+                final byte[] sessionToken = Utils.hex2Byte(json.getString("sessionToken"));
+                final byte[] keyFetchToken = Utils.hex2Byte(json.getString("keyFetchToken"));
+                // TODO: handle choose what to Sync.
+                State state = new Engaged(email, uid, verified, unwrapkB, sessionToken, keyFetchToken);
+                fxAccount = AndroidFxAccount.addAndroidAccount(this,
+                        email,
+                        getProfile().getName(),
+                        FxAccountConstants.DEFAULT_AUTH_SERVER_ENDPOINT,
+                        FxAccountConstants.DEFAULT_TOKEN_SERVER_ENDPOINT,
+                        state,
+                        AndroidFxAccount.DEFAULT_AUTHORITIES_TO_SYNC_AUTOMATICALLY_MAP);
+            } catch (Exception e) {
+                Log.w(LOGTAG, "Got exception creating Firefox Account from JSON; ignoring.", e);
+                if (callback == null) {
+                    callback.sendError("Could not create Firefox Account from JSON: " + e.toString());
+                }
+            }
+            if (callback != null) {
+                callback.sendSuccess(fxAccount != null);
+            }
+
+        } else if ("Accounts:Create".equals(event)) {
             // Do exactly the same thing as if you tapped 'Sync' in Settings.
             final Intent intent = new Intent(getContext(), FxAccountGetStartedActivity.class);
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -3385,7 +3459,7 @@ public class BrowserApp extends GeckoApp
         }
 
         if (itemId == R.id.logins) {
-            Tabs.getInstance().loadUrlInTab(AboutPages.PASSWORDS);
+            Tabs.getInstance().loadUrlInTab(AboutPages.LOGINS);
             return true;
         }
 

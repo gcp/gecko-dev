@@ -54,6 +54,7 @@ let JsCallTreeView = Heritage.extend(DetailsSubview, {
     let profile = recording.getProfile();
     let threadNode = this._prepareCallTree(profile, interval, options);
     this._populateCallTree(threadNode, options);
+    this._toggleJITOptimizationsView(recording);
     this.emit(EVENTS.JS_CALL_TREE_RENDERED);
   },
 
@@ -129,5 +130,22 @@ let JsCallTreeView = Heritage.extend(DetailsSubview, {
     return root;
   },
 
+  /**
+   * Displays or hides the optimizations view based on the recordings
+   * optimizations feature.
+   *
+   * @param {RecordingModel} recording
+   */
+  _toggleJITOptimizationsView: function (recording) {
+    if (recording && recording.getConfiguration().withJITOptimizations) {
+      JITOptimizationsView.show();
+      JITOptimizationsView.render();
+    } else {
+      JITOptimizationsView.hide();
+    }
+  },
+
   toString: () => "[object JsCallTreeView]"
 });
+
+EventEmitter.decorate(JsCallTreeView);

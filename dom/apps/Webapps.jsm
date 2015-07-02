@@ -203,6 +203,7 @@ this.DOMApplicationRegistry = {
   dirKey: DIRECTORY_NAME,
 
   init: function() {
+    // Keep the messages in sync with the lazy-loading in browser.js (bug 1171013).
     this.messages = ["Webapps:Install",
                      "Webapps:Uninstall",
                      "Webapps:GetSelf",
@@ -4861,7 +4862,22 @@ this.DOMApplicationRegistry = {
       browserOnly: browserOnly,
       QueryInterface: XPCOMUtils.generateQI([Ci.mozIApplicationClearPrivateDataParams])
     };
+    this._clearCookieJarData(appId, browserOnly);
     this._notifyCategoryAndObservers(subject, "webapps-clear-data", null, msg);
+  },
+
+  _clearCookieJarData: function(appId, browserOnly) {
+    let browserCookieJar =
+      ChromeUtils.originAttributesToCookieJar({appId: appId,
+                                               inBrowser: true});
+    this._notifyCategoryAndObservers(null, "clear-cookiejar-data", browserCookieJar);
+
+    if (!browserOnly) {
+      let appCookieJar =
+        ChromeUtils.originAttributesToCookieJar({appId: appId,
+                                                 inBrowser: false});
+      this._notifyCategoryAndObservers(null, "clear-cookiejar-data", appCookieJar);
+    }
   }
 };
 
