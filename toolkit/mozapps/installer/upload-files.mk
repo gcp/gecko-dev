@@ -367,6 +367,7 @@ endif
 # Create Android ARchives and metadata for download by local
 # developers using Gradle.
 ifdef MOZ_ANDROID_GECKOLIBS_AAR
+ifndef MOZ_DISABLE_GECKOVIEW
 geckoaar-revision := $(BUILDID)
 
 UPLOAD_EXTRA_FILES += \
@@ -392,8 +393,11 @@ INNER_MAKE_GECKOLIBS_AAR= \
     --distdir '$(_ABS_DIST)' \
     '$(_ABS_DIST)'
 else
+INNER_MAKE_GECKOLIBS_AAR=echo 'Android geckolibs.aar packaging requires packaging geckoview'
+endif # MOZ_DISABLE_GECKOVIEW
+else
 INNER_MAKE_GECKOLIBS_AAR=echo 'Android geckolibs.aar packaging is disabled'
-endif
+endif # MOZ_ANDROID_GECKOLIBS_AAR
 
 ifdef MOZ_OMX_PLUGIN
 DIST_FILES += libomxplugin.so libomxplugingb.so libomxplugingb235.so \
@@ -411,6 +415,11 @@ ifdef MOZ_ENABLE_SZIP
 # These libraries are szipped in-place in the
 # assets/$(ANDROID_CPU_ARCH) directory.
 SZIP_LIBRARIES := $(ASSET_SO_LIBRARIES)
+endif
+
+ifndef COMPILE_ENVIRONMENT
+# Any Fennec binary libraries we download are already szipped.
+ALREADY_SZIPPED=1
 endif
 
 # Fennec's OMNIJAR_NAME can include a directory; for example, it might
@@ -459,7 +468,7 @@ INNER_MAKE_PACKAGE	= \
   ( cd $(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH) && \
     unzip -o $(_ABS_DIST)/gecko.ap_ && \
     rm $(_ABS_DIST)/gecko.ap_ && \
-    $(ZIP) $(if $(MOZ_ENABLE_SZIP),-0 )$(_ABS_DIST)/gecko.ap_ $(ASSET_SO_LIBRARIES) && \
+    $(ZIP) $(if $(ALREADY_SZIPPED),-0 ,$(if $(MOZ_ENABLE_SZIP),-0 ))$(_ABS_DIST)/gecko.ap_ $(ASSET_SO_LIBRARIES) && \
     $(ZIP) -r9D $(_ABS_DIST)/gecko.ap_ $(DIST_FILES) -x $(NON_DIST_FILES) $(SZIP_LIBRARIES) && \
     $(if $(filter-out ./,$(OMNIJAR_DIR)), \
       mkdir -p $(OMNIJAR_DIR) && mv $(OMNIJAR_NAME) $(OMNIJAR_DIR) && ) \
@@ -607,7 +616,6 @@ NO_PKG_FILES += \
 	ClientAuthServer* \
 	OCSPStaplingServer* \
 	GenerateOCSPResponse* \
-	winEmbed.exe \
 	chrome/chrome.rdf \
 	chrome/app-chrome.manifest \
 	chrome/overlayinfo \
@@ -722,6 +730,11 @@ UPLOAD_FILES= \
   $(call QUOTED_WILDCARD,$(DIST)/$(LANGPACK)) \
   $(call QUOTED_WILDCARD,$(wildcard $(DIST)/$(PARTIAL_MAR))) \
   $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(TEST_PACKAGE)) \
+  $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(CPP_TEST_PACKAGE)) \
+  $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(XPC_TEST_PACKAGE)) \
+  $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(MOCHITEST_PACKAGE)) \
+  $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(REFTEST_PACKAGE)) \
+  $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(WP_TEST_PACKAGE)) \
   $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip) \
   $(call QUOTED_WILDCARD,$(DIST)/$(SDK)) \
   $(call QUOTED_WILDCARD,$(MOZ_SOURCESTAMP_FILE)) \

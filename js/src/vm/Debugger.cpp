@@ -806,6 +806,7 @@ Debugger::wrapDebuggeeValue(JSContext* cx, MutableHandleValue vp)
         RootedObject obj(cx, &vp.toObject());
 
         if (obj->is<JSFunction>()) {
+            MOZ_ASSERT(!IsInternalFunctionObject(*obj));
             RootedFunction fun(cx, &obj->as<JSFunction>());
             if (!EnsureFunctionHasScript(cx, fun))
                 return false;
@@ -6261,12 +6262,14 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, HandleValue thisv, AbstractFrameP
      * boundaries, and we are putting a DebugScopeProxy or non-syntactic With on
      * the scope chain.
      */
-    Rooted<StaticEvalObject*> staticScope(cx, StaticEvalObject::create(cx, nullptr));
+    Rooted<ScopeObject*> enclosingStaticScope(cx);
+    if (!env->is<GlobalObject>())
+        enclosingStaticScope = StaticNonSyntacticScopeObjects::create(cx, nullptr);
+    Rooted<StaticEvalObject*> staticScope(cx, StaticEvalObject::create(cx, enclosingStaticScope));
     if (!staticScope)
         return false;
     CompileOptions options(cx);
-    options.setHasPollutedScope(true)
-           .setIsRunOnce(true)
+    options.setIsRunOnce(true)
            .setForEval(true)
            .setNoScriptRval(false)
            .setFileAndLine(filename, lineno)
@@ -6275,8 +6278,8 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, HandleValue thisv, AbstractFrameP
            .maybeMakeStrictMode(frame ? frame.script()->strict() : false);
     RootedScript callerScript(cx, frame ? frame.script() : nullptr);
     SourceBufferHolder srcBuf(chars.start().get(), chars.length(), SourceBufferHolder::NoOwnership);
-    RootedScript script(cx, frontend::CompileScript(cx, &cx->tempLifoAlloc(), env, callerScript,
-                                                    staticScope, options, srcBuf,
+    RootedScript script(cx, frontend::CompileScript(cx, &cx->tempLifoAlloc(), env, staticScope,
+                                                    callerScript, options, srcBuf,
                                                     /* source = */ nullptr,
                                                     /* staticLevel = */ frame ? 1 : 0));
     if (!script)
@@ -6424,14 +6427,8 @@ DebuggerGenericEval(JSContext* cx, const char* fullMethodName, const Value& code
             return false;
 
         RootedObject dynamicScope(cx);
-        // We ignore the static scope here.  See comments about static
-        // scopes in EvaluateInEnv.
-        RootedObject unusedStaticScope(cx);
-        if (!CreateScopeObjectsForScopeChain(cx, scopeChain, env, &dynamicScope,
-                                             &unusedStaticScope))
-        {
+        if (!CreateScopeObjectsForScopeChain(cx, scopeChain, env, &dynamicScope))
             return false;
-        }
 
         env = dynamicScope;
     }
@@ -7024,7 +7021,7 @@ DebuggerObject_defineProperty(JSContext* cx, unsigned argc, Value* vp)
             return false;
 
         ErrorCopier ec(ac);
-        if (!StandardDefineProperty(cx, obj, id, desc))
+        if (!DefineProperty(cx, obj, id, desc))
             return false;
     }
 
@@ -7067,7 +7064,7 @@ DebuggerObject_defineProperties(JSContext* cx, unsigned argc, Value* vp)
 
         ErrorCopier ec(ac);
         for (size_t i = 0; i < n; i++) {
-            if (!StandardDefineProperty(cx, obj, ids[i], descs[i]))
+            if (!DefineProperty(cx, obj, ids[i], descs[i]))
                 return false;
         }
     }
@@ -7632,7 +7629,11 @@ DebuggerEnv_getCallee(JSContext* cx, unsigned argc, Value* vp)
     if (callobj.isForEval())
         return true;
 
-    args.rval().setObject(callobj.callee());
+    JSFunction& callee = callobj.callee();
+    if (IsInternalFunctionObject(callee))
+        return true;
+
+    args.rval().setObject(callee);
     if (!dbg->wrapDebuggeeValue(cx, args.rval()))
         return false;
     return true;
@@ -7759,6 +7760,16 @@ DebuggerEnv_getVariable(JSContext* cx, unsigned argc, Value* vp)
             if (!GetProperty(cx, env, env, id, &v))
                 return false;
         }
+    }
+
+    // When we've faked up scope chain objects for optimized-out scopes,
+    // declarative environments may contain internal JSFunction objects, which
+    // we shouldn't expose to the user.
+    if (v.isObject()) {
+        RootedObject obj(cx, &v.toObject());
+        if (obj->is<JSFunction>() &&
+            IsInternalFunctionObject(obj->as<JSFunction>()))
+            v.setMagic(JS_OPTIMIZED_OUT);
     }
 
     if (!dbg->wrapDebuggeeValue(cx, &v))

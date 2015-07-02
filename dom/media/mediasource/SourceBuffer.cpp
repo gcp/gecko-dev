@@ -73,7 +73,7 @@ SourceBuffer::SetMode(SourceBufferAppendMode aMode, ErrorResult& aRv)
     aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return;
   }
-  if (mIsUsingFormatReader && mGenerateTimestamp &&
+  if (mIsUsingFormatReader && mGenerateTimestamps &&
       aMode == SourceBufferAppendMode::Segments) {
     aRv.Throw(NS_ERROR_DOM_INVALID_ACCESS_ERR);
     return;
@@ -145,6 +145,12 @@ SourceBuffer::GetBuffered(ErrorResult& aRv)
   nsRefPtr<dom::TimeRanges> tr = new dom::TimeRanges();
   ranges.ToTimeRanges(tr);
   return tr.forget();
+}
+
+media::TimeIntervals
+SourceBuffer::GetTimeIntervals()
+{
+  return mContentManager->Buffered();
 }
 
 void
@@ -297,7 +303,7 @@ SourceBuffer::Ended()
   mContentManager->Ended();
   // We want the MediaSourceReader to refresh its buffered range as it may
   // have been modified (end lined up).
-  mMediaSource->GetDecoder()->NotifyDataArrived(nullptr, 1, mReportedOffset++);
+  mMediaSource->GetDecoder()->NotifyDataArrived(1, mReportedOffset++, /* aThrottleUpdates = */ false);
 }
 
 SourceBuffer::SourceBuffer(MediaSource* aMediaSource, const nsACString& aType)
@@ -316,7 +322,7 @@ SourceBuffer::SourceBuffer(MediaSource* aMediaSource, const nsACString& aType)
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aMediaSource);
   mEvictionThreshold = Preferences::GetUint("media.mediasource.eviction_threshold",
-                                            75 * (1 << 20));
+                                            100 * (1 << 20));
   mContentManager =
     SourceBufferContentManager::CreateManager(this,
                                               aMediaSource->GetDecoder(),
@@ -325,14 +331,14 @@ SourceBuffer::SourceBuffer(MediaSource* aMediaSource, const nsACString& aType)
             mContentManager.get());
   if (aType.LowerCaseEqualsLiteral("audio/mpeg") ||
       aType.LowerCaseEqualsLiteral("audio/aac")) {
-    mGenerateTimestamp = true;
+    mGenerateTimestamps = true;
   } else {
-    mGenerateTimestamp = false;
+    mGenerateTimestamps = false;
   }
   mIsUsingFormatReader =
     Preferences::GetBool("media.mediasource.format-reader", false);
   ErrorResult dummy;
-  if (mGenerateTimestamp) {
+  if (mGenerateTimestamps) {
     SetMode(SourceBufferAppendMode::Sequence, dummy);
   } else {
     SetMode(SourceBufferAppendMode::Segments, dummy);
@@ -421,7 +427,7 @@ SourceBuffer::CheckEndTime()
 {
   MOZ_ASSERT(NS_IsMainThread());
   // Check if we need to update mMediaSource duration
-  double endTime = GetBufferedEnd();
+  double endTime = mContentManager->GroupEndTimestamp().ToSeconds();
   double duration = mMediaSource->Duration();
   if (endTime > duration) {
     mMediaSource->SetDuration(endTime, MSRangeRemovalAction::SKIP);
@@ -488,11 +494,13 @@ SourceBuffer::AppendDataCompletedWithSuccess(bool aHasActiveTracks)
       }
     }
   }
-  if (mActive) {
+  if (mActive && mIsUsingFormatReader) {
     // Tell our parent decoder that we have received new data.
     // The information provided do not matter much so long as it is monotonically
     // increasing.
-    mMediaSource->GetDecoder()->NotifyDataArrived(nullptr, 1, mReportedOffset++);
+    mMediaSource->GetDecoder()->NotifyDataArrived(1, mReportedOffset++, /* aThrottleUpdates = */ false);
+    // Send progress event.
+    mMediaSource->GetDecoder()->NotifyBytesDownloaded();
   }
 
   CheckEndTime();
@@ -579,7 +587,7 @@ SourceBuffer::PrepareAppend(const uint8_t* aData, uint32_t aLength, ErrorResult&
   // See if we have enough free space to append our new data.
   // As we can only evict once we have playable data, we must give a chance
   // to the DASH player to provide a complete media segment.
-  if (aLength > mEvictionThreshold ||
+  if (aLength > mEvictionThreshold || evicted == Result::BUFFER_FULL ||
       ((!mIsUsingFormatReader &&
         mContentManager->GetSize() > mEvictionThreshold - aLength) &&
        evicted != Result::CANT_EVICT)) {
@@ -592,7 +600,6 @@ SourceBuffer::PrepareAppend(const uint8_t* aData, uint32_t aLength, ErrorResult&
     aRv.Throw(NS_ERROR_DOM_QUOTA_EXCEEDED_ERR);
     return nullptr;
   }
-  // TODO: Test buffer full flag.
   return data.forget();
 }
 

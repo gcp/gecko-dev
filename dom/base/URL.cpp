@@ -26,13 +26,12 @@ namespace dom {
 NS_IMPL_CYCLE_COLLECTION_CLASS(URL)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(URL)
-  if (tmp->mSearchParams) {
-    tmp->mSearchParams->RemoveObserver(tmp);
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(mSearchParams)
-  }
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mParent)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSearchParams)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(URL)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParent)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSearchParams)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -43,22 +42,23 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(URL)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-URL::URL(already_AddRefed<nsIURI> aURI)
-  : mURI(aURI)
+URL::URL(nsISupports* aParent, already_AddRefed<nsIURI> aURI)
+  : mParent(aParent)
+  , mURI(aURI)
 {
 }
 
-bool
-URL::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto, JS::MutableHandle<JSObject*> aReflector)
+JSObject*
+URL::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return URLBinding::Wrap(aCx, this, aGivenProto, aReflector);
+  return URLBinding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<URL>
 URL::Constructor(const GlobalObject& aGlobal, const nsAString& aUrl,
                  URL& aBase, ErrorResult& aRv)
 {
-  return Constructor(aUrl, aBase.GetURI(), aRv);
+  return Constructor(aGlobal.GetAsSupports(), aUrl, aBase.GetURI(), aRv);
 }
 
 /* static */ already_AddRefed<URL>
@@ -66,22 +66,22 @@ URL::Constructor(const GlobalObject& aGlobal, const nsAString& aUrl,
                  const Optional<nsAString>& aBase, ErrorResult& aRv)
 {
   if (aBase.WasPassed()) {
-    return Constructor(aUrl, aBase.Value(), aRv);
+    return Constructor(aGlobal.GetAsSupports(), aUrl, aBase.Value(), aRv);
   }
 
-  return Constructor(aUrl, nullptr, aRv);
+  return Constructor(aGlobal.GetAsSupports(), aUrl, nullptr, aRv);
 }
 
 /* static */ already_AddRefed<URL>
 URL::Constructor(const GlobalObject& aGlobal, const nsAString& aUrl,
                  const nsAString& aBase, ErrorResult& aRv)
 {
-  return Constructor(aUrl, aBase, aRv);
+  return Constructor(aGlobal.GetAsSupports(), aUrl, aBase, aRv);
 }
 
 /* static */ already_AddRefed<URL>
-URL::Constructor(const nsAString& aUrl, const nsAString& aBase,
-                 ErrorResult& aRv)
+URL::Constructor(nsISupports* aParent, const nsAString& aUrl,
+                 const nsAString& aBase, ErrorResult& aRv)
 {
   nsCOMPtr<nsIURI> baseUri;
   nsresult rv = NS_NewURI(getter_AddRefs(baseUri), aBase, nullptr, nullptr,
@@ -91,12 +91,13 @@ URL::Constructor(const nsAString& aUrl, const nsAString& aBase,
     return nullptr;
   }
 
-  return Constructor(aUrl, baseUri, aRv);
+  return Constructor(aParent, aUrl, baseUri, aRv);
 }
 
 /* static */
 already_AddRefed<URL>
-URL::Constructor(const nsAString& aUrl, nsIURI* aBase, ErrorResult& aRv)
+URL::Constructor(nsISupports* aParent, const nsAString& aUrl, nsIURI* aBase,
+                 ErrorResult& aRv)
 {
   nsCOMPtr<nsIURI> uri;
   nsresult rv = NS_NewURI(getter_AddRefs(uri), aUrl, nullptr, aBase,
@@ -106,7 +107,7 @@ URL::Constructor(const nsAString& aUrl, nsIURI* aBase, ErrorResult& aRv)
     return nullptr;
   }
 
-  nsRefPtr<URL> url = new URL(uri.forget());
+  nsRefPtr<URL> url = new URL(aParent, uri.forget());
   return url.forget();
 }
 
@@ -374,7 +375,7 @@ URL::UpdateURLSearchParams()
     }
   }
 
-  mSearchParams->ParseInput(search, this);
+  mSearchParams->ParseInput(search);
 }
 
 void
@@ -501,22 +502,6 @@ URL::SearchParams()
 }
 
 void
-URL::SetSearchParams(URLSearchParams& aSearchParams)
-{
-  if (mSearchParams) {
-    mSearchParams->RemoveObserver(this);
-  }
-
-  // the observer will be cleared using the cycle collector.
-  mSearchParams = &aSearchParams;
-  mSearchParams->AddObserver(this);
-
-  nsAutoString search;
-  mSearchParams->Serialize(search);
-  SetSearchInternal(search);
-}
-
-void
 URL::GetHash(nsAString& aHash, ErrorResult& aRv) const
 {
   aHash.Truncate();
@@ -525,7 +510,7 @@ URL::GetHash(nsAString& aHash, ErrorResult& aRv) const
   nsresult rv = mURI->GetRef(ref);
   if (NS_SUCCEEDED(rv) && !ref.IsEmpty()) {
     aHash.Assign(char16_t('#'));
-    if (nsContentUtils::EncodeDecodeURLHash()) {
+    if (nsContentUtils::GettersDecodeURLHash()) {
       NS_UnescapeURL(ref); // XXX may result in random non-ASCII bytes!
     }
     AppendUTF8toUTF16(ref, aHash);
@@ -550,8 +535,7 @@ void
 URL::CreateSearchParamsIfNeeded()
 {
   if (!mSearchParams) {
-    mSearchParams = new URLSearchParams();
-    mSearchParams->AddObserver(this);
+    mSearchParams = new URLSearchParams(mParent, this);
     UpdateURLSearchParams();
   }
 }

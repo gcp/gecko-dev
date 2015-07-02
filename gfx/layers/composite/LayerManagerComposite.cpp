@@ -19,7 +19,7 @@
 #include "LayerScope.h"                 // for LayerScope Tool
 #include "protobuf/LayerScopePacket.pb.h" // for protobuf (LayerScope)
 #include "PaintedLayerComposite.h"      // for PaintedLayerComposite
-#include "TiledLayerBuffer.h"           // for TiledLayerComposer
+#include "TiledContentHost.h"
 #include "Units.h"                      // for ScreenIntRect
 #include "UnitTransforms.h"             // for ViewAs
 #include "gfx2DGlue.h"                  // for ToMatrix4x4
@@ -30,7 +30,7 @@
 #include "gfxRect.h"                    // for gfxRect
 #include "gfxUtils.h"                   // for frame color util
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
-#include "mozilla/RefPtr.h"             // for RefPtr, TemporaryRef
+#include "mozilla/RefPtr.h"             // for RefPtr, already_AddRefed
 #include "mozilla/gfx/2D.h"             // for DrawTarget
 #include "mozilla/gfx/Matrix.h"         // for Matrix4x4
 #include "mozilla/gfx/Point.h"          // for IntSize, Point
@@ -330,7 +330,7 @@ LayerManagerComposite::EndTransaction(DrawPaintedLayerCallback aCallback,
 #endif
 }
 
-TemporaryRef<DrawTarget>
+already_AddRefed<DrawTarget>
 LayerManagerComposite::CreateOptimalMaskDrawTarget(const IntSize &aSize)
 {
   NS_RUNTIMEABORT("Should only be called on the drawing side");
@@ -1016,10 +1016,10 @@ LayerManagerComposite::ComputeRenderIntegrityInternal(Layer* aLayer,
     SubtractTransformedRegion(aScreenRegion, incompleteRegion, transformToScreen);
 
     // See if there's any incomplete low-precision rendering
-    TiledLayerComposer* composer = nullptr;
+    TiledContentHost* composer = nullptr;
     LayerComposite* shadow = aLayer->AsLayerComposite();
     if (shadow) {
-      composer = shadow->GetTiledLayerComposer();
+      composer = shadow->GetCompositableHost()->AsTiledContentHost();
       if (composer) {
         incompleteRegion.Sub(incompleteRegion, composer->GetValidLowPrecisionRegion());
         if (!incompleteRegion.IsEmpty()) {
@@ -1254,7 +1254,7 @@ LayerManagerComposite::AutoAddMaskEffect::~AutoAddMaskEffect()
   mCompositable->RemoveMaskEffect();
 }
 
-TemporaryRef<DrawTarget>
+already_AddRefed<DrawTarget>
 LayerManagerComposite::CreateDrawTarget(const IntSize &aSize,
                                         SurfaceFormat aFormat)
 {
@@ -1338,7 +1338,8 @@ LayerManagerComposite::AsyncPanZoomEnabled() const
 
 nsIntRegion
 LayerComposite::GetFullyRenderedRegion() {
-  if (TiledLayerComposer* tiled = GetTiledLayerComposer()) {
+  if (TiledContentHost* tiled = GetCompositableHost() ? GetCompositableHost()->AsTiledContentHost()
+                                                        : nullptr) {
     nsIntRegion shadowVisibleRegion = GetShadowVisibleRegion();
     // Discard the region which hasn't been drawn yet when doing
     // progressive drawing. Note that if the shadow visible region

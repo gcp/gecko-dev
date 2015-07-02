@@ -33,7 +33,10 @@
 
 class ThreadProfile;
 
+// NB: Packing this structure has been shown to cause SIGBUS issues on ARM.
+#ifndef __arm__
 #pragma pack(push, 1)
+#endif
 
 class ProfileEntry
 {
@@ -81,7 +84,9 @@ private:
   char mTagName;
 };
 
+#ifndef __arm__
 #pragma pack(pop)
+#endif
 
 class UniqueJSONStrings
 {
@@ -143,7 +148,13 @@ class UniqueStacks
 {
 public:
   struct FrameKey {
+#ifdef SPS_STANDALONE
     std::string mLocation;
+#else
+    // This cannot be a std::string, as it is not memmove compatible, which
+    // is used by nsHashTable
+    nsCString mLocation;
+#endif
     mozilla::Maybe<unsigned> mLine;
     mozilla::Maybe<unsigned> mCategory;
     mozilla::Maybe<void*> mJITAddress;

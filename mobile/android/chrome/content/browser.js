@@ -603,6 +603,13 @@ var BrowserApp = {
         InitLater(() => WebcompatReporter.init());
       }
 
+      InitLater(function () {
+        // title == 0 and url == 1. See:
+        //   https://mxr.mozilla.org/mozilla-central/source/mobile/android/base/resources/values/arrays.xml?rev=861e4bd9e7fe#153
+        const titleInTitlebarEnabled = Services.prefs.getIntPref("browser.chrome.titlebarMode") == 0;
+        Telemetry.addData("FENNEC_TITLE_IN_TITLEBAR_ENABLED", titleInTitlebarEnabled);
+      });
+
       InitLater(() => LightWeightThemeWebInstaller.init());
       InitLater(() => SpatialNavigation.init(BrowserApp.deck, null), window, "SpatialNavigation");
       InitLater(() => CastingApps.init(), window, "CastingApps");
@@ -2330,14 +2337,7 @@ var NativeWindow = {
    *
    *        checkbox:    A string to appear next to a checkbox under the notification
    *                     message. The button callback functions will be called with
-   *                     the checked state as an argument.                   
-   *
-   *        title:       An object that specifies text to display as the title, and
-   *                     optionally a resource, such as a favicon cache url that can be
-   *                     used to fetch a favicon from the FaviconCache. (This can be
-   *                     generalized to other resources if the situation arises.)
-   *                     { text: <title>,
-   *                       resource: <resource_url> }
+   *                     the checked state as an argument.
    *
    *        actionText:  An object that specifies a clickable string, a type of action,
    *                     and a bundle blob for the consumer to create a click action.
@@ -3203,7 +3203,7 @@ var DesktopUserAgent = {
     // See https://developer.mozilla.org/en/Gecko_user_agent_string_reference
     this.DESKTOP_UA = Cc["@mozilla.org/network/protocol;1?name=http"]
                         .getService(Ci.nsIHttpProtocolHandler).userAgent
-                        .replace(/Android; [a-zA-Z]+/, "X11; Linux x86_64")
+                        .replace(/Android \d.+?; [a-zA-Z]+/, "X11; Linux x86_64")
                         .replace(/Gecko\/[0-9\.]+/, "Gecko/20100101");
   },
 

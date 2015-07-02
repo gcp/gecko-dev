@@ -4,13 +4,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import
+
 import os
-import os.path
 import json
 import copy
-import datetime
 import sys
-import urllib2
 
 from mach.decorators import (
     CommandArgument,
@@ -18,13 +17,6 @@ from mach.decorators import (
     Command,
 )
 
-from taskcluster_graph.commit_parser import parse_commit
-from taskcluster_graph.slugid import slugid
-from taskcluster_graph.slugidjar import SlugidJar
-from taskcluster_graph.from_now import json_time_from_now, current_json_time
-from taskcluster_graph.templates import Templates
-
-import taskcluster_graph.build_task
 
 ROOT = os.path.dirname(os.path.realpath(__file__))
 GECKO = os.path.realpath(os.path.join(ROOT, '..', '..'))
@@ -65,6 +57,7 @@ def docker_image(name):
     return '{}/{}:{}'.format(repository, name, version)
 
 def get_task(task_id):
+    import urllib2
     return json.load(urllib2.urlopen("https://queue.taskcluster.net/v1/task/" + task_id))
 
 
@@ -142,6 +135,13 @@ class DecisionTask(object):
         help='email address of who owns this graph')
     @CommandArgument('task', help="Path to decision task to run.")
     def run_task(self, **params):
+        from taskcluster_graph.slugidjar import SlugidJar
+        from taskcluster_graph.from_now import (
+            json_time_from_now,
+            current_json_time,
+        )
+        from taskcluster_graph.templates import Templates
+
         templates = Templates(ROOT)
         # Template parameters used when expanding the graph
         parameters = dict(gaia_info().items() + {
@@ -193,6 +193,15 @@ class Graph(object):
     @CommandArgument('--extend-graph',
         action="store_true", dest="ci", help='Omit create graph arguments')
     def create_graph(self, **params):
+        from taskcluster_graph.commit_parser import parse_commit
+        from taskcluster_graph.slugid import slugid
+        from taskcluster_graph.from_now import (
+            json_time_from_now,
+            current_json_time,
+        )
+        from taskcluster_graph.templates import Templates
+        import taskcluster_graph.build_task
+
         project = params['project']
         message = params.get('message', '') if project == 'try' else DEFAULT_TRY
 
@@ -271,10 +280,19 @@ class Graph(object):
             taskcluster_graph.build_task.validate(build_task)
             graph['tasks'].append(build_task)
 
-            tests_url = ARTIFACT_URL.format(
-                build_parameters['build_slugid'],
-                build_task['task']['extra']['locations']['tests']
-            )
+            test_packages_url, tests_url = None, None
+
+            if 'test_packages' in build_task['task']['extra']['locations']:
+                test_packages_url = ARTIFACT_URL.format(
+                    build_parameters['build_slugid'],
+                    build_task['task']['extra']['locations']['test_packages']
+                )
+
+            if 'tests' in build_task['task']['extra']['locations']:
+                tests_url = ARTIFACT_URL.format(
+                    build_parameters['build_slugid'],
+                    build_task['task']['extra']['locations']['tests']
+                )
 
             build_url = ARTIFACT_URL.format(
                 build_parameters['build_slugid'],
@@ -318,7 +336,10 @@ class Graph(object):
                 test_parameters = copy.copy(build_parameters)
                 test_parameters['build_url'] = build_url
                 test_parameters['img_url'] = img_url
-                test_parameters['tests_url'] = tests_url
+                if tests_url:
+                    test_parameters['tests_url'] = tests_url
+                if test_packages_url:
+                    test_parameters['test_packages_url'] = test_packages_url
 
                 test_definition = templates.load(test['task'], {})['task']
                 chunk_config = test_definition['extra']['chunks']
@@ -411,6 +432,9 @@ class CIBuild(object):
     @CommandArgument('build_task',
         help='path to build task definition')
     def create_ci_build(self, **params):
+        from taskcluster_graph.templates import Templates
+        import taskcluster_graph.build_task
+
         templates = Templates(ROOT)
         # TODO handle git repos
         head_repository = params['head_repository']
@@ -433,6 +457,10 @@ class CIBuild(object):
         if mozharness_rev is None:
             mozharness_rev = mozharness['revision']
 
+        from taskcluster_graph.from_now import (
+            json_time_from_now,
+            current_json_time,
+        )
         build_parameters = dict(gaia_info().items() + {
             'docker_image': docker_image,
             'owner': params['owner'],

@@ -675,6 +675,8 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 
 <!ENTITY identity.connectionSecure "Secure Connection">
 <!ENTITY identity.connectionNotSecure "Connection is Not Secure">
+<!ENTITY identity.connectionVerified "&brandShortName; verified that you are securely connected to this site, run by:">
+<!ENTITY identity.connectionInternal "This is a secure &brandShortName; page.">
 
 <!ENTITY identity.moreInfoLinkText2 "More Information">
 
@@ -765,6 +767,15 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY mixedContentBlocked2.block.label "Enable protection">
 <!ENTITY mixedContentBlocked2.block.accesskey "E">
 <!ENTITY mixedContentBlocked2.disabled.message "Protection is disabled">
+
+<!ENTITY trackingProtection.title "Tracking Protection">
+<!ENTITY trackingProtection.detectedBlocked "Attempts to track your online behavior have been blocked.">
+<!ENTITY trackingProtection.detectedNotBlocked "Tracking elements detected. You have disabled protection on this site.">
+<!ENTITY trackingProtection.notDetected "No tracking elements detected on this website.">
+<!ENTITY trackingProtection.unblock.label "Disable protection for this site">
+<!ENTITY trackingProtection.unblock.accesskey "D">
+<!ENTITY trackingProtection.block.label "Enable protection for this site">
+<!ENTITY trackingProtection.block.accesskey "E">
 
 <!ENTITY trackingContentBlocked.message "Tracking">
 <!ENTITY trackingContentBlocked.moreinfo "Parts of the page that track your online activity have been blocked.">

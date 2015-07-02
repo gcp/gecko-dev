@@ -242,27 +242,6 @@ static uint32_t gNumberOfWidgetsNeedingEventThread = 0;
 
 #pragma mark -
 
-/* Convenience routine to go from a Gecko rect to Cocoa NSRect.
- *
- * Gecko rects (nsRect) contain an origin (x,y) in a coordinate
- * system with (0,0) in the top-left of the screen. Cocoa rects
- * (NSRect) contain an origin (x,y) in a coordinate system with
- * (0,0) in the bottom-left of the screen. Both nsRect and NSRect
- * contain width/height info, with no difference in their use.
- * If a Cocoa rect is from a flipped view, there is no need to
- * convert coordinate systems.
- */
-#ifndef __LP64__
-static inline void
-ConvertGeckoRectToMacRect(const nsIntRect& aRect, Rect& outMacRect)
-{
-  outMacRect.left = aRect.x;
-  outMacRect.top = aRect.y;
-  outMacRect.right = aRect.x + aRect.width;
-  outMacRect.bottom = aRect.y + aRect.height;
-}
-#endif
-
 // Flips a screen coordinate from a point in the cocoa coordinate system (bottom-left rect) to a point
 // that is a "flipped" cocoa coordinate system (starts in the top-left).
 static inline void
@@ -296,7 +275,7 @@ public:
 
   virtual ~RectTextureImage();
 
-  TemporaryRef<gfx::DrawTarget>
+  already_AddRefed<gfx::DrawTarget>
     BeginUpdate(const nsIntSize& aNewSize,
                 const nsIntRegion& aDirtyRegion = nsIntRegion());
   void EndUpdate(bool aKeepSurface = false);
@@ -2580,7 +2559,7 @@ nsChildView::EnsureVibrancyManager()
   return *mVibrancyManager;
 }
 
-TemporaryRef<gfx::DrawTarget>
+already_AddRefed<gfx::DrawTarget>
 nsChildView::StartRemoteDrawing()
 {
   if (!mGLPresenter) {
@@ -2697,7 +2676,7 @@ RectTextureImage::TextureSizeForSize(const nsIntSize& aSize)
                    gfx::NextPowerOfTwo(aSize.height));
 }
 
-TemporaryRef<gfx::DrawTarget>
+already_AddRefed<gfx::DrawTarget>
 RectTextureImage::BeginUpdate(const nsIntSize& aNewSize,
                               const nsIntRegion& aDirtyRegion)
 {

@@ -22,6 +22,7 @@
 #include "mozilla/EventStateManager.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/Hal.h"
+#include "mozilla/IMEStateManager.h"
 #include "mozilla/ipc/DocumentRendererParent.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/layers/CompositorParent.h"
@@ -247,7 +248,6 @@ private:
 namespace mozilla {
 namespace dom {
 
-TabParent *TabParent::mIMETabParent = nullptr;
 TabParent::LayerToTabParentTable* TabParent::sLayerToTabParentTable = nullptr;
 
 NS_IMPL_ISUPPORTS(TabParent,
@@ -480,9 +480,8 @@ TabParent::Recv__delete__()
 void
 TabParent::ActorDestroy(ActorDestroyReason why)
 {
-  if (mIMETabParent == this) {
-    mIMETabParent = nullptr;
-  }
+  IMEStateManager::OnTabParentDestroying(this);
+
   nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader(true);
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
   if (frameLoader) {
@@ -1933,11 +1932,10 @@ TabParent::RecvNotifyIMEFocus(const bool& aFocus,
     return true;
   }
 
-  mIMETabParent = aFocus ? this : nullptr;
   IMENotification notification(aFocus ? NOTIFY_IME_OF_FOCUS :
                                         NOTIFY_IME_OF_BLUR);
   mContentCache.AssignContent(aContentCache, &notification);
-  widget->NotifyIME(notification);
+  IMEStateManager::NotifyIME(notification, widget, true);
 
   if (aFocus) {
     *aPreference = widget->GetIMEUpdatePreference();
@@ -1972,7 +1970,7 @@ TabParent::RecvNotifyIMETextChange(const ContentCache& aContentCache,
   notification.mTextChangeData.mCausedByComposition = aCausedByComposition;
 
   mContentCache.AssignContent(aContentCache, &notification);
-  widget->NotifyIME(notification);
+  IMEStateManager::NotifyIME(notification, widget, true);
   return true;
 }
 
@@ -1988,7 +1986,7 @@ TabParent::RecvNotifyIMESelectedCompositionRect(
   IMENotification notification(NOTIFY_IME_OF_COMPOSITION_UPDATE);
   mContentCache.AssignContent(aContentCache, &notification);
 
-  widget->NotifyIME(notification);
+  IMEStateManager::NotifyIME(notification, widget, true);
   return true;
 }
 
@@ -2011,7 +2009,7 @@ TabParent::RecvNotifyIMESelection(const ContentCache& aContentCache,
     mContentCache.InitNotification(notification);
     notification.mSelectionChangeData.mCausedByComposition =
       aCausedByComposition;
-    widget->NotifyIME(notification);
+    IMEStateManager::NotifyIME(notification, widget, true);
   }
   return true;
 }
@@ -2039,7 +2037,7 @@ TabParent::RecvNotifyIMEMouseButtonEvent(
     *aConsumedByIME = false;
     return true;
   }
-  nsresult rv = widget->NotifyIME(aIMENotification);
+  nsresult rv = IMEStateManager::NotifyIME(aIMENotification, widget, true);
   *aConsumedByIME = rv == NS_SUCCESS_EVENT_CONSUMED;
   return true;
 }
@@ -2058,7 +2056,7 @@ TabParent::RecvNotifyIMEPositionChange(const ContentCache& aContentCache)
   const nsIMEUpdatePreference updatePreference =
     widget->GetIMEUpdatePreference();
   if (updatePreference.WantPositionChanged()) {
-    widget->NotifyIME(notification);
+    IMEStateManager::NotifyIME(notification, widget, true);
   }
   return true;
 }
@@ -2387,26 +2385,6 @@ TabParent::RecvSetInputContext(const int32_t& aIMEEnabled,
                                const int32_t& aCause,
                                const int32_t& aFocusChange)
 {
-  nsCOMPtr<nsIWidget> widget = GetWidget();
-  if (!widget || !AllowContentIME()) {
-    return true;
-  }
-
-  InputContext oldContext = widget->GetInputContext();
-
-  // Ignore if current widget IME setting is not DISABLED and didn't come
-  // from remote content.  Chrome content may have taken over.
-  if (oldContext.mIMEState.mEnabled != IMEState::DISABLED &&
-      oldContext.IsOriginMainProcess()) {
-    return true;
-  }
-
-  // mIMETabParent (which is actually static) tracks which if any TabParent has IMEFocus
-  // When the input mode is set to anything but IMEState::DISABLED,
-  // mIMETabParent should be set to this
-  mIMETabParent =
-    aIMEEnabled != static_cast<int32_t>(IMEState::DISABLED) ? this : nullptr;
-
   InputContext context;
   context.mIMEState.mEnabled = static_cast<IMEState::Enabled>(aIMEEnabled);
   context.mIMEState.mOpen = static_cast<IMEState::Open>(aIMEOpen);
@@ -2418,15 +2396,8 @@ TabParent::RecvSetInputContext(const int32_t& aIMEEnabled,
   InputContextAction action(
     static_cast<InputContextAction::Cause>(aCause),
     static_cast<InputContextAction::FocusChange>(aFocusChange));
-  widget->SetInputContext(context, action);
 
-  nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
-  if (!observerService)
-    return true;
-
-  nsAutoString state;
-  state.AppendInt(aIMEEnabled);
-  observerService->NotifyObservers(nullptr, "ime-enabled-state-changed", state.get());
+  IMEStateManager::SetInputContextForChildProcess(this, context, action);
 
   return true;
 }
@@ -2612,19 +2583,6 @@ TabParent::RecvGetRenderFrameInfo(PRenderFrameParent* aRenderFrame,
     RequestNotifyLayerTreeReady();
     mNeedLayerTreeReadyNotification = false;
   }
-
-  return true;
-}
-
-bool
-TabParent::AllowContentIME()
-{
-  nsFocusManager* fm = nsFocusManager::GetFocusManager();
-  NS_ENSURE_TRUE(fm, false);
-
-  nsCOMPtr<nsIContent> focusedContent = fm->GetFocusedContent();
-  if (focusedContent && focusedContent->IsEditable())
-    return false;
 
   return true;
 }

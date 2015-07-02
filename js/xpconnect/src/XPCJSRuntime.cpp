@@ -127,13 +127,6 @@ XPCJSRuntime::CustomContextCallback(JSContext* cx, unsigned operation)
         delete XPCContext::GetXPCContext(cx);
     }
 
-    nsTArray<xpcContextCallback> callbacks(extraContextCallbacks);
-    for (uint32_t i = 0; i < callbacks.Length(); ++i) {
-        if (!callbacks[i](cx, operation)) {
-            return false;
-        }
-    }
-
     return true;
 }
 
@@ -1715,6 +1708,24 @@ xpc::GetCurrentCompartmentName(JSContext* cx, nsCString& name)
     GetCompartmentName(compartment, name, &anonymizeID, false);
 }
 
+JSRuntime*
+xpc::GetJSRuntime()
+{
+    return XPCJSRuntime::Get()->Runtime();
+}
+
+void
+xpc::AddGCCallback(xpcGCCallback cb)
+{
+    XPCJSRuntime::Get()->AddGCCallback(cb);
+}
+
+void
+xpc::RemoveGCCallback(xpcGCCallback cb)
+{
+    XPCJSRuntime::Get()->RemoveGCCallback(cb);
+}
+
 static int64_t
 JSMainRuntimeGCHeapDistinguishedAmount()
 {
@@ -3072,6 +3083,9 @@ AccumulateTelemetryCallback(int id, uint32_t sample, const char* key)
       case JS_TELEMETRY_GC_SLICE_MS:
         Telemetry::Accumulate(Telemetry::GC_SLICE_MS, sample);
         break;
+      case JS_TELEMETRY_GC_SLOW_PHASE:
+        Telemetry::Accumulate(Telemetry::GC_SLOW_PHASE, sample);
+        break;
       case JS_TELEMETRY_GC_MMU_50:
         Telemetry::Accumulate(Telemetry::GC_MMU_50, sample);
         break;
@@ -3518,7 +3532,7 @@ XPCJSRuntime::OnJSContextNew(JSContext* cx)
                 return false;
             }
             mStrIDs[i] = INTERNED_STRING_TO_JSID(cx, str);
-            mStrJSVals[i] = STRING_TO_JSVAL(str);
+            mStrJSVals[i].setString(str);
         }
 
         if (!mozilla::dom::DefineStaticJSVals(cx)) {
@@ -3697,23 +3711,6 @@ XPCJSRuntime::RemoveGCCallback(xpcGCCallback cb)
 {
     MOZ_ASSERT(cb, "null callback");
     bool found = extraGCCallbacks.RemoveElement(cb);
-    if (!found) {
-        NS_ERROR("Removing a callback which was never added.");
-    }
-}
-
-void
-XPCJSRuntime::AddContextCallback(xpcContextCallback cb)
-{
-    MOZ_ASSERT(cb, "null callback");
-    extraContextCallbacks.AppendElement(cb);
-}
-
-void
-XPCJSRuntime::RemoveContextCallback(xpcContextCallback cb)
-{
-    MOZ_ASSERT(cb, "null callback");
-    bool found = extraContextCallbacks.RemoveElement(cb);
     if (!found) {
         NS_ERROR("Removing a callback which was never added.");
     }

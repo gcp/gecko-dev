@@ -231,7 +231,6 @@
 @BINPATH@/components/plugin.xpt
 @BINPATH@/components/pref.xpt
 @BINPATH@/components/prefetch.xpt
-@BINPATH@/components/profile.xpt
 #ifdef MOZ_ENABLE_PROFILER_SPS
 @BINPATH@/components/profiler.xpt
 #endif
@@ -450,6 +449,7 @@
 #ifdef MOZ_DEBUG
 @BINPATH@/components/TestInterfaceJS.js
 @BINPATH@/components/TestInterfaceJS.manifest
+@BINPATH@/components/TestInterfaceJSMaplike.js
 #endif
 
 @BINPATH@/components/nsAsyncShutdown.manifest

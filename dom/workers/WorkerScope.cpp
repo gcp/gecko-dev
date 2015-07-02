@@ -621,6 +621,16 @@ ServiceWorkerGlobalScope::SkipWaiting(ErrorResult& aRv)
   return promise.forget();
 }
 
+// static
+bool
+ServiceWorkerGlobalScope::InterceptionEnabled(JSContext* aCx, JSObject* aObj)
+{
+  WorkerPrivate* worker = GetCurrentThreadWorkerPrivate();
+  MOZ_ASSERT(worker);
+  worker->AssertIsOnWorkerThread();
+  return worker->InterceptionEnabled();
+}
+
 WorkerDebuggerGlobalScope::WorkerDebuggerGlobalScope(
                                                   WorkerPrivate* aWorkerPrivate)
 : mWorkerPrivate(aWorkerPrivate)
@@ -732,7 +742,7 @@ workerdebuggersandbox_convert(JSContext *cx, JS::Handle<JSObject *> obj,
                               JSType type, JS::MutableHandle<JS::Value> vp)
 {
   if (type == JSTYPE_OBJECT) {
-    vp.set(OBJECT_TO_JSVAL(obj));
+    vp.setObject(*obj);
     return true;
   }
 

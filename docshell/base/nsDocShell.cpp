@@ -193,7 +193,6 @@
 #include "nsIWidget.h"
 #include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/dom/ScriptSettings.h"
-#include "mozilla/dom/URLSearchParams.h"
 #include "nsPerformance.h"
 
 #ifdef MOZ_TOOLKIT_SEARCH
@@ -224,10 +223,12 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using mozilla::dom::workers::ServiceWorkerManager;
 
-// True means sUseErrorPages has been added to preferences var cache.
+// True means sUseErrorPages and sInterceptionEnabled has been added to
+// preferences var cache.
 static bool gAddedPreferencesVarCache = false;
 
 bool nsDocShell::sUseErrorPages = false;
+bool nsDocShell::sInterceptionEnabled = false;
 
 // Number of documents currently loading
 static int32_t gNumberOfDocumentsLoading = 0;
@@ -2019,24 +2020,6 @@ nsDocShell::SetCurrentURI(nsIURI* aURI, nsIRequest* aRequest,
   if (mLSHE) {
     mLSHE->GetIsSubFrame(&isSubFrame);
   }
-
-  // nsDocShell owns a URLSearchParams that is used by
-  // window.location.searchParams to be in sync with the current location.
-  if (!mURLSearchParams) {
-    mURLSearchParams = new URLSearchParams();
-  }
-
-  nsAutoCString search;
-
-  nsCOMPtr<nsIURL> url(do_QueryInterface(mCurrentURI));
-  if (url) {
-    nsresult rv = url->GetQuery(search);
-    if (NS_FAILED(rv)) {
-      NS_WARNING("Failed to get the query from a nsIURL.");
-    }
-  }
-
-  mURLSearchParams->ParseInput(search, nullptr);
 
   if (!isSubFrame && !isRoot) {
     /*
@@ -4602,8 +4585,7 @@ nsDocShell::GetDocument()
 nsPIDOMWindow*
 nsDocShell::GetWindow()
 {
-  NS_ENSURE_SUCCESS(EnsureScriptEnvironment(), nullptr);
-  return mScriptGlobal;
+  return NS_SUCCEEDED(EnsureScriptEnvironment()) ? mScriptGlobal : nullptr;
 }
 
 NS_IMETHODIMP
@@ -5741,6 +5723,9 @@ nsDocShell::Create()
     Preferences::AddBoolVarCache(&sUseErrorPages,
                                  "browser.xul.error_pages.enabled",
                                  mUseErrorPages);
+    Preferences::AddBoolVarCache(&sInterceptionEnabled,
+                                 "dom.serviceWorkers.interception.enabled",
+                                 false);
     gAddedPreferencesVarCache = true;
   }
 
@@ -5840,11 +5825,6 @@ nsDocShell::Destroy()
 
   mParentWidget = nullptr;
   mCurrentURI = nullptr;
-
-  if (mURLSearchParams) {
-    mURLSearchParams->RemoveObservers();
-    mURLSearchParams = nullptr;
-  }
 
   if (mScriptGlobal) {
     mScriptGlobal->DetachFromDocShell();
@@ -11751,7 +11731,7 @@ nsDocShell::ShouldAddToSessionHistory(nsIURI* aURI)
   // should just do a spec compare, rather than two gets of the scheme and
   // then the path.  -Gagan
   nsresult rv;
-  nsAutoCString buf, pref;
+  nsAutoCString buf;
 
   rv = aURI->GetScheme(buf);
   if (NS_FAILED(rv)) {
@@ -11769,16 +11749,17 @@ nsDocShell::ShouldAddToSessionHistory(nsIURI* aURI)
     }
   }
 
-  rv = Preferences::GetDefaultCString("browser.newtab.url", &pref);
-
-  if (NS_FAILED(rv)) {
-    return true;
+  // Check if the webbrowser chrome wants us to proceed - by default it ensures
+  // aURI is not the newtab URI.
+  nsCOMPtr<nsIWebBrowserChrome3> browserChrome3 = do_GetInterface(mTreeOwner);
+  if (browserChrome3) {
+    bool shouldAdd;
+    rv = browserChrome3->ShouldAddToSessionHistory(this, aURI, &shouldAdd);
+    NS_ENSURE_SUCCESS(rv, true);
+    return shouldAdd;
   }
 
-  rv = aURI->GetSpec(buf);
-  NS_ENSURE_SUCCESS(rv, true);
-
-  return !buf.Equals(pref);
+  return true;
 }
 
 nsresult
@@ -13926,12 +13907,6 @@ nsDocShell::GetOpener()
   return opener;
 }
 
-URLSearchParams*
-nsDocShell::GetURLSearchParams()
-{
-  return mURLSearchParams;
-}
-
 class JavascriptTimelineMarker : public TimelineMarker
 {
 public:
@@ -14047,6 +14022,16 @@ nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNavigate,
                                       bool* aShouldIntercept)
 {
   *aShouldIntercept = false;
+  // Preffed off.
+  if (!sInterceptionEnabled) {
+    return NS_OK;
+  }
+
+  // No in private browsing
+  if (mInPrivateBrowsing) {
+    return NS_OK;
+  }
+
   if (mSandboxFlags) {
     // If we're sandboxed, don't intercept.
     return NS_OK;

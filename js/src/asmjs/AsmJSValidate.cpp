@@ -35,6 +35,7 @@
 #include "asmjs/AsmJSSignalHandlers.h"
 #include "builtin/SIMD.h"
 #include "frontend/Parser.h"
+#include "jit/AtomicOperations.h"
 #include "jit/CodeGenerator.h"
 #include "jit/CompileWrappers.h"
 #include "jit/MIR.h"
@@ -49,6 +50,7 @@
 
 #include "frontend/ParseNode-inl.h"
 #include "frontend/Parser-inl.h"
+#include "jit/AtomicOperations-inl.h"
 #include "jit/MacroAssembler-inl.h"
 
 using namespace js;
@@ -1540,7 +1542,8 @@ class MOZ_STACK_CLASS ModuleCompiler
             !addStandardLibraryAtomicsName("sub", AsmJSAtomicsBuiltin_sub) ||
             !addStandardLibraryAtomicsName("and", AsmJSAtomicsBuiltin_and) ||
             !addStandardLibraryAtomicsName("or", AsmJSAtomicsBuiltin_or) ||
-            !addStandardLibraryAtomicsName("xor", AsmJSAtomicsBuiltin_xor))
+            !addStandardLibraryAtomicsName("xor", AsmJSAtomicsBuiltin_xor) ||
+            !addStandardLibraryAtomicsName("isLockFree", AsmJSAtomicsBuiltin_isLockFree))
         {
             return false;
         }
@@ -4967,7 +4970,7 @@ CheckAtomicsLoad(FunctionCompiler& f, ParseNode* call, MDefinition** def, Type* 
     PrepareArrayIndex(f, &pointerDef, needsBoundsCheck, mask);
 
     *def = f.atomicLoadHeap(viewType, pointerDef, needsBoundsCheck);
-    *type = Type::Signed;
+    *type = Type::Intish;
     return true;
 }
 
@@ -5001,7 +5004,7 @@ CheckAtomicsStore(FunctionCompiler& f, ParseNode* call, MDefinition** def, Type*
     f.atomicStoreHeap(viewType, pointerDef, rhsDef, needsBoundsCheck);
 
     *def = rhsDef;
-    *type = Type::Signed;
+    *type = rhsType;
     return true;
 }
 
@@ -5033,7 +5036,24 @@ CheckAtomicsBinop(FunctionCompiler& f, ParseNode* call, MDefinition** def, Type*
     PrepareArrayIndex(f, &pointerDef, needsBoundsCheck, mask);
 
     *def = f.atomicBinopHeap(op, viewType, pointerDef, valueArgDef, needsBoundsCheck);
-    *type = Type::Signed;
+    *type = Type::Intish;
+    return true;
+}
+
+static bool
+CheckAtomicsIsLockFree(FunctionCompiler& f, ParseNode* call, MDefinition** def, Type* type)
+{
+    if (CallArgListLength(call) != 1)
+        return f.fail(call, "Atomics.isLockFree must be passed 1 argument");
+
+    ParseNode* sizeArg = CallArgList(call);
+
+    uint32_t size;
+    if (!IsLiteralInt(f.m(), sizeArg, &size))
+        return f.fail(sizeArg, "Atomics.isLockFree requires an integer literal argument");
+
+    *def = f.constant(Int32Value(AtomicOperations::isLockfree(size)), Type::Int);
+    *type = Type::Int;
     return true;
 }
 
@@ -5075,7 +5095,7 @@ CheckAtomicsCompareExchange(FunctionCompiler& f, ParseNode* call, MDefinition** 
 
     *def = f.atomicCompareExchangeHeap(viewType, pointerDef, oldValueArgDef, newValueArgDef,
                                        needsBoundsCheck);
-    *type = Type::Signed;
+    *type = Type::Intish;
     return true;
 }
 
@@ -5102,6 +5122,8 @@ CheckAtomicsBuiltinCall(FunctionCompiler& f, ParseNode* callNode, AsmJSAtomicsBu
         return CheckAtomicsBinop(f, callNode, resultDef, resultType, AtomicFetchOrOp);
       case AsmJSAtomicsBuiltin_xor:
         return CheckAtomicsBinop(f, callNode, resultDef, resultType, AtomicFetchXorOp);
+      case AsmJSAtomicsBuiltin_isLockFree:
+        return CheckAtomicsIsLockFree(f, callNode, resultDef, resultType);
       default:
         MOZ_CRASH("unexpected atomicsBuiltin function");
     }
@@ -5629,6 +5651,41 @@ class CheckSimdVectorScalarArgs
     }
 };
 
+class CheckSimdReplaceLaneArgs
+{
+    AsmJSSimdType formalSimdType_;
+
+  public:
+    explicit CheckSimdReplaceLaneArgs(AsmJSSimdType t) : formalSimdType_(t) {}
+
+    bool operator()(FunctionCompiler& f, ParseNode* arg, unsigned argIndex, Type actualType,
+                    MDefinition** def) const
+    {
+        MOZ_ASSERT(argIndex < 3);
+        uint32_t u32;
+        switch (argIndex) {
+          case 0:
+            // First argument is the vector
+            if (!(actualType <= Type(formalSimdType_))) {
+                return f.failf(arg, "%s is not a subtype of %s", actualType.toChars(),
+                               Type(formalSimdType_).toChars());
+            }
+            return true;
+          case 1:
+            // Second argument is the lane < 4
+            if (!IsLiteralOrConstInt(f, arg, &u32))
+                return f.failf(arg, "lane selector should be a constant integer literal");
+            if (u32 >= SimdTypeToLength(formalSimdType_))
+                return f.failf(arg, "lane selector should be in bounds");
+            return true;
+          case 2:
+            // Third argument is the scalar
+            return CheckSimdScalarArgs(formalSimdType_)(f, arg, argIndex, actualType, def);
+        }
+        return false;
+    }
+};
+
 } // anonymous namespace
 
 static inline bool
@@ -5684,14 +5741,17 @@ CheckSimdBinary<MSimdShift::Operation>(FunctionCompiler& f, ParseNode* call, Asm
 }
 
 static bool
-CheckSimdWith(FunctionCompiler& f, ParseNode* call, AsmJSSimdType opType, SimdLane lane,
-              MDefinition** def, Type* type)
+CheckSimdReplaceLane(FunctionCompiler& f, ParseNode* call, AsmJSSimdType opType,
+                     MDefinition** def, Type* type)
 {
     DefinitionVector defs;
-    if (!CheckSimdCallArgs(f, call, 2, CheckSimdVectorScalarArgs(opType), &defs))
+    if (!CheckSimdCallArgs(f, call, 3, CheckSimdReplaceLaneArgs(opType), &defs))
         return false;
+    ParseNode* laneArg = NextNode(CallArgList(call));
+    uint32_t lane;
+    JS_ALWAYS_TRUE(IsLiteralInt(f.m(), laneArg, &lane));
     *type = opType;
-    *def = f.insertElementSimd(defs[0], defs[1], lane, type->toMIRType());
+    *def = f.insertElementSimd(defs[0], defs[2], SimdLane(lane), type->toMIRType());
     return true;
 }
 
@@ -5950,14 +6010,8 @@ CheckSimdOperationCall(FunctionCompiler& f, ParseNode* call, const ModuleCompile
       case AsmJSSimdOperation_xor:
         return CheckSimdBinary(f, call, opType, MSimdBinaryBitwise::xor_, def, type);
 
-      case AsmJSSimdOperation_withX:
-        return CheckSimdWith(f, call, opType, SimdLane::LaneX, def, type);
-      case AsmJSSimdOperation_withY:
-        return CheckSimdWith(f, call, opType, SimdLane::LaneY, def, type);
-      case AsmJSSimdOperation_withZ:
-        return CheckSimdWith(f, call, opType, SimdLane::LaneZ, def, type);
-      case AsmJSSimdOperation_withW:
-        return CheckSimdWith(f, call, opType, SimdLane::LaneW, def, type);
+      case AsmJSSimdOperation_replaceLane:
+          return CheckSimdReplaceLane(f, call, opType, def, type);
 
       case AsmJSSimdOperation_fromInt32x4:
         return CheckSimdCast<MSimdConvert>(f, call, AsmJSSimdType_int32x4, opType, def, type);
@@ -9080,7 +9134,8 @@ GenerateAsyncInterruptExit(ModuleCompiler& m, Label* throwLabel)
     masm.transferReg(lr);
     masm.finishDataTransfer();
     masm.ret();
-
+#elif defined(JS_CODEGEN_ARM64)
+    MOZ_CRASH();
 #elif defined (JS_CODEGEN_NONE)
     MOZ_CRASH();
 #else

@@ -117,7 +117,9 @@ MResumePoint::writeRecoverData(CompactBufferWriter& writer) const
     // arguments_object.
     MOZ_ASSERT(CountArgSlots(script, fun) < SNAPSHOT_MAX_NARGS + 4);
 
+#ifdef DEBUG
     uint32_t implicit = StartArgSlot(script);
+#endif
     uint32_t formalArgs = CountArgSlots(script, fun);
     uint32_t nallocs = formalArgs + script->nfixed() + exprStack;
 
@@ -1387,14 +1389,6 @@ RObjectState::recover(JSContext* cx, SnapshotIterator& iter) const
             if (val.isUndefined())
                 continue;
 
-            // In order to simplify the code, we do not have a
-            // MStoreUnboxedBoolean, but we reuse the MStoreUnboxedScalar code.
-            // This has a nasty side-effect of add a MTruncate which coerce the
-            // boolean into an Int32. The following code check that if the
-            // property was expected to be a boolean, then we coerce it here.
-            if (properties[i].type == JSVAL_TYPE_BOOLEAN)
-                val.setBoolean(val.toInt32() != 0);
-
             id = NameToId(properties[i].name);
             ObjectOpResult result;
 
@@ -1500,5 +1494,31 @@ bool RStringReplace::recover(JSContext* cx, SnapshotIterator& iter) const
         return false;
 
     iter.storeInstructionResult(result);
+    return true;
+}
+
+bool
+MAtomicIsLockFree::writeRecoverData(CompactBufferWriter& writer) const
+{
+    MOZ_ASSERT(canRecoverOnBailout());
+    writer.writeUnsigned(uint32_t(RInstruction::Recover_AtomicIsLockFree));
+    return true;
+}
+
+RAtomicIsLockFree::RAtomicIsLockFree(CompactBufferReader& reader)
+{ }
+
+bool
+RAtomicIsLockFree::recover(JSContext* cx, SnapshotIterator& iter) const
+{
+    RootedValue operand(cx, iter.read());
+    MOZ_ASSERT(operand.isInt32());
+
+    int32_t result;
+    if (!js::AtomicIsLockFree(cx, operand, &result))
+        return false;
+
+    RootedValue rootedResult(cx, js::Int32Value(result));
+    iter.storeInstructionResult(rootedResult);
     return true;
 }

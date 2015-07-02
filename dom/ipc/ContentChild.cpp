@@ -92,7 +92,6 @@
 #include "nsDebugImpl.h"
 #include "nsHashPropertyBag.h"
 #include "nsLayoutStylesheetCache.h"
-#include "nsIJSRuntimeService.h"
 #include "nsThreadManager.h"
 #include "nsAnonymousTemporaryFile.h"
 #include "nsISpellChecker.h"
@@ -1240,26 +1239,6 @@ ContentChild::RecvUpdateServiceWorkerRegistrations()
     nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
     if (swm) {
         swm->UpdateAllRegistrations();
-    }
-    return true;
-}
-
-bool
-ContentChild::RecvRemoveServiceWorkerRegistrationsForDomain(const nsString& aDomain)
-{
-    nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
-    if (swm) {
-        swm->Remove(NS_ConvertUTF16toUTF8(aDomain));
-    }
-    return true;
-}
-
-bool
-ContentChild::RecvRemoveServiceWorkerRegistrations()
-{
-    nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
-    if (swm) {
-        swm->RemoveAll();
     }
     return true;
 }

@@ -21,6 +21,7 @@
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
+#include "mozilla/unused.h"
 #include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
 #include "nsPresContext.h"
@@ -249,6 +250,50 @@ private:
   }
 };
 
+class ForceCloseHelper final : public nsIIPCBackgroundChildCreateCallback
+{
+public:
+  NS_DECL_ISUPPORTS
+
+  static void ForceClose(const MessagePortIdentifier& aIdentifier)
+  {
+    PBackgroundChild* actor =
+      mozilla::ipc::BackgroundChild::GetForCurrentThread();
+    if (actor) {
+      unused << actor->SendMessagePortForceClose(aIdentifier.uuid(),
+                                                 aIdentifier.destinationUuid(),
+                                                 aIdentifier.sequenceId());
+      return;
+    }
+
+    nsRefPtr<ForceCloseHelper> helper = new ForceCloseHelper(aIdentifier);
+    if (NS_WARN_IF(!mozilla::ipc::BackgroundChild::GetOrCreateForCurrentThread(helper))) {
+      MOZ_CRASH();
+    }
+  }
+
+private:
+  explicit ForceCloseHelper(const MessagePortIdentifier& aIdentifier)
+    : mIdentifier(aIdentifier)
+  {}
+
+  ~ForceCloseHelper() {}
+
+  void ActorFailed() override
+  {
+    MOZ_CRASH("Failed to create a PBackgroundChild actor!");
+  }
+
+  void ActorCreated(mozilla::ipc::PBackgroundChild* aActor) override
+  {
+    ForceClose(mIdentifier);
+  }
+
+  const MessagePortIdentifier mIdentifier;
+};
+
+NS_IMPL_ISUPPORTS(ForceCloseHelper, nsIIPCBackgroundChildCreateCallback)
+
 } // anonymous namespace
 
 MessagePort::MessagePort(nsPIDOMWindow* aWindow)
@@ -314,8 +359,13 @@ MessagePort::Initialize(const nsID& aUUID,
   mNextStep = eNextStepNone;
 
   if (mNeutered) {
+    // If this port is neutered we don't want to keep it alive artificially nor
+    // we want to add listeners or workerFeatures.
     mState = eStateDisentangled;
-  } else if (mState == eStateEntangling) {
+    return;
+  }
+
+  if (mState == eStateEntangling) {
     ConnectToPBackground();
   } else {
     MOZ_ASSERT(mState == eStateUnshippedEntangled);
@@ -794,6 +844,14 @@ MessagePort::UpdateMustKeepAlive()
       mWorkerFeature = nullptr;
     }
 
+    if (NS_IsMainThread()) {
+      nsCOMPtr<nsIObserverService> obs =
+        do_GetService("@mozilla.org/observer-service;1");
+      if (obs) {
+        obs->RemoveObserver(this, "inner-window-destroyed");
+      }
+    }
+
     Release();
     return;
   }
@@ -828,12 +886,6 @@ MessagePort::Observe(nsISupports* aSubject, const char* aTopic,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (innerID == mInnerID) {
-    nsCOMPtr<nsIObserverService> obs =
-      do_GetService("@mozilla.org/observer-service;1");
-    if (obs) {
-      obs->RemoveObserver(this, "inner-window-destroyed");
-    }
-
     Close();
   }
 
@@ -861,6 +913,12 @@ MessagePort::RemoveDocFromBFCache()
   }
 
   bfCacheEntry->RemoveFromBFCacheSync();
+}
+
+/* static */ void
+MessagePort::ForceClose(const MessagePortIdentifier& aIdentifier)
+{
+  ForceCloseHelper::ForceClose(aIdentifier);
 }
 
 } // namespace dom

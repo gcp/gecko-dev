@@ -25,18 +25,18 @@ window.queuedFrames = [];
  */
 window.Frame = React.createClass({
   propTypes: {
-    style: React.PropTypes.object,
-    head: React.PropTypes.node,
-    width: React.PropTypes.number,
-    height: React.PropTypes.number,
-    onContentsRendered: React.PropTypes.func,
     className: React.PropTypes.string,
     /* By default, <link rel="stylesheet> nodes from the containing frame's
        head will be cloned into this iframe.  However, if the link also has
        a "class" attribute, we only clone it if that class attribute is the
        same as cssClass.  This allows us to avoid injecting stylesheets that
        aren't intended for this rendering of this component. */
-    cssClass: React.PropTypes.string
+    cssClass: React.PropTypes.string,
+    head: React.PropTypes.node,
+    height: React.PropTypes.number,
+    onContentsRendered: React.PropTypes.func,
+    style: React.PropTypes.object,
+    width: React.PropTypes.number
   },
   render: function() {
     return React.createElement("iframe", {
@@ -69,9 +69,13 @@ window.Frame = React.createClass({
         // if this node is a CSS stylesheet...
         if (isStyleSheet(parentHeadNode)) {
           // and it has a class different from the one that this frame does,
-          // return immediately instead of appending it.
-          if (parentHeadNode.hasAttribute("class") && this.props.cssClass &&
-            parentHeadNode.getAttribute("class") !== this.props.cssClass) {
+          // return immediately instead of appending it.  Note that this
+          // explicitly does not check for cssClass existence, because
+          // non-existence of cssClass will be different from a style
+          // element that does have a class on it, and we want it to return
+          // in that case.
+          if (parentHeadNode.hasAttribute("class") &&
+              parentHeadNode.getAttribute("class") !== this.props.cssClass) {
             return;
           }
         }

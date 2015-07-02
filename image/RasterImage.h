@@ -23,6 +23,7 @@
 #include "nsIProperties.h"
 #include "nsTArray.h"
 #include "imgFrame.h"
+#include "LookupResult.h"
 #include "nsThreadUtils.h"
 #include "DecodePool.h"
 #include "Orientation.h"
@@ -244,6 +245,7 @@ public:
                                        nsresult aStatus,
                                        bool aLastPart) override;
 
+  void NotifyForLoadEvent(Progress aProgress);
   void NotifyForDecodeOnlyOnDraw();
 
   /**
@@ -294,15 +296,15 @@ private:
                                           GraphicsFilter aFilter,
                                           uint32_t aFlags);
 
-  TemporaryRef<gfx::SourceSurface> CopyFrame(uint32_t aWhichFrame,
+  already_AddRefed<gfx::SourceSurface> CopyFrame(uint32_t aWhichFrame,
                                              uint32_t aFlags);
 
   Pair<DrawResult, RefPtr<gfx::SourceSurface>>
     GetFrameInternal(uint32_t aWhichFrame, uint32_t aFlags);
 
-  DrawableFrameRef LookupFrameInternal(uint32_t aFrameNum,
-                                       const gfx::IntSize& aSize,
-                                       uint32_t aFlags);
+  LookupResult LookupFrameInternal(uint32_t aFrameNum,
+                                   const gfx::IntSize& aSize,
+                                   uint32_t aFlags);
   DrawableFrameRef LookupFrame(uint32_t aFrameNum,
                                const nsIntSize& aSize,
                                uint32_t aFlags);
@@ -360,6 +362,9 @@ private: // data
   nsIntSize                  mSize;
   Orientation                mOrientation;
 
+  /// If this has a value, we're waiting for SetSize() to send the load event.
+  Maybe<Progress>            mLoadProgress;
+
   nsCOMPtr<nsIProperties>   mProperties;
 
   /// If this image is animated, a FrameAnimator which manages its animation.
@@ -407,6 +412,7 @@ private: // data
   bool                       mHasSize:1;       // Has SetSize() been called?
   bool                       mDecodeOnlyOnDraw:1; // Decoding only on draw?
   bool                       mTransient:1;     // Is the image short-lived?
+  bool                       mSyncLoad:1;      // Are we loading synchronously?
   bool                       mDiscardable:1;   // Is container discardable?
   bool                       mHasSourceData:1; // Do we have source data?
   bool                       mHasBeenDecoded:1; // Decoded at least once?

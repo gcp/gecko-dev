@@ -18,8 +18,8 @@
 #include "nsDOMJSUtils.h"
 #include "nsJSUtils.h"
 #include "nsIDocument.h"
-#include "nsIJSRuntimeService.h"
 #include "nsIXPConnect.h"
+#include "xpcpublic.h"
 #include "nsIDOMElement.h"
 #include "prmem.h"
 #include "nsIContent.h"
@@ -90,8 +90,7 @@ static PLDHashTable* sNPObjWrappers;
 // wrappers and we can kill off hash tables etc.
 static int32_t sWrapperCount;
 
-// The runtime service used to register/unregister GC callbacks.
-nsCOMPtr<nsIJSRuntimeService> sCallbackRuntime;
+static bool sCallbackIsRegistered = false;
 
 static nsTArray<NPObject*>* sDelayedReleases;
 
@@ -319,18 +318,11 @@ DelayedReleaseGCCallback(JSGCStatus status)
 static bool
 RegisterGCCallbacks()
 {
-  if (sCallbackRuntime) {
+  if (sCallbackIsRegistered) {
     return true;
   }
 
-  static const char rtsvc_id[] = "@mozilla.org/js/xpc/RuntimeService;1";
-  nsCOMPtr<nsIJSRuntimeService> rtsvc(do_GetService(rtsvc_id));
-  if (!rtsvc) {
-    return false;
-  }
-
-  JSRuntime *jsRuntime = nullptr;
-  rtsvc->GetRuntime(&jsRuntime);
+  JSRuntime *jsRuntime = xpc::GetJSRuntime();
   MOZ_ASSERT(jsRuntime != nullptr);
 
   // Register a callback to trace wrapped JSObjects.
@@ -340,30 +332,29 @@ RegisterGCCallbacks()
 
   // Register our GC callback to perform delayed destruction of finalized
   // NPObjects.
-  rtsvc->RegisterGCCallback(DelayedReleaseGCCallback);
+  xpc::AddGCCallback(DelayedReleaseGCCallback);
 
-  // Set runtime pointer to indicate that callbacks have been registered.
-  sCallbackRuntime = rtsvc;
+  sCallbackIsRegistered = true;
+
   return true;
 }
 
 static void
 UnregisterGCCallbacks()
 {
-  MOZ_ASSERT(sCallbackRuntime);
+  MOZ_ASSERT(sCallbackIsRegistered);
 
-  JSRuntime *jsRuntime = nullptr;
-  sCallbackRuntime->GetRuntime(&jsRuntime);
+  JSRuntime *jsRuntime = xpc::GetJSRuntime();
   MOZ_ASSERT(jsRuntime != nullptr);
 
   // Remove tracing callback.
   JS_RemoveExtraGCRootsTracer(jsRuntime, TraceJSObjWrappers, nullptr);
 
   // Remove delayed destruction callback.
-  sCallbackRuntime->UnregisterGCCallback(DelayedReleaseGCCallback);
-
-  // Unset runtime pointer to indicate callbacks are no longer registered.
-  sCallbackRuntime = nullptr;
+  if (sCallbackIsRegistered) {
+    xpc::RemoveGCCallback(DelayedReleaseGCCallback);
+    sCallbackIsRegistered = false;
+  }
 }
 
 static bool
@@ -496,9 +487,9 @@ NPVariantToJSVal(NPP npp, JSContext *cx, const NPVariant *variant)
   case NPVariantType_Void :
     return JS::UndefinedValue();
   case NPVariantType_Null :
-    return JSVAL_NULL;
+    return JS::NullValue();
   case NPVariantType_Bool :
-    return BOOLEAN_TO_JSVAL(NPVARIANT_TO_BOOLEAN(*variant));
+    return JS::BooleanValue(NPVARIANT_TO_BOOLEAN(*variant));
   case NPVariantType_Int32 :
     {
       // Don't use INT_TO_JSVAL directly to prevent bugs when dealing
@@ -518,7 +509,7 @@ NPVariantToJSVal(NPP npp, JSContext *cx, const NPVariant *variant)
         ::JS_NewUCStringCopyN(cx, utf16String.get(), utf16String.Length());
 
       if (str) {
-        return STRING_TO_JSVAL(str);
+        return JS::StringValue(str);
       }
 
       break;
@@ -530,7 +521,7 @@ NPVariantToJSVal(NPP npp, JSContext *cx, const NPVariant *variant)
           nsNPObjWrapper::GetNewOrUsed(npp, cx, NPVARIANT_TO_OBJECT(*variant));
 
         if (obj) {
-          return OBJECT_TO_JSVAL(obj);
+          return JS::ObjectValue(*obj);
         }
       }
 

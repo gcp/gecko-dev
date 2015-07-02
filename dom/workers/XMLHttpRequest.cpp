@@ -1187,7 +1187,7 @@ EventRunnable::PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
   if (NS_SUCCEEDED(mResponseTextResult)) {
     mResponseResult = mResponseTextResult;
     if (mResponseText.IsVoid()) {
-      mResponse = JSVAL_NULL;
+      mResponse.setNull();
     }
   }
   else {
@@ -2457,7 +2457,7 @@ XMLHttpRequest::GetResponse(JSContext* /* unused */,
         return;
       }
 
-      mStateData.mResponse = STRING_TO_JSVAL(str);
+      mStateData.mResponse.setString(str);
     }
   }
 

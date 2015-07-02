@@ -39,7 +39,7 @@ namespace layers {
 class Layer;
 class Compositor;
 class ThebesBufferData;
-class TiledLayerComposer;
+class TiledContentHost;
 class CompositableParentManager;
 class PCompositableParent;
 struct EffectChain;
@@ -67,7 +67,7 @@ public:
   NS_INLINE_DECL_REFCOUNTING(CompositableHost)
   explicit CompositableHost(const TextureInfo& aTextureInfo);
 
-  static TemporaryRef<CompositableHost> Create(const TextureInfo& aTextureInfo);
+  static already_AddRefed<CompositableHost> Create(const TextureInfo& aTextureInfo);
 
   virtual CompositableType GetType() = 0;
 
@@ -132,7 +132,7 @@ public:
   Layer* GetLayer() const { return mLayer; }
   void SetLayer(Layer* aLayer) { mLayer = aLayer; }
 
-  virtual TiledLayerComposer* AsTiledLayerComposer() { return nullptr; }
+  virtual TiledContentHost* AsTiledContentHost() { return nullptr; }
 
   typedef uint32_t AttachFlags;
   static const AttachFlags NO_FLAGS = 0;
@@ -183,7 +183,7 @@ public:
                     bool aDumpHtml=false) { }
   static void DumpTextureHost(std::stringstream& aStream, TextureHost* aTexture);
 
-  virtual TemporaryRef<gfx::DataSourceSurface> GetAsSurface() { return nullptr; }
+  virtual already_AddRefed<gfx::DataSourceSurface> GetAsSurface() { return nullptr; }
 
   virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix) = 0;
 
@@ -221,7 +221,7 @@ public:
 
   virtual void Unlock() { }
 
-  virtual TemporaryRef<TexturedEffect> GenEffect(const gfx::Filter& aFilter) {
+  virtual already_AddRefed<TexturedEffect> GenEffect(const gfx::Filter& aFilter) {
     return nullptr;
   }
 

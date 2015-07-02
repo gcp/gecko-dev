@@ -71,6 +71,7 @@ public:
 
   void SetGroupStartTimestamp(const TimeUnit& aGroupStartTimestamp) override;
   void RestartGroupStartTimestamp() override;
+  TimeUnit GroupEndTimestamp() override;
 
   // Interface for MediaSourceDemuxer
   MediaInfo GetMetadata();
@@ -254,7 +255,17 @@ private:
     }
   };
 
-  bool ProcessFrame(MediaRawData* aSample, TrackData& aTrackData);
+  void CheckSequenceDiscontinuity();
+  void ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData);
+  void CheckNextInsertionIndex(TrackData& aTrackData,
+                               const TimeUnit& aSampleTime);
+  void InsertFrames(TrackBuffer& aSamples,
+                    const TimeIntervals& aIntervals,
+                    TrackData& aTrackData);
+  void RemoveFrames(const TimeIntervals& aIntervals,
+                    TrackData& aTrackData,
+                    uint32_t aStartIndex);
+  void UpdateBufferedRanges();
   void RejectProcessing(nsresult aRejectValue, const char* aName);
   void ResolveProcessing(bool aResolveValue, const char* aName);
   MediaPromiseRequestHolder<CodedFrameProcessingPromise> mProcessingRequest;
@@ -291,6 +302,7 @@ private:
   }
   RefPtr<MediaTaskQueue> mTaskQueue;
 
+  TimeInterval mAppendWindow;
   TimeUnit mTimestampOffset;
   TimeUnit mLastTimestampOffset;
   void RestoreCachedVariables();
@@ -310,12 +322,15 @@ private:
 
   // Global size of this source buffer content.
   Atomic<int64_t> mSizeSourceBuffer;
+  uint32_t mEvictionThreshold;
+  Atomic<bool> mEvictionOccurred;
 
   // Monitor to protect following objects accessed across multipple threads.
   mutable Monitor mMonitor;
   // Stable audio and video track time ranges.
   TimeIntervals mVideoBufferedRanges;
   TimeIntervals mAudioBufferedRanges;
+  TimeUnit mOfficialGroupEndTimestamp;
   // MediaInfo of the first init segment read.
   MediaInfo mInfo;
 };

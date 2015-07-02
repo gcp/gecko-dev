@@ -455,6 +455,7 @@ function Workers() {
   this._onWorkerListChanged = this._onWorkerListChanged.bind(this);
   this._onWorkerFreeze = this._onWorkerFreeze.bind(this);
   this._onWorkerThaw = this._onWorkerThaw.bind(this);
+  this._onWorkerSelect = this._onWorkerSelect.bind(this);
 }
 
 Workers.prototype = {
@@ -476,6 +477,10 @@ Workers.prototype = {
   },
 
   _updateWorkerList: function () {
+    if (!this._tabClient.listWorkers) {
+      return;
+    }
+
     this._tabClient.listWorkers((response) => {
       let workerActors = new Set();
       for (let worker of response.workers) {
@@ -516,6 +521,13 @@ Workers.prototype = {
   _onWorkerThaw: function (type, packet) {
     let workerClient = this._workerClients.get(packet.from);
     DebuggerView.Workers.addWorker(packet.from, workerClient.url);
+  },
+
+  _onWorkerSelect: function (workerActor) {
+    let workerClient = this._workerClients.get(workerActor);
+    gDevTools.showToolbox(devtools.TargetFactory.forWorker(workerClient),
+                          "jsdebugger",
+                          devtools.Toolbox.HostType.WINDOW);
   }
 };
 
@@ -1208,7 +1220,7 @@ SourceScripts.prototype = {
   connect: function() {
     dumpn("SourceScripts is connecting...");
     this.debuggerClient.addListener("newGlobal", this._onNewGlobal);
-    this.debuggerClient.addListener("newSource", this._onNewSource);
+    this.activeThread.addListener("newSource", this._onNewSource);
     this.activeThread.addListener("blackboxchange", this._onBlackBoxChange);
     this.activeThread.addListener("prettyprintchange", this._onPrettyPrintChange);
     this.handleTabNavigation();
@@ -1223,7 +1235,7 @@ SourceScripts.prototype = {
     }
     dumpn("SourceScripts is disconnecting...");
     this.debuggerClient.removeListener("newGlobal", this._onNewGlobal);
-    this.debuggerClient.removeListener("newSource", this._onNewSource);
+    this.activeThread.removeListener("newSource", this._onNewSource);
     this.activeThread.removeListener("blackboxchange", this._onBlackBoxChange);
     this.activeThread.addListener("prettyprintchange", this._onPrettyPrintChange);
   },

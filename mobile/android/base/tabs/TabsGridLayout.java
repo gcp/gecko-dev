@@ -5,28 +5,30 @@
 
 package org.mozilla.gecko.tabs;
 
-import java.util.ArrayList;
-import java.util.List;
-
-import org.mozilla.gecko.animation.ViewHelper;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tab;
-import org.mozilla.gecko.tabs.TabsPanel.TabsLayout;
 import org.mozilla.gecko.Tabs;
+import org.mozilla.gecko.animation.PropertyAnimator;
+import org.mozilla.gecko.animation.ViewHelper;
+import org.mozilla.gecko.tabs.TabsPanel.TabsLayout;
 
 import android.content.Context;
 import android.content.res.Resources;
 import android.content.res.TypedArray;
 import android.graphics.PointF;
+import android.graphics.Rect;
 import android.util.AttributeSet;
 import android.util.SparseArray;
-import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.animation.DecelerateInterpolator;
+import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.GridView;
@@ -36,6 +38,8 @@ import com.nineoldandroids.animation.ObjectAnimator;
 import com.nineoldandroids.animation.PropertyValuesHolder;
 import com.nineoldandroids.animation.ValueAnimator;
 
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A tabs layout implementation for the tablet redesign (bug 1014156).
@@ -47,18 +51,17 @@ class TabsGridLayout extends GridView
                                 Tabs.OnTabsChangedListener {
     private static final String LOGTAG = "Gecko" + TabsGridLayout.class.getSimpleName();
 
-    private static final int ANIM_TIME_MS = 200;
     public static final int ANIM_DELAY_MULTIPLE_MS = 20;
+    private static final int ANIM_TIME_MS = 200;
     private static final DecelerateInterpolator ANIM_INTERPOLATOR = new DecelerateInterpolator();
 
     private final Context mContext;
-    private TabsPanel mTabsPanel;
     private final SparseArray<PointF> mTabLocations = new SparseArray<PointF>();
-
-    final private boolean mIsPrivate;
-
+    private final boolean mIsPrivate;
     private final TabsLayoutAdapter mTabsAdapter;
     private final int mColumnWidth;
+    private TabsPanel mTabsPanel;
+    private int lastSelectedTabId;
 
     public TabsGridLayout(Context context, AttributeSet attrs) {
         super(context, attrs, R.attr.tabGridLayoutViewStyle);
@@ -103,40 +106,10 @@ class TabsGridLayout extends GridView
                 autoHidePanel();
             }
         });
-    }
 
-    private class TabsGridLayoutAdapter extends TabsLayoutAdapter {
-
-        final private Button.OnClickListener mCloseClickListener;
-
-        public TabsGridLayoutAdapter (Context context) {
-            super(context, R.layout.new_tablet_tabs_item_cell);
-
-            mCloseClickListener = new Button.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    closeTab(v);
-                }
-            };
-        }
-
-        @Override
-        TabsLayoutItemView newView(int position, ViewGroup parent) {
-            final TabsLayoutItemView item = super.newView(position, parent);
-
-            item.setCloseOnClickListener(mCloseClickListener);
-
-            return item;
-        }
-
-        @Override
-        public void bindView(TabsLayoutItemView view, Tab tab) {
-            super.bindView(view, tab);
-
-            // If we're recycling this view, there's a chance it was transformed during
-            // the close animation. Remove any of those properties.
-            resetTransforms(view);
-        }
+        TabSwipeGestureListener mSwipeListener = new TabSwipeGestureListener();
+        setOnTouchListener(mSwipeListener);
+        setOnScrollListener(mSwipeListener.makeScrollListener());
     }
 
     private void populateTabLocations(final Tab removedTab) {
@@ -192,13 +165,19 @@ class TabsGridLayout extends GridView
         Tabs.getInstance().refreshThumbnails();
         Tabs.registerOnTabsChangedListener(this);
         refreshTabsData();
+
+        Tab currentlySelectedTab = Tabs.getInstance().getSelectedTab();
+        if (lastSelectedTabId != currentlySelectedTab.getId()) {
+            smoothScrollToPosition(mTabsAdapter.getPositionForTab(currentlySelectedTab));
+        }
     }
 
     @Override
     public void hide() {
+        lastSelectedTabId = Tabs.getInstance().getSelectedTab().getId();
         setVisibility(View.GONE);
         Tabs.unregisterOnTabsChangedListener(this);
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Tab:Screenshot:Cancel",""));
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Tab:Screenshot:Cancel", ""));
         mTabsAdapter.clear();
     }
 
@@ -231,7 +210,7 @@ class TabsGridLayout extends GridView
                         int selected = mTabsAdapter.getPositionForTab(tabsInstance.getSelectedTab());
                         updateSelectedStyle(selected);
                     }
-                    if(!tab.isPrivate()) {
+                    if (!tab.isPrivate()) {
                         // Make sure we always have at least one normal tab
                         final Iterable<Tab> tabs = tabsInstance.getTabsInOrder();
                         boolean removedTabIsLastNormalTab = true;
@@ -304,6 +283,9 @@ class TabsGridLayout extends GridView
     private void resetTransforms(View view) {
         ViewHelper.setAlpha(view, 1);
         ViewHelper.setTranslationX(view, 0);
+        ViewHelper.setTranslationY(view, 0);
+
+        ((TabsLayoutItemView) view).setCloseVisible(true);
     }
 
     @Override
@@ -335,7 +317,6 @@ class TabsGridLayout extends GridView
         Tab tab = Tabs.getInstance().getTab(itemView.getTabId());
 
         Tabs.getInstance().closeTab(tab);
-        updateSelectedPosition();
     }
 
     private void animateRemoveTab(final Tab removedTab) {
@@ -366,7 +347,7 @@ class TabsGridLayout extends GridView
                 final List<Animator> childAnimators = new ArrayList<>();
 
                 PropertyValuesHolder translateX, translateY;
-                for (int x = 0, i = removedPosition - firstPosition ; i < childCount; i++, x++) {
+                for (int x = 0, i = removedPosition - firstPosition; i < childCount; i++, x++) {
                     final View child = getChildAt(i);
                     ObjectAnimator animator;
 
@@ -396,7 +377,7 @@ class TabsGridLayout extends GridView
                 for (int x = 1, i = (removedPosition - firstPosition) + 1; i < childCount; i++, x++) {
                     final View child = getChildAt(i);
 
-                    final PointF targetLocation = mTabLocations.get(x+1);
+                    final PointF targetLocation = mTabLocations.get(x + 1);
                     if (targetLocation == null) {
                         continue;
                     }
@@ -408,5 +389,279 @@ class TabsGridLayout extends GridView
                 return true;
             }
         });
+    }
+
+    private void animateCancel(final View view) {
+        PropertyAnimator animator = new PropertyAnimator(ANIM_TIME_MS);
+        animator.attach(view, PropertyAnimator.Property.ALPHA, 1);
+        animator.attach(view, PropertyAnimator.Property.TRANSLATION_X, 0);
+
+        animator.addPropertyAnimationListener(new PropertyAnimator.PropertyAnimationListener() {
+            @Override
+            public void onPropertyAnimationStart() {
+            }
+
+            @Override
+            public void onPropertyAnimationEnd() {
+                TabsLayoutItemView tab = (TabsLayoutItemView) view;
+                tab.setCloseVisible(true);
+            }
+        });
+
+        animator.start();
+    }
+
+    private class TabsGridLayoutAdapter extends TabsLayoutAdapter {
+
+        final private Button.OnClickListener mCloseClickListener;
+
+        public TabsGridLayoutAdapter(Context context) {
+            super(context, R.layout.new_tablet_tabs_item_cell);
+
+            mCloseClickListener = new Button.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    closeTab(v);
+                }
+            };
+        }
+
+        @Override
+        TabsLayoutItemView newView(int position, ViewGroup parent) {
+            final TabsLayoutItemView item = super.newView(position, parent);
+
+            item.setCloseOnClickListener(mCloseClickListener);
+
+            return item;
+        }
+
+        @Override
+        public void bindView(TabsLayoutItemView view, Tab tab) {
+            super.bindView(view, tab);
+
+            // If we're recycling this view, there's a chance it was transformed during
+            // the close animation. Remove any of those properties.
+            resetTransforms(view);
+        }
+    }
+
+    private class TabSwipeGestureListener implements View.OnTouchListener {
+        // same value the stock browser uses for after drag animation velocity in pixels/sec
+        // http://androidxref.com/4.0.4/xref/packages/apps/Browser/src/com/android/browser/NavTabScroller.java#61
+        private static final float MIN_VELOCITY = 750;
+
+        private final int mSwipeThreshold;
+        private final int mMinFlingVelocity;
+
+        private final int mMaxFlingVelocity;
+        private VelocityTracker mVelocityTracker;
+
+        private int mTabWidth = 1;
+
+        private View mSwipeView;
+        private Runnable mPendingCheckForTap;
+
+        private float mSwipeStartX;
+        private boolean mSwiping;
+        private boolean mEnabled;
+
+        public TabSwipeGestureListener() {
+            mEnabled = true;
+
+            ViewConfiguration vc = ViewConfiguration.get(TabsGridLayout.this.getContext());
+            mSwipeThreshold = vc.getScaledTouchSlop();
+            mMinFlingVelocity = (int) (TabsGridLayout.this.getContext().getResources().getDisplayMetrics().density * MIN_VELOCITY);
+            mMaxFlingVelocity = vc.getScaledMaximumFlingVelocity();
+        }
+
+        public void setEnabled(boolean enabled) {
+            mEnabled = enabled;
+        }
+
+        public OnScrollListener makeScrollListener() {
+            return new OnScrollListener() {
+                @Override
+                public void onScrollStateChanged(AbsListView view, int scrollState) {
+                    setEnabled(scrollState != GridView.OnScrollListener.SCROLL_STATE_TOUCH_SCROLL);
+                }
+
+                @Override
+                public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
+
+                }
+            };
+        }
+
+        @Override
+        public boolean onTouch(View view, MotionEvent e) {
+            if (!mEnabled) {
+                return false;
+            }
+
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN: {
+                    // Check if we should set pressed state on the
+                    // touched view after a standard delay.
+                    triggerCheckForTap();
+
+                    final float x = e.getRawX();
+                    final float y = e.getRawY();
+
+                    // Find out which view is being touched
+                    mSwipeView = findViewAt(x, y);
+
+                    if (mSwipeView != null) {
+                        if (mTabWidth < 2) {
+                            mTabWidth = mSwipeView.getWidth();
+                        }
+
+                        mSwipeStartX = e.getRawX();
+
+                        mVelocityTracker = VelocityTracker.obtain();
+                        mVelocityTracker.addMovement(e);
+                    }
+
+                    view.onTouchEvent(e);
+                    return true;
+                }
+
+                case MotionEvent.ACTION_UP: {
+                    if (mSwipeView == null) {
+                        break;
+                    }
+
+                    cancelCheckForTap();
+                    mSwipeView.setPressed(false);
+
+                    if (!mSwiping) {
+                        TabsLayoutItemView item = (TabsLayoutItemView) mSwipeView;
+                        Tabs.getInstance().selectTab(item.getTabId());
+                        autoHidePanel();
+
+                        mVelocityTracker.recycle();
+                        mVelocityTracker = null;
+                        break;
+                    }
+
+                    mVelocityTracker.addMovement(e);
+                    mVelocityTracker.computeCurrentVelocity(1000, mMaxFlingVelocity);
+
+                    float velocityX = Math.abs(mVelocityTracker.getXVelocity());
+
+                    boolean dismiss = false;
+
+                    float deltaX = ViewHelper.getTranslationX(mSwipeView);
+
+                    if (Math.abs(deltaX) > mTabWidth / 2) {
+                        dismiss = true;
+                    } else if (mMinFlingVelocity <= velocityX && velocityX <= mMaxFlingVelocity) {
+                        dismiss = mSwiping && (deltaX * mVelocityTracker.getYVelocity() > 0);
+                    }
+                    if (dismiss) {
+                        closeTab(mSwipeView.findViewById(R.id.close));
+                    } else {
+                        animateCancel(mSwipeView);
+                    }
+                    mVelocityTracker.recycle();
+                    mVelocityTracker = null;
+                    mSwipeView = null;
+
+                    mSwipeStartX = 0;
+                    mSwiping = false;
+                }
+
+                case MotionEvent.ACTION_MOVE: {
+                    if (mSwipeView == null || mVelocityTracker == null) {
+                        break;
+                    }
+
+                    mVelocityTracker.addMovement(e);
+
+                    float delta = e.getRawX() - mSwipeStartX;
+
+                    boolean isScrollingX = Math.abs(delta) > mSwipeThreshold;
+                    boolean isSwipingToClose = isScrollingX;
+
+                    // If we're actually swiping, make sure we don't
+                    // set pressed state on the swiped view.
+                    if (isScrollingX) {
+                        cancelCheckForTap();
+                    }
+
+                    if (isSwipingToClose) {
+                        mSwiping = true;
+                        TabsGridLayout.this.requestDisallowInterceptTouchEvent(true);
+
+                        ((TabsLayoutItemView) mSwipeView).setCloseVisible(false);
+
+                        // Stops listview from highlighting the touched item
+                        // in the list when swiping.
+                        MotionEvent cancelEvent = MotionEvent.obtain(e);
+                        cancelEvent.setAction(MotionEvent.ACTION_CANCEL |
+                                (e.getActionIndex() << MotionEvent.ACTION_POINTER_INDEX_SHIFT));
+                        TabsGridLayout.this.onTouchEvent(cancelEvent);
+                        cancelEvent.recycle();
+                    }
+
+                    if (mSwiping) {
+                        ViewHelper.setTranslationX(mSwipeView, delta);
+
+                        ViewHelper.setAlpha(mSwipeView, Math.min(1f,
+                                1f - 2f * Math.abs(delta) / mTabWidth));
+
+                        return true;
+                    }
+
+                    break;
+                }
+            }
+            return false;
+        }
+
+        private View findViewAt(float rawX, float rawY) {
+            Rect rect = new Rect();
+
+            int[] listViewCoords = new int[2];
+            TabsGridLayout.this.getLocationOnScreen(listViewCoords);
+
+            int x = (int) rawX - listViewCoords[0];
+            int y = (int) rawY - listViewCoords[1];
+
+            for (int i = 0; i < TabsGridLayout.this.getChildCount(); i++) {
+                View child = TabsGridLayout.this.getChildAt(i);
+                child.getHitRect(rect);
+
+                if (rect.contains(x, y)) {
+                    return child;
+                }
+            }
+
+            return null;
+        }
+
+        private void triggerCheckForTap() {
+            if (mPendingCheckForTap == null) {
+                mPendingCheckForTap = new CheckForTap();
+            }
+
+            TabsGridLayout.this.postDelayed(mPendingCheckForTap, ViewConfiguration.getTapTimeout());
+        }
+
+        private void cancelCheckForTap() {
+            if (mPendingCheckForTap == null) {
+                return;
+            }
+
+            TabsGridLayout.this.removeCallbacks(mPendingCheckForTap);
+        }
+
+        private class CheckForTap implements Runnable {
+            @Override
+            public void run() {
+                if (!mSwiping && mSwipeView != null && mEnabled) {
+                    mSwipeView.setPressed(true);
+                }
+            }
+        }
     }
 }

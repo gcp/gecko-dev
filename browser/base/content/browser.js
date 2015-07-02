@@ -54,6 +54,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
                                   "resource://gre/modules/LightweightThemeManager.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Pocket",
                                   "resource:///modules/Pocket.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "NewTabURL",
+                                  "resource:///modules/NewTabURL.jsm");
 
 // Can't use XPCOMUtils for these because the scripts try to define the variables
 // on window, and so the defineProperty inside defineLazyGetter fails.
@@ -278,6 +280,7 @@ let gInitialPages = [
 #include browser-social.js
 #include browser-tabview.js
 #include browser-thumbnails.js
+#include browser-trackingprotection.js
 
 #ifdef MOZ_DATA_REPORTING
 #include browser-data-submission-info-bar.js
@@ -962,6 +965,7 @@ var gBrowserInit = {
     BrowserOnClick.init();
     DevEdition.init();
     AboutPrivateBrowsingListener.init();
+    TrackingProtection.init();
 
     let mm = window.getGroupMessageManager("browsers");
     mm.loadFrameScript("chrome://browser/content/tab-content.js", true);
@@ -1444,12 +1448,6 @@ var gBrowserInit = {
         }
       }, 5000);
 
-      // Telemetry for tracking protection.
-      let tpEnabled = gPrefService
-                      .getBoolPref("privacy.trackingprotection.enabled");
-      Services.telemetry.getHistogramById("TRACKING_PROTECTION_ENABLED")
-        .add(tpEnabled);
-
       PanicButtonNotifier.init();
     });
     this.delayedStartupFinished = true;
@@ -1531,6 +1529,8 @@ var gBrowserInit = {
     BrowserOnClick.uninit();
 
     DevEdition.uninit();
+
+    TrackingProtection.uninit();
 
     gMenuButtonUpdateBadge.uninit();
 
@@ -2571,6 +2571,7 @@ let gMenuButtonUpdateBadge = {
       }
       PanelUI.menuButton.classList.add("badged-button");
       Services.obs.addObserver(this, "update-staged", false);
+      Services.obs.addObserver(this, "update-downloaded", false);
     }
   },
 
@@ -2579,6 +2580,7 @@ let gMenuButtonUpdateBadge = {
       this.timer.cancel();
     if (this.enabled) {
       Services.obs.removeObserver(this, "update-staged");
+      Services.obs.removeObserver(this, "update-downloaded");
       PanelUI.panel.removeEventListener("popupshowing", this, true);
       this.enabled = false;
     }
@@ -2602,72 +2604,55 @@ let gMenuButtonUpdateBadge = {
   },
 
   observe: function (subject, topic, status) {
-    const STATE_DOWNLOADING     = "downloading";
-    const STATE_PENDING         = "pending";
-    const STATE_PENDING_SVC     = "pending-service";
-    const STATE_APPLIED         = "applied";
-    const STATE_APPLIED_SVC     = "applied-service";
-    const STATE_FAILED          = "failed";
-
-    let updateButton = document.getElementById("PanelUI-update-status");
-
-    let updateButtonText;
-    let stringId;
-
-    // Update the UI when the background updater is finished.
-    switch (status) {
-      case STATE_APPLIED:
-      case STATE_APPLIED_SVC:
-      case STATE_PENDING:
-      case STATE_PENDING_SVC:
-        if (this.timer) {
-          return;
-        }
-        // Give the user badgeWaitTime seconds to react before prompting.
-        this.timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-        this.timer.initWithCallback(this, this.badgeWaitTime * 1000,
-                                    this.timer.TYPE_ONE_SHOT);
-        // The timer callback will call uninit() when it completes.
-        break;
-      case STATE_FAILED:
-        // Background update has failed, let's show the UI responsible for
-        // prompting the user to update manually.
-        PanelUI.menuButton.setAttribute("update-status", "failed");
-        PanelUI.menuButton.setAttribute("badge", "!");
-
-        stringId = "appmenu.updateFailed.description";
-        updateButtonText = gNavigatorBundle.getString(stringId);
-
-        updateButton.setAttribute("label", updateButtonText);
-        updateButton.setAttribute("update-status", "failed");
-        updateButton.hidden = false;
-
-        PanelUI.panel.addEventListener("popupshowing", this, true);
-
-        this.uninit();
-        break;
+    if (status == "failed") {
+      // Background update has failed, let's show the UI responsible for
+      // prompting the user to update manually.
+      this.displayBadge(false);
+      this.uninit();
+      return;
     }
+
+    // Give the user badgeWaitTime seconds to react before prompting.
+    this.timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+    this.timer.initWithCallback(this, this.badgeWaitTime * 1000,
+                                this.timer.TYPE_ONE_SHOT);
+    // The timer callback will call uninit() when it completes.
   },
 
   notify: function () {
     // If the update is successfully applied, or if the updater has fallen back
     // to non-staged updates, add a badge to the hamburger menu to indicate an
     // update will be applied once the browser restarts.
-    PanelUI.menuButton.setAttribute("update-status", "succeeded");
+    this.displayBadge(true);
+    this.uninit();
+  },
 
-    let brandBundle = document.getElementById("bundle_brand");
-    let brandShortName = brandBundle.getString("brandShortName");
-    stringId = "appmenu.restartNeeded.description";
-    updateButtonText = gNavigatorBundle.getFormattedString(stringId,
-                                                           [brandShortName]);
+  displayBadge: function (succeeded) {
+    let status = succeeded ? "succeeded" : "failed";
+    PanelUI.menuButton.setAttribute("update-status", status);
+    if (!succeeded) {
+      PanelUI.menuButton.setAttribute("badge", "!");
+    }
+
+    let stringId;
+    let updateButtonText;
+    if (succeeded) {
+      let brandBundle = document.getElementById("bundle_brand");
+      let brandShortName = brandBundle.getString("brandShortName");
+      stringId = "appmenu.restartNeeded.description";
+      updateButtonText = gNavigatorBundle.getFormattedString(stringId,
+                                                             [brandShortName]);
+    } else {
+      stringId = "appmenu.updateFailed.description";
+      updateButtonText = gNavigatorBundle.getString(stringId);
+    }
 
     let updateButton = document.getElementById("PanelUI-update-status");
     updateButton.setAttribute("label", updateButtonText);
-    updateButton.setAttribute("update-status", "succeeded");
+    updateButton.setAttribute("update-status", status);
     updateButton.hidden = false;
 
     PanelUI.panel.addEventListener("popupshowing", this, true);
-    this.uninit();
   },
 
   handleEvent: function(e) {
@@ -3147,9 +3132,12 @@ var PrintPreviewListener = {
 
   getPrintPreviewBrowser: function () {
     if (!this._printPreviewTab) {
+      let browser = gBrowser.selectedTab.linkedBrowser;
+      let forceNotRemote = gMultiProcessBrowser && !browser.isRemoteBrowser;
       this._tabBeforePrintPreview = gBrowser.selectedTab;
       this._printPreviewTab = gBrowser.loadOneTab("about:blank",
-                                                  { inBackground: false });
+                                                  { inBackground: false,
+                                                    forceNotRemote });
       gBrowser.selectedTab = this._printPreviewTab;
     }
     return gBrowser.getBrowserForTab(this._printPreviewTab);
@@ -4103,6 +4091,10 @@ var XULBrowserWindow = {
     return true;
   },
 
+  shouldAddToSessionHistory: function(aDocShell, aURI) {
+    return aURI.spec != NewTabURL.get();
+  },
+
   onProgressChange: function (aWebProgress, aRequest,
                               aCurSelfProgress, aMaxSelfProgress,
                               aCurTotalProgress, aMaxTotalProgress) {
@@ -4389,6 +4381,7 @@ var XULBrowserWindow = {
       uri = Services.uriFixup.createExposableURI(uri);
     } catch (e) {}
     gIdentityHandler.checkIdentity(this._state, uri);
+    TrackingProtection.onSecurityChange(this._state);
   },
 
   // simulate all change notifications after switching tabs
@@ -6605,11 +6598,6 @@ var gIdentityHandler = {
     delete this._identityBox;
     return this._identityBox = document.getElementById("identity-box");
   },
-  get _identityPopupContentBox () {
-    delete this._identityPopupContentBox;
-    return this._identityPopupContentBox =
-      document.getElementById("identity-popup-content-box");
-  },
   get _identityPopupContentHost () {
     delete this._identityPopupContentHost;
     return this._identityPopupContentHost =
@@ -6629,6 +6617,16 @@ var gIdentityHandler = {
     delete this._identityPopupContentVerif;
     return this._identityPopupContentVerif =
       document.getElementById("identity-popup-content-verifier");
+  },
+  get _identityPopupSecurityContent () {
+    delete this._identityPopupSecurityContent;
+    return this._identityPopupSecurityContent =
+      document.getElementById("identity-popup-security-content");
+  },
+  get _identityPopupSecurityView () {
+    delete this._identityPopupSecurityView;
+    return this._identityPopupSecurityView =
+      document.getElementById("identity-popup-securityView");
   },
   get _identityIconLabel () {
     delete this._identityIconLabel;
@@ -6683,6 +6681,11 @@ var gIdentityHandler = {
     displaySecurityInfo();
     event.stopPropagation();
     this._identityPopup.hidePopup();
+  },
+
+  showSubView(name, anchor) {
+    let view = document.getElementById("identity-popup-multiView");
+    view.showSubView(`identity-popup-${name}View`, anchor);
   },
 
   /**
@@ -6777,7 +6780,7 @@ var gIdentityHandler = {
          nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT     |
          nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT)) {
       this.showBadContentDoorhanger(state);
-    } else if (gPrefService.getBoolPref("privacy.trackingprotection.enabled")) {
+    } else if (TrackingProtection.enabled) {
       // We didn't show the shield
       Services.telemetry.getHistogramById("TRACKING_PROTECTION_SHIELD")
         .add(0);
@@ -6859,8 +6862,10 @@ var gIdentityHandler = {
     this.setIdentityMessages(newMode);
 
     // Update the popup too, if it's open
-    if (this._identityPopup.state == "open")
+    if (this._identityPopup.state == "open") {
       this.setPopupMessages(newMode);
+      this.updateSitePermissions();
+    }
 
     this._mode = newMode;
   },
@@ -6945,7 +6950,8 @@ var gIdentityHandler = {
   setPopupMessages : function(newMode) {
 
     this._identityPopup.className = newMode;
-    this._identityPopupContentBox.className = newMode;
+    this._identityPopupSecurityView.className = newMode;
+    this._identityPopupSecurityContent.className = newMode;
 
     // Initialize the optional strings to empty values
     let supplemental = "";
@@ -6953,16 +6959,15 @@ var gIdentityHandler = {
     let host = "";
     let owner = "";
 
-    if (newMode == this.IDENTITY_MODE_CHROMEUI) {
-      let brandBundle = document.getElementById("bundle_brand");
-      host = brandBundle.getString("brandFullName");
-    } else {
-      try {
-        host = this.getEffectiveHost();
-      } catch (e) {
-        // Some URIs might have no hosts.
-        host = this._lastUri.specIgnoringRef;
-      }
+    try {
+      host = this.getEffectiveHost();
+    } catch (e) {
+      // Some URIs might have no hosts.
+    }
+
+    if (!host) {
+      // Fallback for special protocols.
+      host = this._lastUri.specIgnoringRef;
     }
 
     switch (newMode) {
@@ -6987,6 +6992,9 @@ var gIdentityHandler = {
         supplemental += iData.country;
       break;
     }
+    case this.IDENTITY_MODE_UNKNOWN:
+      supplemental = gNavigatorBundle.getString("identity.not_secure");
+      break;
     case this.IDENTITY_MODE_MIXED_DISPLAY_LOADED:
     case this.IDENTITY_MODE_MIXED_DISPLAY_LOADED_ACTIVE_BLOCKED:
       supplemental = gNavigatorBundle.getString("identity.broken_loaded");
@@ -6999,10 +7007,13 @@ var gIdentityHandler = {
     // Push the appropriate strings out to the UI. Need to use |value| for the
     // host as it's a <label> that will be cropped if too long. Using
     // |textContent| would simply wrap the value.
-    this._identityPopupContentHost.value = host;
+    this._identityPopupContentHost.setAttribute("value", host);
     this._identityPopupContentOwner.textContent = owner;
     this._identityPopupContentSupp.textContent = supplemental;
     this._identityPopupContentVerif.textContent = verifier;
+
+    // Hide subviews when updating panel information.
+    document.getElementById("identity-popup-multiView").showMainView();
   },
 
   /**
@@ -7127,6 +7138,7 @@ var gIdentityHandler = {
 
     let label = document.createElement("label");
     label.setAttribute("flex", "1");
+    label.setAttribute("class", "identity-popup-permission-label");
     label.setAttribute("control", menulist.getAttribute("id"));
     label.setAttribute("value", SitePermissions.getPermissionLabel(aPermission));
 

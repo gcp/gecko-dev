@@ -10,7 +10,7 @@ config = {
                 "--xre-path=%(abs_app_dir)s"
             ],
             "run_filename": "runcppunittests.py",
-            "testsdir": "cppunittests"
+            "testsdir": "cppunittest"
         },
         "jittest": {
             "options": [
@@ -33,7 +33,8 @@ config = {
                 "--setpref=webgl.force-enabled=true",
                 "--quiet",
                 "--log-raw=%(raw_log_file)s",
-                "--use-test-media-devices"
+                "--use-test-media-devices",
+                "--screenshot-on-fail",
             ],
             "run_filename": "runtests.py",
             "testsdir": "mochitest"

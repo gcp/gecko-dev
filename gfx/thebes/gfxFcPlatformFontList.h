@@ -184,7 +184,7 @@ public:
                       bool aNeedsBold);
 
 #ifdef USE_SKIA
-    virtual mozilla::TemporaryRef<mozilla::gfx::GlyphRenderingOptions>
+    virtual already_AddRefed<mozilla::gfx::GlyphRenderingOptions>
     GetGlyphRenderingOptions(const TextRunDrawParams* aRunParams = nullptr) override;
 #endif
 
@@ -263,7 +263,6 @@ protected:
     nsCountedRef<FcConfig> mLastConfig;
 
     static FT_Library sCairoFTLibrary;
-    static FcChar8* sSentinelFirstFamily;
 };
 
 #endif /* GFXPLATFORMFONTLIST_H_ */

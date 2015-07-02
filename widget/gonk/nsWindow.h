@@ -29,6 +29,10 @@ struct InputContext;
 struct InputContextAction;
 }
 
+namespace mozilla {
+class HwcComposer2D;
+}
+
 class nsScreenGonk;
 
 class nsWindow : public nsBaseWidget
@@ -98,7 +102,7 @@ public:
 
     NS_IMETHOD MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen = nullptr) /*override*/;
 
-    virtual mozilla::TemporaryRef<mozilla::gfx::DrawTarget>
+    virtual already_AddRefed<mozilla::gfx::DrawTarget>
         StartRemoteDrawing() override;
     virtual void EndRemoteDrawing() override;
 
@@ -159,6 +163,8 @@ private:
     nsAutoPtr<mozilla::MultiTouchInput> mSynthesizedTouchInput;
 
     nsRefPtr<nsScreenGonk> mScreen;
+
+    nsRefPtr<mozilla::HwcComposer2D> mComposer2D;
 };
 
 #endif /* nsWindow_h */

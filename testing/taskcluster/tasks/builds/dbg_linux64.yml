@@ -8,8 +8,15 @@ task:
       name: '[TC] Linux64 Dbg'
       description: 'Linux64 Dbg'
 
-  workerType: b2g-desktop-opt
+  workerType: dbg-linux64
 
   payload:
     env:
       MH_CUSTOM_BUILD_VARIANT_CFG: 'debug'
+  extra:
+    treeherder:
+      groupSymbol: tc
+      groupName: Submitted by taskcluster
+      symbol: B
+      collection:
+        debug: true

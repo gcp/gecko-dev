@@ -17,6 +17,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
@@ -147,7 +148,10 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         mView = view;
         setOverscrollColor(R.color.toolbar_grey);
 
-        Bitmap scrollbarImage = view.getScrollbarImage();
+        final BitmapFactory.Options bitmapOptions = new BitmapFactory.Options();
+        bitmapOptions.inScaled = false;
+        Bitmap scrollbarImage =
+                BitmapUtils.decodeResource(view.getContext(), R.drawable.scrollbar, bitmapOptions);
         IntSize size = new IntSize(scrollbarImage.getWidth(), scrollbarImage.getHeight());
         scrollbarImage = expandCanvasToPowerOfTwo(scrollbarImage, size);
 
@@ -687,7 +691,7 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         if (msg == Tabs.TabEvents.SELECTED) {
             if (mView != null) {
                 final int overscrollColor =
-                        (tab.isPrivate() ? R.color.private_toolbar_grey : R.color.toolbar_grey);
+                        (tab.isPrivate() ? R.color.tabs_tray_grey_pressed : R.color.toolbar_grey);
                 setOverscrollColor(overscrollColor);
 
                 if (mView.getChildAt(0) != null) {

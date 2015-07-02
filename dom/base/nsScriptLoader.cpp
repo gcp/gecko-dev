@@ -12,6 +12,7 @@
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "xpcpublic.h"
 #include "nsIUnicodeDecoder.h"
 #include "nsIContent.h"
 #include "nsJSUtils.h"
@@ -19,7 +20,6 @@
 #include "mozilla/dom/Element.h"
 #include "nsGkAtoms.h"
 #include "nsNetUtil.h"
-#include "nsIJSRuntimeService.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptSecurityManager.h"
@@ -214,7 +214,7 @@ nsScriptLoader::CheckContentPolicy(nsIDocument* aDocument,
                                    const nsAString &aType)
 {
   int16_t shouldLoad = nsIContentPolicy::ACCEPT;
-  nsresult rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_SCRIPT,
+  nsresult rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_INTERNAL_SCRIPT,
                                           aURI,
                                           aDocument->NodePrincipal(),
                                           aContext,
@@ -289,7 +289,7 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest, const nsAString &aType,
                      aRequest->mURI,
                      mDocument,
                      nsILoadInfo::SEC_NORMAL,
-                     nsIContentPolicy::TYPE_SCRIPT,
+                     nsIContentPolicy::TYPE_INTERNAL_SCRIPT,
                      loadGroup,
                      prompter,
                      nsIRequest::LOAD_NORMAL |
@@ -831,12 +831,7 @@ NotifyOffThreadScriptLoadCompletedRunnable::Run()
     // The result of the off thread parse was not actually needed to process
     // the request (disappearing window, some other error, ...). Finish the
     // request to avoid leaks in the JS engine.
-    nsCOMPtr<nsIJSRuntimeService> svc = do_GetService("@mozilla.org/js/xpc/RuntimeService;1");
-    NS_ENSURE_TRUE(svc, NS_ERROR_FAILURE);
-    JSRuntime *rt;
-    svc->GetRuntime(&rt);
-    NS_ENSURE_TRUE(rt, NS_ERROR_FAILURE);
-    JS::FinishOffThreadScript(nullptr, rt, mToken);
+    JS::FinishOffThreadScript(nullptr, xpc::GetJSRuntime(), mToken);
   }
 
   return rv;

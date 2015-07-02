@@ -443,7 +443,7 @@ MaybeMoveToMidPoint(Point& aP0, Point& aP1, const Point& aMidPoint)
   }
 }
 
-TemporaryRef<Path>
+already_AddRefed<Path>
 nsCSSBorderRenderer::GetSideClipSubPath(mozilla::css::Side aSide)
 {
   // the clip proceeds clockwise from the top left corner;
@@ -1032,7 +1032,7 @@ bool IsVisible(int aStyle)
   return false;
 }
 
-TemporaryRef<GradientStops>
+already_AddRefed<GradientStops>
 nsCSSBorderRenderer::CreateCornerGradient(mozilla::css::Corner aCorner,
                                           nscolor aFirstColor,
                                           nscolor aSecondColor,
@@ -1072,10 +1072,6 @@ nsCSSBorderRenderer::CreateCornerGradient(mozilla::css::Corner aCorner,
 
   nsTArray<gfx::GradientStop> rawStops(2);
   rawStops.SetLength(2);
-  // This is only guaranteed to give correct (and in some cases more correct)
-  // rendering with the Direct2D Azure and Quartz Cairo backends. For other
-  // cairo backends it could create un-antialiased border corner transitions
-  // since that at least used to be pixman's behaviour for hard stops.
   rawStops[0].color = firstColor;
   rawStops[0].offset = 0.5;
   rawStops[1].color = secondColor;

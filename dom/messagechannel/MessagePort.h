@@ -76,7 +76,7 @@ public:
   NS_DECL_NSIOBSERVER
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MessagePort,
-                                           DOMEventTargetHelper)
+                                           MessagePortBase)
 
   static already_AddRefed<MessagePort>
   Create(nsPIDOMWindow* aWindow, const nsID& aUUID,
@@ -85,6 +85,9 @@ public:
   static already_AddRefed<MessagePort>
   Create(nsPIDOMWindow* aWindow, const MessagePortIdentifier& aIdentifier,
          ErrorResult& aRv);
+
+  static void
+  ForceClose(const MessagePortIdentifier& aIdentifier);
 
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -173,6 +176,11 @@ private:
   // creating the actor and until the actor is entangled.
   // We release the object when the port is closed or disentangled.
   void UpdateMustKeepAlive();
+
+  bool IsCertainlyAliveForCC() const override
+  {
+    return mIsKeptAlive;
+  }
 
   nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
 

@@ -99,6 +99,7 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventStateManager.h"
+#include "mozilla/RuleNodeCacheConditions.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -459,12 +460,7 @@ GetScaleForValue(const StyleAnimationValue& aValue, nsIFrame* aFrame)
   nsCSSValueSharedList* list = aValue.GetCSSValueSharedListValue();
   MOZ_ASSERT(list->mHead);
 
-  if (list->mHead->mValue.GetUnit() == eCSSUnit_None) {
-    // There is an animation, but no actual transform yet.
-    return gfxSize();
-  }
-
-  bool dontCare;
+  RuleNodeCacheConditions dontCare;
   TransformReferenceBox refBox(aFrame);
   gfx3DMatrix transform = nsStyleTransformMatrix::ReadTransforms(
                             list->mHead,
@@ -3508,7 +3504,7 @@ AddBoxesForFrame(nsIFrame* aFrame,
              pseudoType == nsCSSAnonBoxes::mozAnonymousPositionedBlock ||
              pseudoType == nsCSSAnonBoxes::mozMathMLAnonymousBlock ||
              pseudoType == nsCSSAnonBoxes::mozXULAnonymousBlock) {
-    for (nsIFrame* kid = aFrame->GetFirstPrincipalChild(); kid; kid = kid->GetNextSibling()) {
+    for (nsIFrame* kid : aFrame->PrincipalChildList()) {
       AddBoxesForFrame(kid, aCallback);
     }
   } else {
@@ -3547,7 +3543,7 @@ nsLayoutUtils::GetFirstNonAnonymousFrame(nsIFrame* aFrame)
                pseudoType == nsCSSAnonBoxes::mozAnonymousPositionedBlock ||
                pseudoType == nsCSSAnonBoxes::mozMathMLAnonymousBlock ||
                pseudoType == nsCSSAnonBoxes::mozXULAnonymousBlock) {
-      for (nsIFrame* kid = aFrame->GetFirstPrincipalChild(); kid; kid = kid->GetNextSibling()) {
+      for (nsIFrame* kid : aFrame->PrincipalChildList()) {
         nsIFrame* f = GetFirstNonAnonymousFrame(kid);
         if (f) {
           return f;
@@ -6957,7 +6953,7 @@ nsLayoutUtils::GetEditableRootContentByContentEditable(nsIDocument* aDocument)
 nsLayoutUtils::AssertNoDuplicateContinuations(nsIFrame* aContainer,
                                               const nsFrameList& aFrameList)
 {
-  for (nsIFrame* f = aFrameList.FirstChild(); f ; f = f->GetNextSibling()) {
+  for (nsIFrame* f : aFrameList) {
     // Check only later continuations of f; we deal with checking the
     // earlier continuations when we hit those earlier continuations in
     // the frame list.
@@ -8131,7 +8127,8 @@ nsLayoutUtils::HasApzAwareListeners(EventListenerManager* aElm)
          aElm->HasListenersFor(nsGkAtoms::ontouchmove) ||
          aElm->HasListenersFor(nsGkAtoms::onwheel) ||
          aElm->HasListenersFor(nsGkAtoms::onDOMMouseScroll) ||
-         aElm->HasListenersFor(nsHtml5Atoms::onmousewheel);
+         aElm->HasListenersFor(nsHtml5Atoms::onmousewheel) ||
+         aElm->HasListenersFor(nsGkAtoms::onMozMousePixelScroll);
 }
 
 /* static */ bool

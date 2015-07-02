@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import unicode_literals
+from __future__ import absolute_import, unicode_literals
 
 from argparse import Namespace
 from collections import defaultdict
@@ -333,6 +333,10 @@ class MochitestRunner(MozbuildObject):
             if not options.app or options.app == self.get_binary_path():
                 options.app = self.get_webapp_runtime_path()
             options.xrePath = self.get_webapp_runtime_xre_path()
+            # On Mac, pass the path to the runtime, to ensure the test app
+            # uses that specific runtime instead of another one on the system.
+            if sys.platform.startswith('darwin'):
+                options.browserArgs.extend(('-runtime', os.path.join(self.distdir, self.substs['MOZ_MACBUNDLE_NAME'])))
 
         from manifestparser import TestManifest
         manifest = TestManifest()

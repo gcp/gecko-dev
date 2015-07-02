@@ -60,6 +60,7 @@ public:
   }
 
   already_AddRefed<TimeRanges> GetBuffered(ErrorResult& aRv);
+  TimeIntervals GetTimeIntervals();
 
   double TimestampOffset() const
   {
@@ -183,7 +184,7 @@ private:
 
   SourceBufferAppendMode mAppendMode;
   bool mUpdating;
-  bool mGenerateTimestamp;
+  bool mGenerateTimestamps;
   bool mIsUsingFormatReader;
 
   mozilla::Atomic<bool> mActive;

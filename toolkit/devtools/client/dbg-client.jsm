@@ -224,7 +224,6 @@ const UnsolicitedNotifications = {
   "networkEventUpdate": "networkEventUpdate",
   "newGlobal": "newGlobal",
   "newScript": "newScript",
-  "newSource": "newSource",
   "tabDetached": "tabDetached",
   "tabListChanged": "tabListChanged",
   "reflowActivity": "reflowActivity",
@@ -512,7 +511,8 @@ DebuggerClient.prototype = {
       executeSoon(() => aOnResponse({
         from: workerClient.actor,
         type: "attached",
-        isFrozen: workerClient.isFrozen
+        isFrozen: workerClient.isFrozen,
+        url: workerClient.url
       }, workerClient));
       return;
     }
@@ -740,6 +740,7 @@ DebuggerClient.prototype = {
 
     let request = new Request(aRequest);
     request.format = "json";
+    request.stack = Components.stack;
     if (aOnResponse) {
       request.on("json-reply", aOnResponse);
     }
@@ -1033,7 +1034,13 @@ DebuggerClient.prototype = {
     }
 
     if (activeRequest) {
-      activeRequest.emit("json-reply", aPacket);
+      let emitReply = () => activeRequest.emit("json-reply", aPacket);
+      if (activeRequest.stack) {
+        Cu.callFunctionWithAsyncStack(emitReply, activeRequest.stack,
+                                      "DevTools RDP");
+      } else {
+        emitReply();
+      }
     }
   },
 
@@ -1373,6 +1380,8 @@ function WorkerClient(aClient, aForm) {
   this.addListener("close", this._onClose);
   this.addListener("freeze", this._onFreeze);
   this.addListener("thaw", this._onThaw);
+
+  this.traits = {};
 }
 
 WorkerClient.prototype = {
@@ -1446,6 +1455,10 @@ WorkerClient.prototype = {
 
   _onThaw: function () {
     this._isFrozen = false;
+  },
+
+  reconfigure: function () {
+    return Promise.resolve();
   },
 
   events: ["close", "freeze", "thaw"]
@@ -1623,7 +1636,6 @@ function ThreadClient(aClient, aActor) {
   this._pauseGrips = {};
   this._threadGrips = {};
   this.request = this.client.request;
-  this.events = [];
 }
 
 ThreadClient.prototype = {
@@ -2170,7 +2182,9 @@ ThreadClient.prototype = {
     actors: args(0)
   }, {
     telemetry: "PROTOTYPESANDPROPERTIES"
-  })
+  }),
+
+  events: ["newSource"]
 };
 
 eventSource(ThreadClient.prototype);
@@ -2458,7 +2472,21 @@ ObjectClient.prototype = {
       }
       return aPacket;
     }
-  })
+  }),
+
+  /**
+   * Request the stack to the promise's allocation point.
+   */
+  getPromiseAllocationStack: DebuggerClient.requester({
+    type: "allocationStack"
+  }, {
+    before: function(aPacket) {
+      if (this._grip.class !== "Promise") {
+        throw new Error("getAllocationStack is only valid for promise grips.");
+      }
+      return aPacket;
+    }
+  }),
 };
 
 /**

@@ -281,6 +281,16 @@ public:
     }
   }
 
+  bool operator== (const SelfType& aOther) const
+  {
+    return mIntervals == aOther.mIntervals;
+  }
+
+  bool operator!= (const SelfType& aOther) const
+  {
+    return mIntervals != aOther.mIntervals;
+  }
+
   SelfType& operator= (const SelfType& aOther)
   {
     mIntervals = aOther.mIntervals;
@@ -415,6 +425,14 @@ public:
     SelfType intervals(Move(startInterval));
     intervals += Move(endInterval);
     return Intersection(intervals);
+  }
+
+  SelfType& operator-= (const SelfType& aIntervals)
+  {
+    for (const auto& interval : aIntervals.mIntervals) {
+      *this -= interval;
+    }
+    return *this;
   }
 
   SelfType operator- (const ElemType& aInterval)

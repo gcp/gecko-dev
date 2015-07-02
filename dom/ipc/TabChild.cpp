@@ -20,6 +20,7 @@
 #include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestChild.h"
 #include "mozilla/plugins/PluginWidgetChild.h"
+#include "mozilla/IMEStateManager.h"
 #include "mozilla/ipc/DocumentRendererChild.h"
 #include "mozilla/ipc/FileDescriptorUtils.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
@@ -248,7 +249,16 @@ TabChildBase::InitializeRootMetrics()
   // This is the root layer, so the cumulative resolution is the same
   // as the resolution.
   mLastRootMetrics.SetPresShellResolution(mLastRootMetrics.GetCumulativeResolution().ToScaleFactor().scale);
-  mLastRootMetrics.SetScrollOffset(CSSPoint(0, 0));
+
+  nsCOMPtr<nsIPresShell> shell = GetPresShell();
+  if (shell && shell->GetRootScrollFrameAsScrollable()) {
+    // The session history code might restore a scroll position when navigating
+    // back or forward, and we don't want to clobber that.
+    nsPoint pos = shell->GetRootScrollFrameAsScrollable()->GetScrollPosition();
+    mLastRootMetrics.SetScrollOffset(CSSPoint::FromAppUnits(pos));
+  } else {
+    mLastRootMetrics.SetScrollOffset(CSSPoint(0, 0));
+  }
 
   TABC_LOG("After InitializeRootMetrics, mLastRootMetrics is %s\n",
     Stringify(mLastRootMetrics).c_str());
@@ -494,7 +504,7 @@ TabChildBase::DispatchMessageManagerMessage(const nsAString& aMessageName,
                                             const nsAString& aJSONData)
 {
     AutoSafeJSContext cx;
-    JS::Rooted<JS::Value> json(cx, JSVAL_NULL);
+    JS::Rooted<JS::Value> json(cx, JS::NullValue());
     StructuredCloneData cloneData;
     JSAutoStructuredCloneBuffer buffer;
     if (JS_ParseJSON(cx,
@@ -2146,6 +2156,13 @@ TabChild::RecvNotifyAPZStateChange(const ViewID& aViewId,
                                    const int& aArg)
 {
   mAPZEventState->ProcessAPZStateChange(GetDocument(), aViewId, aChange, aArg);
+  if (aChange == APZStateChange::TransformEnd) {
+    // This is used by tests to determine when the APZ is done doing whatever
+    // it's doing. XXX generify this as needed when writing additional tests.
+    DispatchMessageManagerMessage(
+      NS_LITERAL_STRING("APZ:TransformEnd"),
+      NS_LITERAL_STRING("{}"));
+  }
   return true;
 }
 
@@ -2180,6 +2197,20 @@ bool TabChild::RecvParentActivated(const bool& aActivated)
 
   nsCOMPtr<nsIDOMWindow> window = do_GetInterface(WebNavigation());
   fm->ParentActivated(window, aActivated);
+  return true;
+}
+
+bool
+TabChild::RecvStopIMEStateManagement()
+{
+  IMEStateManager::StopIMEStateManagement();
+  return true;
+}
+
+bool
+TabChild::RecvMenuKeyboardListenerInstalled(const bool& aInstalled)
+{
+  IMEStateManager::OnInstalledMenuKeyboardListener(aInstalled);
   return true;
 }
 

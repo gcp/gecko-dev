@@ -57,6 +57,7 @@ public:
     NO_DATA_EVICTED,
     DATA_EVICTED,
     CANT_EVICT,
+    BUFFER_FULL,
   };
 
   // Evicts data up to aPlaybackTime. aThreshold is used to
@@ -99,6 +100,7 @@ public:
 
   virtual void SetGroupStartTimestamp(const TimeUnit& aGroupStartTimestamp) {}
   virtual void RestartGroupStartTimestamp() {}
+  virtual TimeUnit GroupEndTimestamp() = 0;
 
 #if defined(DEBUG)
   virtual void Dump(const char* aPath) { }

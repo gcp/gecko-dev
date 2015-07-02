@@ -36,12 +36,9 @@ public:
     decoder->SetResource(resource);
 
     reader->Init(nullptr);
-    {
-      // This needs to be done before invoking GetBuffered. This is normally
-      // done by MediaDecoderStateMachine.
-      ReentrantMonitorAutoEnter mon(decoder->GetReentrantMonitor());
-      reader->SetStartTime(0);
-    }
+    // This needs to be done before invoking GetBuffered. This is normally
+    // done by MediaDecoderStateMachine.
+    reader->DispatchSetStartTime(0);
   }
 
   void Init() {
@@ -67,7 +64,7 @@ private:
     decoder = nullptr;
     resource = nullptr;
     reader = nullptr;
-    SharedThreadPool::SpinUntilShutdown();
+    SharedThreadPool::SpinUntilEmpty();
   }
 
   void ReadMetadata()

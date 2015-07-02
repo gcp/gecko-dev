@@ -990,7 +990,7 @@ CacheEntry_setBytecode(JSContext* cx, HandleObject cache, uint8_t* buffer, uint3
     if (!arrayBuffer)
         return false;
 
-    SetReservedSlot(cache, CacheEntry_BYTECODE, OBJECT_TO_JSVAL(arrayBuffer));
+    SetReservedSlot(cache, CacheEntry_BYTECODE, ObjectValue(*arrayBuffer));
     return true;
 }
 
@@ -4318,6 +4318,36 @@ ReflectTrackedOptimizations(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+#ifdef DEBUG
+static bool
+DumpStaticScopeChain(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    RootedObject callee(cx, &args.callee());
+
+    if (args.length() != 1) {
+        ReportUsageError(cx, callee, "Wrong number of arguments");
+        return false;
+    }
+
+    if (!args[0].isObject() || !args[0].toObject().is<JSFunction>()) {
+        ReportUsageError(cx, callee, "Argument must be an interpreted function");
+        return false;
+    }
+
+    RootedFunction fun(cx, &args[0].toObject().as<JSFunction>());
+    if (!fun->isInterpreted()) {
+        ReportUsageError(cx, callee, "Argument must be an interpreted function");
+        return false;
+    }
+
+    js::DumpStaticScopeChain(fun->getOrCreateScript(cx));
+
+    args.rval().setUndefined();
+    return true;
+}
+#endif
+
 namespace js {
 namespace shell {
 
@@ -4966,6 +4996,12 @@ static const JSFunctionSpecWithHelp fuzzing_unsafe_functions[] = {
 "  any. If |fun| is not a scripted function or has not been compiled by\n"
 "  Ion, null is returned."),
 
+#ifdef DEBUG
+    JS_FN_HELP("dumpStaticScopeChain", DumpStaticScopeChain, 1, 0,
+"dumpStaticScopeChain(fun)",
+"  Prints the static scope chain of an interpreted function fun."),
+#endif
+
     JS_FS_HELP_END
 };
 
@@ -5400,7 +5436,7 @@ static void
 InitDOMObject(HandleObject obj)
 {
     /* Fow now just initialize to a constant we can check. */
-    SetReservedSlot(obj, DOM_OBJECT_SLOT, PRIVATE_TO_JSVAL((void*)0x1234));
+    SetReservedSlot(obj, DOM_OBJECT_SLOT, PrivateValue((void*)0x1234));
 }
 
 static bool

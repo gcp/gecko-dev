@@ -344,6 +344,11 @@ loop.OTSdkDriver = (function() {
     _onSessionConnectionCompleted: function(error) {
       if (error) {
         console.error("Failed to complete connection", error);
+        // We log this here before the connection failure to ensure the metrics
+        // event gets to the server before the leave action occurs. Otherwise
+        // the server won't log the metrics event because the user is no longer
+        // in the room.
+        this._notifyMetricsEvent("sdk.exception." + error.code);
         this.dispatcher.dispatch(new sharedActions.ConnectionFailure({
           reason: FAILURE_DETAILS.COULD_NOT_CONNECT
         }));
@@ -399,6 +404,7 @@ loop.OTSdkDriver = (function() {
 
       this._noteConnectionLengthIfNeeded(this._getTwoWayMediaStartTime(),
         performance.now());
+      this._notifyMetricsEvent("Session." + event.reason);
       this.dispatcher.dispatch(new sharedActions.ConnectionFailure({
         reason: reason
       }));
@@ -485,9 +491,14 @@ loop.OTSdkDriver = (function() {
         case "Session.streamDestroyed":
           this._metrics.recvStreams--;
           break;
+        case "Session.networkDisconnected":
+        case "Session.forceDisconnected":
+          break;
         default:
-          console.error("Unexpected event name", eventName);
-          return;
+          if (eventName.indexOf("sdk.exception") === -1) {
+            console.error("Unexpected event name", eventName);
+            return;
+          }
       }
       if (!state) {
         state = this._getConnectionState();
@@ -698,8 +709,12 @@ loop.OTSdkDriver = (function() {
         channel.on({
           message: function(ev) {
             try {
+              var message = JSON.parse(ev.data);
+              /* Append the timestamp. This is the time that gets shown. */
+              message.receivedTimestamp = (new Date()).toISOString();
+
               this.dispatcher.dispatch(
-                new sharedActions.ReceivedTextChatMessage(JSON.parse(ev.data)));
+                new sharedActions.ReceivedTextChatMessage(message));
             } catch (ex) {
               console.error("Failed to process incoming chat message", ex);
             }
@@ -906,6 +921,8 @@ loop.OTSdkDriver = (function() {
         this.dispatcher.dispatch(new sharedActions.ConnectionFailure({
           reason: FAILURE_DETAILS.UNABLE_TO_PUBLISH_MEDIA
         }));
+      } else {
+        this._notifyMetricsEvent("sdk.exception." + event.code);
       }
     },
 

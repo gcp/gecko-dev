@@ -184,6 +184,22 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         ]]></body>
       </method>
 
+      <method name="onKeyPress">
+        <parameter name="aEvent"/>
+        <body><![CDATA[
+          switch (aEvent.keyCode) {
+            case KeyEvent.DOM_VK_LEFT:
+            case KeyEvent.DOM_VK_RIGHT:
+            case KeyEvent.DOM_VK_HOME:
+              this.popup.hidePopup();
+              return;
+              break;
+          }
+
+          return this.handleKeyPress(aEvent);
+        ]]></body>
+      </method>
+
       <field name="_mayTrimURLs">true</field>
       <method name="trimValue">
         <parameter name="aURL"/>
@@ -314,7 +330,9 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
               url = action.params.url;
             } else if (action.type == "searchengine") {
               let engine = Services.search.getEngineByName(action.params.engineName);
-              let submission = engine.getSubmission(action.params.searchQuery);
+              let query = action.params.searchSuggestion ||
+                          action.params.searchQuery;
+              let submission = engine.getSubmission(query);
 
               url = submission.uri.spec;
               postData = submission.postData;
@@ -774,12 +792,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
           try {
             action.params = JSON.parse(params);
-            if (action.params.input) {
-              action.params.input = decodeURIComponent(action.params.input);
-            }
-            if (action.params.searchQuery) {
-              action.params.searchQuery = decodeURIComponent(action.params.searchQuery);
-            }
           } catch (e) {
             // If this failed, we assume that params is not a JSON object, and
             // is instead just a flat string. This will happen when
@@ -787,6 +799,17 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             // a URL.
             action.params = {
               url: params,
+            }
+            return action;
+          }
+
+          for (let key of [
+            "input",
+            "searchQuery",
+            "searchSuggestion",
+          ]) {
+            if (action.params[key]) {
+              action.params[key] = decodeURIComponent(action.params[key]);
             }
           }
 
@@ -1561,7 +1584,9 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                 }
                 case "searchengine": {
                   let engine = Services.search.getEngineByName(action.params.engineName);
-                  let submission = engine.getSubmission(action.params.searchQuery);
+                  let query = action.params.searchSuggestion ||
+                              action.params.searchQuery;
+                  let submission = engine.getSubmission(query);
                   url = submission.uri.spec;
                   options.postData = submission.postData;
                   break;
@@ -2352,10 +2377,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             Services.urlFormatter.formatURLPref("app.support.baseURL")
               + "tracking-protection";
         }
-        if (Services.prefs.getBoolPref("privacy.trackingprotection.enabled")) {
-          let histogram = Services.telemetry.getHistogramById("TRACKING_PROTECTION_EVENTS");
-          histogram.add(0);
-        }
       ]]></constructor>
       <method name="disableMixedContentProtection">
         <body><![CDATA[
@@ -2390,10 +2411,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // places this host on the tracking protection allowlist.
           Services.perms.add(normalizedUrl,
             "trackingprotection", Services.perms.ALLOW_ACTION);
-          // Telemetry for disable protection
-          let histogram = Services.telemetry.getHistogramById(
-              "TRACKING_PROTECTION_EVENTS");
-          histogram.add(1);
           BrowserReload();
         ]]></body>
       </method>
@@ -2404,10 +2421,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // from the tracking protection allowlist.
           Services.perms.remove(gBrowser.selectedBrowser.currentURI.host,
             "trackingprotection");
-          // Telemetry for enable protection
-          let histogram = Services.telemetry.getHistogramById(
-              "TRACKING_PROTECTION_EVENTS");
-          histogram.add(2);
           BrowserReload();
         ]]></body>
       </method>

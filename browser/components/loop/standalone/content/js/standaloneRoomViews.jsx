@@ -16,11 +16,15 @@ loop.standaloneRoomViews = (function(mozL10n) {
 
   var StandaloneRoomInfoArea = React.createClass({
     propTypes: {
-      isFirefox: React.PropTypes.bool.isRequired,
       activeRoomStore: React.PropTypes.oneOfType([
         React.PropTypes.instanceOf(loop.store.ActiveRoomStore),
         React.PropTypes.instanceOf(loop.store.FxOSActiveRoomStore)
-      ]).isRequired
+      ]).isRequired,
+      failureReason: React.PropTypes.string,
+      isFirefox: React.PropTypes.bool.isRequired,
+      joinRoom: React.PropTypes.func.isRequired,
+      roomState: React.PropTypes.string.isRequired,
+      roomUsed: React.PropTypes.bool.isRequired
     },
 
     onFeedbackSent: function() {
@@ -33,7 +37,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
     _renderCallToActionLink: function() {
       if (this.props.isFirefox) {
         return (
-          <a href={loop.config.learnMoreUrl} className="btn btn-info">
+          <a className="btn btn-info" href={loop.config.learnMoreUrl}>
             {mozL10n.get("rooms_room_full_call_to_action_label", {
               clientShortname: mozL10n.get("clientShortname2")
             })}
@@ -41,7 +45,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
         );
       }
       return (
-        <a href={loop.config.downloadFirefoxUrl} className="btn btn-info">
+        <a className="btn btn-info" href={loop.config.downloadFirefoxUrl}>
           {mozL10n.get("rooms_room_full_call_to_action_nonFx_label", {
             brandShortname: mozL10n.get("brandShortname")
           })}
@@ -127,9 +131,8 @@ loop.standaloneRoomViews = (function(mozL10n) {
             return (
               <div className="ended-conversation">
                 <sharedViews.FeedbackView
-                  onAfterFeedbackReceived={this.onFeedbackSent}
                   noCloseText={true}
-                />
+                  onAfterFeedbackReceived={this.onFeedbackSent} />
               </div>
             );
           }
@@ -248,6 +251,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
       // The poster URLs are for UI-showcase testing and development
       localPosterUrl: React.PropTypes.string,
       remotePosterUrl: React.PropTypes.string,
+      roomState: React.PropTypes.string,
       screenSharePosterUrl: React.PropTypes.string
     },
 
@@ -432,11 +436,11 @@ loop.standaloneRoomViews = (function(mozL10n) {
         <div className="room-conversation-wrapper">
           <div className="beta-logo" />
           <StandaloneRoomHeader dispatcher={this.props.dispatcher} />
-          <StandaloneRoomInfoArea roomState={this.state.roomState}
+          <StandaloneRoomInfoArea activeRoomStore={this.props.activeRoomStore}
                                   failureReason={this.state.failureReason}
-                                  joinRoom={this.joinRoom}
                                   isFirefox={this.props.isFirefox}
-                                  activeRoomStore={this.props.activeRoomStore}
+                                  joinRoom={this.joinRoom}
+                                  roomState={this.state.roomState}
                                   roomUsed={this.state.used} />
           <div className="media-layout">
             <div className={mediaWrapperClasses}>
@@ -445,40 +449,40 @@ loop.standaloneRoomViews = (function(mozL10n) {
               </span>
               <div className={remoteStreamClasses}>
                 <sharedViews.MediaView displayAvatar={!this.shouldRenderRemoteVideo()}
-                  posterUrl={this.props.remotePosterUrl}
                   isLoading={this._shouldRenderRemoteLoading()}
                   mediaType="remote"
+                  posterUrl={this.props.remotePosterUrl}
                   srcVideoObject={this.state.remoteSrcVideoObject} />
               </div>
               <div className={screenShareStreamClasses}>
                 <sharedViews.MediaView displayAvatar={false}
-                  posterUrl={this.props.screenSharePosterUrl}
                   isLoading={this._shouldRenderScreenShareLoading()}
                   mediaType="screen-share"
+                  posterUrl={this.props.screenSharePosterUrl}
                   srcVideoObject={this.state.screenShareVideoObject} />
               </div>
-              <sharedViews.TextChatView
+              <sharedViews.chat.TextChatView
                 dispatcher={this.props.dispatcher}
                 showAlways={true}
                 showRoomName={true} />
               <div className="local">
                 <sharedViews.MediaView displayAvatar={this.state.videoMuted}
-                  posterUrl={this.props.localPosterUrl}
                   isLoading={this._shouldRenderLocalLoading()}
                   mediaType="local"
+                  posterUrl={this.props.localPosterUrl}
                   srcVideoObject={this.state.localSrcVideoObject} />
               </div>
             </div>
             <sharedViews.ConversationToolbar
-              dispatcher={this.props.dispatcher}
-              video={{enabled: !this.state.videoMuted,
-                      visible: this._roomIsActive()}}
               audio={{enabled: !this.state.audioMuted,
                       visible: this._roomIsActive()}}
-              publishStream={this.publishStream}
+              dispatcher={this.props.dispatcher}
+              enableHangup={this._roomIsActive()}
               hangup={this.leaveRoom}
               hangupButtonLabel={mozL10n.get("rooms_leave_button_label")}
-              enableHangup={this._roomIsActive()} />
+              publishStream={this.publishStream}
+              video={{enabled: !this.state.videoMuted,
+                      visible: this._roomIsActive()}} />
           </div>
           <loop.fxOSMarketplaceViews.FxOSHiddenMarketplaceView
             marketplaceSrc={this.state.marketplaceSrc}
