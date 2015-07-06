@@ -12,11 +12,10 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/unused.h"
 #include "nsThreadUtils.h"
-#include "prlog.h"
+#include "mozilla/Logging.h"
 
 #undef LOG
 #undef LOG_ENABLED
-
 PRLogModuleInfo *gCamerasParentLog;
 #define LOG(args) MOZ_LOG(gCamerasParentLog, mozilla::LogLevel::Debug, args)
 #define LOG_ENABLED() MOZ_LOG_TEST(gCamerasParentLog, 5)
@@ -29,7 +28,7 @@ public:
   FrameSizeChangeRunnable(CamerasParent *aParent, CaptureEngine capEngine,
                           int cap_id, unsigned int aWidth, unsigned int aHeight)
     : mParent(aParent), mCapEngine(capEngine), mCapId(cap_id),
-      mWidth(aWidth), mHeight(aHeight) {};
+      mWidth(aWidth), mHeight(aHeight) {}
 
   NS_IMETHOD Run() {
     if (!mParent->ChildIsAlive()) {
@@ -701,8 +700,9 @@ CamerasParent::CamerasParent()
     mWebRTCThread(nullptr),
     mChildIsAlive(true)
 {
-  if (!gCamerasParentLog)
+  if (!gCamerasParentLog) {
     gCamerasParentLog = PR_NewLogModule("CamerasParent");
+  }
   LOG(("CamerasParent: %p", this));
 
   mPBackgroundThread = NS_GetCurrentThread();
