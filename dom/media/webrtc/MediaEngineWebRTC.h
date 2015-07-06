@@ -56,7 +56,8 @@
 namespace mozilla {
 
 class MediaEngineWebRTCAudioSource : public MediaEngineAudioSource,
-                                     public webrtc::VoEMediaProcess
+                                     public webrtc::VoEMediaProcess,
+                                     private MediaConstraintsHelper
 {
 public:
   MediaEngineWebRTCAudioSource(nsIThread* aThread, webrtc::VoiceEngine* aVoiceEnginePtr,
@@ -85,7 +86,8 @@ public:
   virtual void GetUUID(nsACString& aUUID) override;
 
   virtual nsresult Allocate(const dom::MediaTrackConstraints& aConstraints,
-                            const MediaEnginePrefs& aPrefs) override;
+                            const MediaEnginePrefs& aPrefs,
+                            const nsString& aDeviceId) override;
   virtual nsresult Deallocate() override;
   virtual nsresult Start(SourceMediaStream* aStream, TrackID aID) override;
   virtual nsresult Stop(SourceMediaStream* aSource, TrackID aID) override;
@@ -112,6 +114,10 @@ public:
   {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
+
+  virtual uint32_t GetBestFitnessDistance(
+      const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets,
+      const nsString& aDeviceId) override;
 
   // VoEMediaProcess.
   void Process(int channel, webrtc::ProcessingTypes type,
