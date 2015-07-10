@@ -11,8 +11,8 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/unused.h"
-#include "nsThreadUtils.h"
 #include "mozilla/Logging.h"
+#include "nsThreadUtils.h"
 
 #undef LOG
 #undef LOG_ENABLED
@@ -655,6 +655,15 @@ CamerasParent::RecvStopCapture(const int& aCapEngine,
 
   mVideoCaptureThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return SendReplySuccess();
+}
+
+bool
+CamerasParent::RecvAllDone()
+{
+  LOG((__PRETTY_FUNCTION__));
+  // Don't try to send anything to the child now
+  mChildIsAlive = false;
+  return Send__delete__(this);
 }
 
 void CamerasParent::DoShutdown()

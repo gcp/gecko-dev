@@ -85,6 +85,7 @@ public:
   virtual bool RecvStartCapture(const int&, const int&, const CaptureCapability&) override;
   virtual bool RecvStopCapture(const int&, const int&) override;
   virtual bool RecvReleaseFrame(mozilla::ipc::Shmem&&) override;
+  virtual bool RecvAllDone() override;
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
   nsIThread* GetBackgroundThread() { return mPBackgroundThread; };

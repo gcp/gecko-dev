@@ -17,6 +17,7 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/WeakPtr.h"
+#include "mozilla/unused.h"
 #include "MediaUtils.h"
 #include "nsThreadUtils.h"
 
@@ -579,6 +580,14 @@ CamerasChild::Shutdown()
 
   OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
   if (CamerasSingleton::Thread()) {
+    LOG(("Dispatching actor deletion"));
+    // Delete the parent actor
+    nsCOMPtr<nsIRunnable> deleteRunnable =
+      media::NewRunnableFrom([=]() -> nsresult {
+        unused << this->SendAllDone();
+        return NS_OK;
+      });
+    CamerasSingleton::Thread()->Dispatch(deleteRunnable, NS_DISPATCH_NORMAL);
     LOG(("PBackground thread exists, dispatching close"));
     // Dispatch closing the IPC thread back to us when the
     // BackgroundChild is closed.

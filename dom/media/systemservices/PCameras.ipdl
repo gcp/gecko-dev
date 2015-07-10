@@ -36,6 +36,7 @@ child:
   async ReplyGetCaptureDevice(nsCString device_name, nsCString device_id);
   async ReplyFailure();
   async ReplySuccess();
+  async __delete__();
 
 parent:
   async NumberOfCaptureDevices(int engine);
@@ -51,7 +52,8 @@ parent:
   // transfers frame back
   async ReleaseFrame(Shmem s);
 
-  async __delete__();
+  // Ask parent to delete us
+  async AllDone();
 };
 
 } // namespace camera
