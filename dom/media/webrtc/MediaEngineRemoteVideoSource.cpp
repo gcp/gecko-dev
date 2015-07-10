@@ -40,6 +40,7 @@ MediaEngineRemoteVideoSource::Init() {
                                         mCaptureIndex,
                                         deviceName, kMaxDeviceNameLength,
                                         uniqueId, kMaxUniqueIdLength)) {
+    LOG(("Error initializing RemoteVideoSource (GetCaptureDevice)"));
     return;
   }
 

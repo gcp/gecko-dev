@@ -182,7 +182,7 @@ private:
 
   nsCOMPtr<nsIThread> mThread;
 
-  //XXX: what is this really locking?
+  // gUM runnables can e.g. Enumerate from multiple threads
   Mutex mMutex;
   webrtc::VoiceEngine* mVoiceEngine;
   bool mAudioEngineInit;

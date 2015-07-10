@@ -19,6 +19,8 @@ nsresult SynchronouslyCreatePBackground();
 
 class ThreadDestructor : public nsRunnable
 {
+  DISALLOW_COPY_AND_ASSIGN(ThreadDestructor);
+
 public:
   explicit ThreadDestructor(nsCOMPtr<nsIThread> aThread)
     : mThread(aThread) {}
@@ -48,7 +50,7 @@ public:
 
 private:
   ~RunnableTask() {}
-  nsRefPtr<nsIRunnable> mRunnable;
+  nsCOMPtr<nsIRunnable> mRunnable;
 };
 
 }

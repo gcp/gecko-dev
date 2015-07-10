@@ -18,7 +18,7 @@
 #undef LOG_ENABLED
 PRLogModuleInfo *gCamerasParentLog;
 #define LOG(args) MOZ_LOG(gCamerasParentLog, mozilla::LogLevel::Debug, args)
-#define LOG_ENABLED() MOZ_LOG_TEST(gCamerasParentLog, 5)
+#define LOG_ENABLED() MOZ_LOG_TEST(gCamerasParentLog, mozilla::LogLevel::Debug)
 
 namespace mozilla {
 namespace camera {
@@ -84,17 +84,13 @@ public:
                        int64_t render_time)
     : mParent(aParent), mCapEngine(engine), mCapId(cap_id), mSize(size),
       mTimeStamp(time_stamp), mNtpTime(ntp_time), mRenderTime(render_time) {
-    mBuffer = (unsigned char*)malloc(size);
+    mBuffer.reset(new unsigned char[size]);
     // There is an extra copy here. We can't copy into Shmem yet
     // because we have no idea if the next frame will arrive before
     // us copying the data into the Shmem will have finished. We need
     // multiple Shmem to avoid this.
-    memcpy(mBuffer, buffer, size);
+    memcpy(mBuffer.get(), buffer, size);
   };
-
-  virtual ~DeliverFrameRunnable() {
-    free(mBuffer);
-  }
 
   NS_IMETHOD Run() {
     if (!mParent->ChildIsAlive()) {
@@ -103,7 +99,7 @@ public:
       return NS_OK;
     }
     if (!mParent->DeliverFrameOverIPC(mCapEngine, mCapId,
-                                      mBuffer, mSize, mTimeStamp,
+                                      mBuffer.get(), mSize, mTimeStamp,
                                       mNtpTime, mRenderTime)) {
       mResult = -1;
     } else {
@@ -120,7 +116,7 @@ private:
   CamerasParent *mParent;
   CaptureEngine mCapEngine;
   int mCapId;
-  unsigned char* mBuffer;
+  mozilla::UniquePtr<unsigned char[]> mBuffer;
   int mSize;
   uint32_t mTimeStamp;
   int64_t mNtpTime;
@@ -278,12 +274,14 @@ CamerasParent::CloseEngines()
     while (mCallbacks.Length()) {
       auto capEngine = mCallbacks[0]->mCapEngine;
       auto capNum = mCallbacks[0]->mCapturerId;
-      LOG(("Forcing shutdown of engne %d, capturer %d", capEngine, capNum));
+      LOG(("Forcing shutdown of engine %d, capturer %d", capEngine, capNum));
       {
         MutexAutoUnlock unlock(mCallbackMutex);
         RecvStopCapture(capEngine, capNum);
         RecvReleaseCaptureDevice(capEngine, capNum);
       }
+      // The callbacks list might have changed while we released the lock,
+      // but note that due to the loop construct this will not break us.
     }
   }
 
@@ -318,6 +316,11 @@ CamerasParent::EnsureInitialized(int aEngine)
   return true;
 }
 
+// Dispatch the runnable to do the camera operation on the
+// specific Cameras thread, preventing us from blocking, and
+// chain a runnable to send back the result on the IPC thread.
+// It would be nice to get rid of the code duplication here,
+// perhaps via Promises.
 bool
 CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine)
 {
@@ -346,7 +349,7 @@ CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine)
         this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
+  mVideoCaptureThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
 
   return true;
 }
@@ -384,7 +387,7 @@ CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
       this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
+  mVideoCaptureThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return true;
 }
 
@@ -416,7 +419,7 @@ CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
                                    webrtcCaps.rawType,
                                    webrtcCaps.codecType,
                                    webrtcCaps.interlaced);
-          LOG(("Capability: %d %d %d %d %d %d",
+          LOG(("Capability: %u %u %u %u %d %d",
                webrtcCaps.width,
                webrtcCaps.height,
                webrtcCaps.maxFPS,
@@ -433,7 +436,7 @@ CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
       this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
+  mVideoCaptureThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return true;
 }
 
@@ -482,7 +485,7 @@ CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
       this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
+  mVideoCaptureThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return true;
 }
 
@@ -516,7 +519,7 @@ CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
       this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
+  mVideoCaptureThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return true;
 }
 
@@ -550,7 +553,7 @@ CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
       return NS_OK;
     });
 #ifndef XP_MACOSX
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
+  mVideoCaptureThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
 #else
   // Mac OS X hangs on shutdown if we don't do this on the main thread.
   NS_DispatchToMainThread(webrtc_runnable);
@@ -616,7 +619,7 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
       this->mPBackgroundThread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
       return NS_OK;
     });
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
+  mVideoCaptureThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return true;
 }
 
@@ -650,7 +653,7 @@ CamerasParent::RecvStopCapture(const int& aCapEngine,
       return NS_OK;
     });
 
-  mWebRTCThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
+  mVideoCaptureThread->message_loop()->PostTask(FROM_HERE, new RunnableTask(webrtc_runnable));
   return SendReplySuccess();
 }
 
@@ -674,12 +677,12 @@ void CamerasParent::DoShutdown()
 
   mPBackgroundThread = nullptr;
 
-  if (mWebRTCThread) {
-    if (mWebRTCThread->IsRunning()) {
-      mWebRTCThread->Stop();
+  if (mVideoCaptureThread) {
+    if (mVideoCaptureThread->IsRunning()) {
+      mVideoCaptureThread->Stop();
     }
-    delete mWebRTCThread;
-    mWebRTCThread = nullptr;
+    delete mVideoCaptureThread;
+    mVideoCaptureThread = nullptr;
   }
 }
 
@@ -697,7 +700,7 @@ CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
 CamerasParent::CamerasParent()
   : mCallbackMutex("CamerasParent.mCallbackMutex"),
     mShmemInitialized(false),
-    mWebRTCThread(nullptr),
+    mVideoCaptureThread(nullptr),
     mChildIsAlive(true)
 {
   if (!gCamerasParentLog) {
@@ -709,14 +712,14 @@ CamerasParent::CamerasParent()
   MOZ_ASSERT(mPBackgroundThread != nullptr, "GetCurrentThread failed");
 
   LOG(("Spinning up WebRTC Cameras Thread"));
-  mWebRTCThread = new base::Thread("WebRTC Cameras");
+  mVideoCaptureThread = new base::Thread("VideoCapture");
   base::Thread::Options options;
 #if defined(_WIN32)
   options.message_loop_type = MessageLoop::TYPE_MOZILLA_NONMAINUITHREAD;
 #else
   options.message_loop_type = MessageLoop::TYPE_MOZILLA_NONMAINTHREAD;
 #endif
-  if (!mWebRTCThread->StartWithOptions(options)) {
+  if (!mVideoCaptureThread->StartWithOptions(options)) {
     MOZ_CRASH();
   }
 

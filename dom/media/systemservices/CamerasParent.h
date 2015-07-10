@@ -73,6 +73,8 @@ public:
 
 class CamerasParent :  public PCamerasParent
 {
+  DISALLOW_COPY_AND_ASSIGN(CamerasParent);
+
 public:
   virtual bool RecvAllocateCaptureDevice(const int&, const nsCString&) override;
   virtual bool RecvReleaseCaptureDevice(const int&, const int &) override;
@@ -117,10 +119,10 @@ private:
   mozilla::ipc::Shmem mShmem;
 
   // PBackground parent thread
-  nsIThread* mPBackgroundThread;
+  nsCOMPtr<nsIThread> mPBackgroundThread;
 
   // webrtc processing thread
-  base::Thread* mWebRTCThread;
+  base::Thread* mVideoCaptureThread;
 
   // Shutdown handling
   bool mChildIsAlive;

@@ -12,6 +12,7 @@
 #include "mozilla/camera/PCamerasChild.h"
 #include "mozilla/camera/PCamerasParent.h"
 #include "mozilla/Mutex.h"
+#include "nsCOMPtr.h"
 
 // conflicts with #include of scoped_ptr.h
 #undef FF
@@ -45,7 +46,7 @@ struct CapturerElement {
   webrtc::ExternalRenderer* callback;
 };
 
-// statically mirror webrtc.org API
+// statically mirror webrtc.org ViECapture API
 int NumberOfCapabilities(CaptureEngine aCapEngine,
                          const char* deviceUniqueIdUTF8);
 int GetCaptureCapability(CaptureEngine aCapEngine,
@@ -123,8 +124,9 @@ public:
 
 
 private:
-  explicit CamerasChild();
+  CamerasChild();
   ~CamerasChild();
+  bool DispatchToParent(nsCOMPtr<nsIRunnable> aRunnable);
 
   nsTArray<CapturerElement> mCallbacks;
   // Protects the callback arrays

@@ -29,6 +29,7 @@
 
 #include "MediaEngineWrapper.h"
 #include "mozilla/dom/MediaStreamTrackBinding.h"
+
 // WebRTC library includes follow
 #include "webrtc/common.h"
 #include "webrtc/video_engine/include/vie_capture.h"
@@ -59,7 +60,7 @@ public:
                            void *handle) override;
   virtual bool IsTextureSupported() override { return false; };
 
-  //
+  // MediaEngineCameraVideoSource
   MediaEngineRemoteVideoSource(int aIndex, mozilla::camera::CaptureEngine aCapEngine,
                                dom::MediaSourceEnum aMediaSource,
                                const char* aMonitorName = "RemoteVideo.Monitor");

@@ -31,8 +31,7 @@ public:
   NS_DECL_ISUPPORTS
 
 private:
-  ~WorkerBackgroundChildCallback()
-  { }
+  ~WorkerBackgroundChildCallback() { }
 
   virtual void
   ActorCreated(PBackgroundChild* aActor) override
