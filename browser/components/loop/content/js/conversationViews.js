@@ -4,6 +4,7 @@
 
 var loop = loop || {};
 loop.conversationViews = (function(mozL10n) {
+  "use strict";
 
   var CALL_STATES = loop.store.CALL_STATES;
   var CALL_TYPES = loop.shared.utils.CALL_TYPES;
@@ -459,7 +460,7 @@ loop.conversationViews = (function(mozL10n) {
     _onEmailLinkReceived: function() {
       var emailLink = this.getStoreState().emailLink;
       var contactEmail = _getPreferredEmail(this.props.contact).value;
-      sharedUtils.composeCallUrlEmail(emailLink, contactEmail);
+      sharedUtils.composeCallUrlEmail(emailLink, contactEmail, null, "callfailed");
       this.closeWindow();
     },
 

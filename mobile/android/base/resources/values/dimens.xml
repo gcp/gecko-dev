@@ -126,6 +126,7 @@
     <dimen name="tab_thumbnail_height">90dp</dimen>
     <dimen name="tab_thumbnail_width">160dp</dimen>
     <dimen name="tabs_panel_indicator_width">60dp</dimen>
+    <dimen name="tabs_panel_button_width">48dp</dimen>
     <dimen name="tabs_strip_height">40dp</dimen>
     <dimen name="tabs_strip_button_width">100dp</dimen>
     <dimen name="tabs_strip_button_padding">18dp</dimen>
@@ -159,8 +160,11 @@
     <dimen name="icongrid_columnwidth">128dp</dimen>
     <dimen name="icongrid_padding">16dp</dimen>
 
-    <!-- PanelGridView dimensions -->
+    <!-- PanelRecyclerView dimensions -->
     <dimen name="panel_grid_view_column_width">150dp</dimen>
+    <dimen name="panel_grid_view_horizontal_spacing">3dp</dimen>
+    <dimen name="panel_grid_view_vertical_spacing">3dp</dimen>
+    <dimen name="panel_grid_view_outer_spacing">3dp</dimen>
 
     <!-- PanelItemView dimensions -->
     <dimen name="panel_article_item_height">95dp</dimen>

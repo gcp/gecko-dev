@@ -1090,8 +1090,6 @@ static void SetGradient(const nsCSSValue& aValue, nsPresContext* aPresContext,
     aResult.mSize = NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER;
   }
 
-  aResult.mLegacySyntax = gradient->mIsLegacySyntax;
-
   // bg-position
   SetGradientCoord(gradient->mBgPos.mXValue, aPresContext, aContext,
                    aResult.mBgPosX, aConditions);
@@ -8899,7 +8897,7 @@ nsRuleNode::SetStyleClipPathToCSSValue(nsStyleClipPath* aStyleClipPath,
   const nsCSSValueList* cur = aValue->GetListValue();
 
   uint8_t sizingBox = NS_STYLE_CLIP_SHAPE_SIZING_NOBOX;
-  nsStyleBasicShape* basicShape = nullptr;
+  nsRefPtr<nsStyleBasicShape> basicShape;
   for (unsigned i = 0; i < 2; ++i) {
     if (!cur) {
       break;
@@ -9375,7 +9373,7 @@ nsRuleNode::SweepChildren(nsTArray<nsRuleNode*>& aSweepQueue)
   if (ChildrenAreHashed()) {
     PLDHashTable* children = ChildrenHash();
     uint32_t oldChildCount = children->EntryCount();
-    for (auto iter = children->RemovingIter(); !iter.Done(); iter.Next()) {
+    for (auto iter = children->Iter(); !iter.Done(); iter.Next()) {
       auto entry = static_cast<ChildrenHashEntry*>(iter.Get());
       nsRuleNode* node = entry->mRuleNode;
       if (node->DestroyIfNotMarked()) {

@@ -745,7 +745,23 @@ protected:
   bool ParseProperty(nsCSSProperty aPropID);
   bool ParsePropertyByFunction(nsCSSProperty aPropID);
   bool ParseSingleValueProperty(nsCSSValue& aValue,
-                                  nsCSSProperty aPropID);
+                                nsCSSProperty aPropID);
+
+  // These are similar to ParseSingleValueProperty but only work for
+  // properties that are parsed with ParseBoxProperties or
+  // ParseGroupedBoxProperty.  Stores in aConsumedTokens whether any tokens
+  // were consumed.
+  //
+  // Only works with variants with the following flags:
+  // A, C, H, K, L, N, P, CALC.
+  bool ParseBoxPropertyVariant(nsCSSValue& aValue,
+                               uint32_t aVariantMask,
+                               const KTableValue aKeywordTable[],
+                               uint32_t aRestrictions,
+                               bool& aConsumedTokens);
+  bool ParseBoxProperty(nsCSSValue& aValue,
+                        nsCSSProperty aPropID,
+                        bool& aConsumedTokens);
 
   enum PriorityParsingStatus {
     ePriority_None,
@@ -1039,6 +1055,10 @@ protected:
   bool ParseVariant(nsCSSValue& aValue,
                     int32_t aVariantMask,
                     const KTableValue aKeywordTable[]);
+  bool ParseVariantWithRestrictions(nsCSSValue& aValue,
+                                    int32_t aVariantMask,
+                                    const KTableValue aKeywordTable[],
+                                    uint32_t aRestrictions);
   bool ParseNonNegativeVariant(nsCSSValue& aValue,
                                int32_t aVariantMask,
                                const KTableValue aKeywordTable[]);
@@ -1077,12 +1097,8 @@ protected:
   bool ParseImageRect(nsCSSValue& aImage);
   bool ParseElement(nsCSSValue& aValue);
   bool ParseColorStop(nsCSSValueGradient* aGradient);
-  bool ParseLinearGradient(nsCSSValue& aValue, bool aIsRepeating,
-                           bool aIsLegacy);
-  bool ParseRadialGradient(nsCSSValue& aValue, bool aIsRepeating,
-                           bool aIsLegacy);
-  bool IsLegacyGradientLine(const nsCSSTokenType& aType,
-                            const nsString& aId);
+  bool ParseLinearGradient(nsCSSValue& aValue, bool aIsRepeating);
+  bool ParseRadialGradient(nsCSSValue& aValue, bool aIsRepeating);
   bool ParseGradientColorStops(nsCSSValueGradient* aGradient,
                                nsCSSValue& aValue);
 
@@ -6751,10 +6767,10 @@ CSSParserImpl::ParseWebkitPrefixedGradient(nsAString& aPrefixedFuncName,
 
   nsAutoScannerChanger scannerChanger(this, unprefixedFuncBody);
   if (unprefixedFuncName.EqualsLiteral("linear-gradient")) {
-    return ParseLinearGradient(aValue, false, false);
+    return ParseLinearGradient(aValue, false);
   }
   if (unprefixedFuncName.EqualsLiteral("radial-gradient")) {
-    return ParseRadialGradient(aValue, false, false);
+    return ParseRadialGradient(aValue, false);
   }
 
   NS_ERROR("CSSUnprefixingService returned an unrecognized type of "
@@ -6964,15 +6980,15 @@ static const nsCSSProperty kBorderLeftIDs[] = {
   eCSSProperty_border_left_style,
   eCSSProperty_border_left_color
 };
-static const nsCSSProperty kBorderStartIDs[] = {
-  eCSSProperty_border_start_width,
-  eCSSProperty_border_start_style,
-  eCSSProperty_border_start_color
+static const nsCSSProperty kBorderInlineStartIDs[] = {
+  eCSSProperty_border_inline_start_width,
+  eCSSProperty_border_inline_start_style,
+  eCSSProperty_border_inline_start_color
 };
-static const nsCSSProperty kBorderEndIDs[] = {
-  eCSSProperty_border_end_width,
-  eCSSProperty_border_end_style,
-  eCSSProperty_border_end_color
+static const nsCSSProperty kBorderInlineEndIDs[] = {
+  eCSSProperty_border_inline_end_width,
+  eCSSProperty_border_inline_end_style,
+  eCSSProperty_border_inline_end_color
 };
 static const nsCSSProperty kBorderBlockStartIDs[] = {
   eCSSProperty_border_block_start_width,
@@ -7133,6 +7149,24 @@ CSSParserImpl::TranslateDimension(nsCSSValue& aValue,
   VARIANT_ALL | \
   VARIANT_CALC | \
   VARIANT_OPENTYPE_SVG_KEYWORD
+
+bool
+CSSParserImpl::ParseVariantWithRestrictions(nsCSSValue& aValue,
+                                            int32_t aVariantMask,
+                                            const KTableValue aKeywordTable[],
+                                            uint32_t aRestrictions)
+{
+  switch (aRestrictions) {
+    default:
+      MOZ_ASSERT(false, "should not be reached");
+    case 0:
+      return ParseVariant(aValue, aVariantMask, aKeywordTable);
+    case CSS_PROPERTY_VALUE_NONNEGATIVE:
+      return ParseNonNegativeVariant(aValue, aVariantMask, aKeywordTable);
+    case CSS_PROPERTY_VALUE_AT_LEAST_ONE:
+      return ParseOneOrLargerVariant(aValue, aVariantMask, aKeywordTable);
+  }
+}
 
 // Note that callers passing VARIANT_CALC in aVariantMask will get
 // full-range parsing inside the calc() expression, and the code that
@@ -7369,11 +7403,6 @@ CSSParserImpl::ParseVariant(nsCSSValue& aValue,
       eCSSToken_Function == tk->mType) {
     // a generated gradient
     nsDependentString tmp(tk->mIdent, 0);
-    bool isLegacy = false;
-    if (StringBeginsWith(tmp, NS_LITERAL_STRING("-moz-"))) {
-      tmp.Rebind(tmp, 5);
-      isLegacy = true;
-    }
     bool isRepeating = false;
     if (StringBeginsWith(tmp, NS_LITERAL_STRING("repeating-"))) {
       tmp.Rebind(tmp, 10);
@@ -7381,13 +7410,12 @@ CSSParserImpl::ParseVariant(nsCSSValue& aValue,
     }
 
     if (tmp.LowerCaseEqualsLiteral("linear-gradient")) {
-      return ParseLinearGradient(aValue, isRepeating, isLegacy);
+      return ParseLinearGradient(aValue, isRepeating);
     }
     if (tmp.LowerCaseEqualsLiteral("radial-gradient")) {
-      return ParseRadialGradient(aValue, isRepeating, isLegacy);
+      return ParseRadialGradient(aValue, isRepeating);
     }
-    if (ShouldUseUnprefixingService() &&
-        !isRepeating && !isLegacy &&
+    if (ShouldUseUnprefixingService() && !isRepeating &&
         StringBeginsWith(tmp, NS_LITERAL_STRING("-webkit-"))) {
       // Copy 'tmp' into a string on the stack, since as soon as we
       // start parsing, its backing store (in "tk") will be overwritten
@@ -9151,24 +9179,15 @@ CSSParserImpl::ParseColorStop(nsCSSValueGradient* aGradient)
 //    | radial-gradient( <radial-gradient-line>? <color-stops> ')'
 //
 // <linear-gradient-line> : [ to [left | right] || [top | bottom] ] ,
-//                        | <legacy-gradient-line>
 // <radial-gradient-line> : [ <shape> || <size> ] [ at <position> ]? ,
 //                        | [ at <position> ] ,
-//                        | <legacy-gradient-line>? <legacy-shape-size>?
 // <shape> : circle | ellipse
 // <size> : closest-side | closest-corner | farthest-side | farthest-corner
 //        | <length> | [<length> | <percentage>]{2}
 //
-// <legacy-gradient-line> : [ <position> || <angle>] ,
-//
-// <legacy-shape-size> : [ <shape> || <legacy-size> ] ,
-// <legacy-size> : closest-side | closest-corner | farthest-side
-//               | farthest-corner | contain | cover
-//
 // <color-stops> : <color-stop> , <color-stop> [, <color-stop>]*
 bool
-CSSParserImpl::ParseLinearGradient(nsCSSValue& aValue, bool aIsRepeating,
-                                   bool aIsLegacy)
+CSSParserImpl::ParseLinearGradient(nsCSSValue& aValue, bool aIsRepeating)
 {
   nsRefPtr<nsCSSValueGradient> cssGradient
     = new nsCSSValueGradient(false, aIsRepeating);
@@ -9209,56 +9228,20 @@ CSSParserImpl::ParseLinearGradient(nsCSSValue& aValue, bool aIsRepeating,
     return ParseGradientColorStops(cssGradient, aValue);
   }
 
-  if (!aIsLegacy) {
-    UngetToken();
-
-    // <angle> ,
-    if (ParseVariant(cssGradient->mAngle, VARIANT_ANGLE, nullptr) &&
-        !ExpectSymbol(',', true)) {
-      SkipUntil(')');
-      return false;
-    }
-
-    return ParseGradientColorStops(cssGradient, aValue);
-  }
-
-  nsCSSTokenType ty = mToken.mType;
-  nsString id = mToken.mIdent;
   UngetToken();
 
-  // <legacy-gradient-line>
-  bool haveGradientLine = IsLegacyGradientLine(ty, id);
-  if (haveGradientLine) {
-    cssGradient->mIsLegacySyntax = true;
-    bool haveAngle =
-      ParseVariant(cssGradient->mAngle, VARIANT_ANGLE, nullptr);
-
-    // if we got an angle, we might now have a comma, ending the gradient-line
-    if (!haveAngle || !ExpectSymbol(',', true)) {
-      if (!ParseBoxPositionValues(cssGradient->mBgPos, false)) {
-        SkipUntil(')');
-        return false;
-      }
-
-      if (!ExpectSymbol(',', true) &&
-          // if we didn't already get an angle, we might have one now,
-          // otherwise it's an error
-          (haveAngle ||
-           !ParseVariant(cssGradient->mAngle, VARIANT_ANGLE, nullptr) ||
-           // now we better have a comma
-           !ExpectSymbol(',', true))) {
-        SkipUntil(')');
-        return false;
-      }
-    }
+  // <angle> ,
+  if (ParseVariant(cssGradient->mAngle, VARIANT_ANGLE, nullptr) &&
+      !ExpectSymbol(',', true)) {
+    SkipUntil(')');
+    return false;
   }
 
   return ParseGradientColorStops(cssGradient, aValue);
 }
 
 bool
-CSSParserImpl::ParseRadialGradient(nsCSSValue& aValue, bool aIsRepeating,
-                                   bool aIsLegacy)
+CSSParserImpl::ParseRadialGradient(nsCSSValue& aValue, bool aIsRepeating)
 {
   nsRefPtr<nsCSSValueGradient> cssGradient
     = new nsCSSValueGradient(true, aIsRepeating);
@@ -9269,8 +9252,6 @@ CSSParserImpl::ParseRadialGradient(nsCSSValue& aValue, bool aIsRepeating,
                  nsCSSProps::kRadialGradientShapeKTable);
 
   bool haveSize = ParseVariant(cssGradient->GetRadialSize(), VARIANT_KEYWORD,
-                               aIsLegacy ?
-                               nsCSSProps::kRadialGradientLegacySizeKTable :
                                nsCSSProps::kRadialGradientSizeKTable);
   if (haveSize) {
     if (!haveShape) {
@@ -9278,7 +9259,7 @@ CSSParserImpl::ParseRadialGradient(nsCSSValue& aValue, bool aIsRepeating,
       haveShape = ParseVariant(cssGradient->GetRadialShape(), VARIANT_KEYWORD,
                                nsCSSProps::kRadialGradientShapeKTable);
     }
-  } else if (!aIsLegacy) {
+  } else {
     // Save RadialShape before parsing RadiusX because RadialShape and
     // RadiusX share the storage.
     int32_t shape =
@@ -9329,138 +9310,21 @@ CSSParserImpl::ParseRadialGradient(nsCSSValue& aValue, bool aIsRepeating,
     return false;
   }
 
-  if (!aIsLegacy) {
-    if (mToken.mType == eCSSToken_Ident &&
-        mToken.mIdent.LowerCaseEqualsLiteral("at")) {
-      // [ <shape> || <size> ]? at <position> ,
-      if (!ParseBoxPositionValues(cssGradient->mBgPos, false) ||
-          !ExpectSymbol(',', true)) {
-        SkipUntil(')');
-        return false;
-      }
-
-      return ParseGradientColorStops(cssGradient, aValue);
+  if (mToken.mType == eCSSToken_Ident &&
+      mToken.mIdent.LowerCaseEqualsLiteral("at")) {
+    // [ <shape> || <size> ]? at <position> ,
+    if (!ParseBoxPositionValues(cssGradient->mBgPos, false) ||
+        !ExpectSymbol(',', true)) {
+      SkipUntil(')');
+      return false;
     }
 
-    // <color-stops> only
-    UngetToken();
     return ParseGradientColorStops(cssGradient, aValue);
   }
-  MOZ_ASSERT(!cssGradient->mIsExplicitSize);
 
-  nsCSSTokenType ty = mToken.mType;
-  nsString id = mToken.mIdent;
+  // <color-stops> only
   UngetToken();
-
-  // <legacy-gradient-line>
-  bool haveGradientLine = false;
-  // if we already encountered a shape or size,
-  // we can not have a gradient-line in legacy syntax
-  if (!haveShape && !haveSize) {
-      haveGradientLine = IsLegacyGradientLine(ty, id);
-  }
-  if (haveGradientLine) {
-    bool haveAngle =
-      ParseVariant(cssGradient->mAngle, VARIANT_ANGLE, nullptr);
-
-    // if we got an angle, we might now have a comma, ending the gradient-line
-    if (!haveAngle || !ExpectSymbol(',', true)) {
-      if (!ParseBoxPositionValues(cssGradient->mBgPos, false)) {
-        SkipUntil(')');
-        return false;
-      }
-
-      if (!ExpectSymbol(',', true) &&
-          // if we didn't already get an angle, we might have one now,
-          // otherwise it's an error
-          (haveAngle ||
-           !ParseVariant(cssGradient->mAngle, VARIANT_ANGLE, nullptr) ||
-           // now we better have a comma
-           !ExpectSymbol(',', true))) {
-        SkipUntil(')');
-        return false;
-      }
-    }
-
-    if (cssGradient->mAngle.GetUnit() != eCSSUnit_None) {
-      cssGradient->mIsLegacySyntax = true;
-    }
-  }
-
-  // radial gradients might have a shape and size here for legacy syntax
-  if (!haveShape && !haveSize) {
-    haveShape =
-      ParseVariant(cssGradient->GetRadialShape(), VARIANT_KEYWORD,
-                   nsCSSProps::kRadialGradientShapeKTable);
-    haveSize =
-      ParseVariant(cssGradient->GetRadialSize(), VARIANT_KEYWORD,
-                   nsCSSProps::kRadialGradientLegacySizeKTable);
-
-    // could be in either order
-    if (!haveShape) {
-      haveShape =
-        ParseVariant(cssGradient->GetRadialShape(), VARIANT_KEYWORD,
-                     nsCSSProps::kRadialGradientShapeKTable);
-    }
-  }
-
-  if ((haveShape || haveSize) && !ExpectSymbol(',', true)) {
-    SkipUntil(')');
-    return false;
-  }
-
   return ParseGradientColorStops(cssGradient, aValue);
-}
-
-bool
-CSSParserImpl::IsLegacyGradientLine(const nsCSSTokenType& aType,
-                                    const nsString& aId)
-{
-  // N.B. ParseBoxPositionValues is not guaranteed to put back
-  // everything it scanned if it fails, so we must only call it
-  // if there is no alternative to consuming a <box-position>.
-  // ParseVariant, as used here, will either succeed and consume
-  // a single token, or fail and consume none, so we can be more
-  // cavalier about calling it.
-
-  bool haveGradientLine = false;
-  switch (aType) {
-  case eCSSToken_Percentage:
-  case eCSSToken_Number:
-  case eCSSToken_Dimension:
-    haveGradientLine = true;
-    break;
-
-  case eCSSToken_Function:
-    if (aId.LowerCaseEqualsLiteral("calc") ||
-        aId.LowerCaseEqualsLiteral("-moz-calc")) {
-      haveGradientLine = true;
-      break;
-    }
-    // fall through
-  case eCSSToken_ID:
-  case eCSSToken_Hash:
-    // this is a color
-    break;
-
-  case eCSSToken_Ident: {
-    // This is only a gradient line if it's a box position keyword.
-    nsCSSKeyword kw = nsCSSKeywords::LookupKeyword(aId);
-    int32_t junk;
-    if (kw != eCSSKeyword_UNKNOWN &&
-        nsCSSProps::FindKeyword(kw, nsCSSProps::kBackgroundPositionKTable,
-                                junk)) {
-      haveGradientLine = true;
-    }
-    break;
-  }
-
-  default:
-    // error
-    break;
-  }
-
-  return haveGradientLine;
 }
 
 bool
@@ -9593,8 +9457,12 @@ CSSParserImpl::ParseBoxProperties(const nsCSSProperty aPropIDs[])
   int32_t count = 0;
   nsCSSRect result;
   NS_FOR_CSS_SIDES (index) {
-    if (! ParseSingleValueProperty(result.*(nsCSSRect::sides[index]),
-                                   aPropIDs[index])) {
+    bool consumedTokens;
+    if (!ParseBoxProperty(result.*(nsCSSRect::sides[index]),
+                          aPropIDs[index], consumedTokens)) {
+      if (consumedTokens) {
+        return false;
+      }
       break;
     }
     count++;
@@ -9640,8 +9508,17 @@ CSSParserImpl::ParseGroupedBoxProperty(int32_t aVariantMask,
 
   int32_t count = 0;
   NS_FOR_CSS_SIDES (index) {
-    if (!ParseNonNegativeVariant(result.*(nsCSSRect::sides[index]),
-                                 aVariantMask, nullptr)) {
+    bool consumedTokens;
+    if (!ParseBoxPropertyVariant(result.*(nsCSSRect::sides[index]),
+                                 aVariantMask, nullptr,
+                                 CSS_PROPERTY_VALUE_NONNEGATIVE,
+                                 consumedTokens)) {
+      if (consumedTokens) {
+        // we consumed some tokens, which means we failed in the middle
+        // of parsing a multi-token value, and thus we shouldn't just
+        // exit the loop and return true
+        return false;
+      }
       break;
     }
     count++;
@@ -10066,10 +9943,10 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSProperty aPropID)
     return ParseBorderSide(kBorderBlockStartIDs, false);
   case eCSSProperty_border_bottom:
     return ParseBorderSide(kBorderBottomIDs, false);
-  case eCSSProperty_border_end:
-    return ParseBorderSide(kBorderEndIDs, false);
-  case eCSSProperty_border_start:
-    return ParseBorderSide(kBorderStartIDs, false);
+  case eCSSProperty_border_inline_end:
+    return ParseBorderSide(kBorderInlineEndIDs, false);
+  case eCSSProperty_border_inline_start:
+    return ParseBorderSide(kBorderInlineStartIDs, false);
   case eCSSProperty_border_left:
     return ParseBorderSide(kBorderLeftIDs, false);
   case eCSSProperty_border_right:
@@ -10231,6 +10108,79 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSProperty aPropID)
 #define BG_LR     (BG_LEFT | BG_RIGHT)
 
 bool
+CSSParserImpl::ParseBoxPropertyVariant(nsCSSValue& aValue,
+                                       uint32_t aVariantMask,
+                                       const KTableValue aKeywordTable[],
+                                       uint32_t aRestrictions,
+                                       bool& aConsumedTokens)
+{
+  aConsumedTokens = false;
+
+  uint32_t lineBefore, colBefore;
+  if (!GetNextTokenLocation(true, &lineBefore, &colBefore)) {
+    return false;
+  }
+
+  if (!ParseVariantWithRestrictions(aValue, aVariantMask, aKeywordTable,
+                                    aRestrictions)) {
+    uint32_t lineAfter, colAfter;
+    if (!GetNextTokenLocation(true, &lineAfter, &colAfter)) {
+      // any single token value that was invalid will have been pushed back,
+      // so GetNextTokenLocation encountering EOF means we failed while
+      // parsing a multi-token value
+      aConsumedTokens = true;
+    } else if (lineAfter != lineBefore || colAfter != colBefore) {
+      aConsumedTokens = true;
+    }
+    return false;
+  }
+
+  aConsumedTokens = true;
+  return true;
+}
+
+bool
+CSSParserImpl::ParseBoxProperty(nsCSSValue& aValue,
+                                nsCSSProperty aPropID,
+                                bool& aConsumedTokens)
+{
+  aConsumedTokens = false;
+
+  if (aPropID < 0 || aPropID >= eCSSProperty_COUNT_no_shorthands) {
+    MOZ_ASSERT(false, "must only be called for longhand properties");
+    return false;
+  }
+
+  MOZ_ASSERT(!nsCSSProps::PropHasFlags(aPropID,
+                                       CSS_PROPERTY_VALUE_PARSER_FUNCTION),
+             "must only be called for non-function-parsed properties");
+
+  uint32_t variant = nsCSSProps::ParserVariant(aPropID);
+  if (variant == 0) {
+    MOZ_ASSERT(false, "must only be called for variant-parsed properties");
+    return false;
+  }
+
+  if (aPropID == eCSSProperty_script_level ||
+      aPropID == eCSSProperty_math_display) {
+    MOZ_ASSERT(false, "must not be called for unsafe properties");
+    return false;
+  }
+
+  if (variant & ~(VARIANT_AHKLP | VARIANT_COLOR | VARIANT_CALC)) {
+    MOZ_ASSERT(false, "must only be called for properties that take certain "
+                      "variants");
+    return false;
+  }
+
+  const KTableValue* kwtable = nsCSSProps::kKeywordTableTable[aPropID];
+  uint32_t restrictions = nsCSSProps::ValueRestrictions(aPropID);
+
+  return ParseBoxPropertyVariant(aValue, variant, kwtable, restrictions,
+                                 aConsumedTokens);
+}
+
+bool
 CSSParserImpl::ParseSingleValueProperty(nsCSSValue& aValue,
                                         nsCSSProperty aPropID)
 {
@@ -10314,17 +10264,9 @@ CSSParserImpl::ParseSingleValueProperty(nsCSSValue& aValue,
        aPropID == eCSSProperty_math_display))
     return false;
 
-  const KTableValue *kwtable = nsCSSProps::kKeywordTableTable[aPropID];
-  switch (nsCSSProps::ValueRestrictions(aPropID)) {
-    default:
-      MOZ_ASSERT(false, "should not be reached");
-    case 0:
-      return ParseVariant(aValue, variant, kwtable);
-    case CSS_PROPERTY_VALUE_NONNEGATIVE:
-      return ParseNonNegativeVariant(aValue, variant, kwtable);
-    case CSS_PROPERTY_VALUE_AT_LEAST_ONE:
-      return ParseOneOrLargerVariant(aValue, variant, kwtable);
-  }
+  const KTableValue* kwtable = nsCSSProps::kKeywordTableTable[aPropID];
+  uint32_t restrictions = nsCSSProps::ValueRestrictions(aPropID);
+  return ParseVariantWithRestrictions(aValue, variant, kwtable, restrictions);
 }
 
 // font-descriptor: descriptor ':' value ';'
@@ -10636,10 +10578,6 @@ CSSParserImpl::ParseBackgroundItem(CSSParserImpl::BackgroundParseState& aState)
                  mToken.mIdent.LowerCaseEqualsLiteral("radial-gradient") ||
                  mToken.mIdent.LowerCaseEqualsLiteral("repeating-linear-gradient") ||
                  mToken.mIdent.LowerCaseEqualsLiteral("repeating-radial-gradient") ||
-                 mToken.mIdent.LowerCaseEqualsLiteral("-moz-linear-gradient") ||
-                 mToken.mIdent.LowerCaseEqualsLiteral("-moz-radial-gradient") ||
-                 mToken.mIdent.LowerCaseEqualsLiteral("-moz-repeating-linear-gradient") ||
-                 mToken.mIdent.LowerCaseEqualsLiteral("-moz-repeating-radial-gradient") ||
                  mToken.mIdent.LowerCaseEqualsLiteral("-moz-image-rect") ||
                  mToken.mIdent.LowerCaseEqualsLiteral("-moz-element") ||
                  (ShouldUseUnprefixingService() &&

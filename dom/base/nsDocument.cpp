@@ -82,9 +82,13 @@
 #include "nsIRefreshURI.h"
 #include "nsIWebNavigation.h"
 #include "nsIScriptError.h"
+#include "nsISimpleEnumerator.h"
 #include "nsStyleSheetService.h"
 
-#include "nsNetUtil.h"     // for NS_MakeAbsoluteURI
+#include "nsNetUtil.h"     // for NS_NewURI
+#include "nsIInputStreamChannel.h"
+#include "nsIAuthPrompt.h"
+#include "nsIAuthPrompt2.h"
 
 #include "nsIScriptSecurityManager.h"
 #include "nsIPrincipal.h"
@@ -11064,7 +11068,8 @@ public:
   NS_IMETHOD Run()
   {
     if (mDoc->GetWindow()) {
-      mDoc->GetWindow()->SetFullScreenInternal(mValue, false, mHMD);
+      mDoc->GetWindow()->SetFullscreenInternal(
+        nsPIDOMWindow::eForFullscreenAPI, mValue, mHMD);
     }
     return NS_OK;
   }

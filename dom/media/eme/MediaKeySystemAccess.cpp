@@ -26,6 +26,7 @@
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
+#include "nsXULAppAPI.h"
 
 namespace mozilla {
 namespace dom {
@@ -100,6 +101,11 @@ static bool
 AdobePluginFileExists(const nsACString& aVersionStr,
                       const nsAString& aFilename)
 {
+  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+    NS_WARNING("AdobePluginFileExists() lying because it doesn't work with e10s");
+    return true;
+  }
+
   nsCOMPtr<nsIFile> path;
   nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR, getter_AddRefs(path));
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -161,17 +167,6 @@ EnsureMinCDMVersion(mozIGeckoMediaPluginService* aGMPService,
     return MediaKeySystemStatus::Cdm_not_installed;
   }
 
-  if (aMinCdmVersion == NO_CDM_VERSION) {
-    return MediaKeySystemStatus::Available;
-  }
-
-  nsresult rv;
-  int32_t version = versionStr.ToInteger(&rv);
-  if (NS_FAILED(rv) || version < 0 || aMinCdmVersion > version) {
-    aOutMessage = NS_LITERAL_CSTRING("Installed CDM version insufficient");
-    return MediaKeySystemStatus::Cdm_insufficient_version;
-  }
-
 #ifdef XP_WIN
   if (aKeySystem.EqualsLiteral("com.adobe.access") ||
       aKeySystem.EqualsLiteral("com.adobe.primetime")) {
@@ -196,6 +191,14 @@ EnsureMinCDMVersion(mozIGeckoMediaPluginService* aGMPService,
     }
   }
 #endif
+
+  nsresult rv;
+  int32_t version = versionStr.ToInteger(&rv);
+  if (aMinCdmVersion != NO_CDM_VERSION &&
+      (NS_FAILED(rv) || version < 0 || aMinCdmVersion > version)) {
+    aOutMessage = NS_LITERAL_CSTRING("Installed CDM version insufficient");
+    return MediaKeySystemStatus::Cdm_insufficient_version;
+  }
 
   return MediaKeySystemStatus::Available;
 }

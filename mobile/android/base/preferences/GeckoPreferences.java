@@ -120,15 +120,18 @@ OnSharedPreferenceChangeListener
     private static final String PREFS_GEO_REPORTING = NON_PREF_PREFIX + "app.geo.reportdata";
     private static final String PREFS_GEO_LEARN_MORE = NON_PREF_PREFIX + "geo.learn_more";
     private static final String PREFS_HEALTHREPORT_LINK = NON_PREF_PREFIX + "healthreport.link";
-    private static final String PREFS_DEVTOOLS_REMOTE_ENABLED = "devtools.debugger.remote-enabled";
+    private static final String PREFS_DEVTOOLS_REMOTE_USB_ENABLED = "devtools.remote.usb.enabled";
+    private static final String PREFS_DEVTOOLS_REMOTE_WIFI_ENABLED = "devtools.remote.wifi.enabled";
     private static final String PREFS_DISPLAY_REFLOW_ON_ZOOM = "browser.zoom.reflowOnZoom";
     private static final String PREFS_DISPLAY_TITLEBAR_MODE = "browser.chrome.titlebarMode";
     private static final String PREFS_SYNC = NON_PREF_PREFIX + "sync";
     public static final String PREFS_OPEN_URLS_IN_PRIVATE = NON_PREF_PREFIX + "openExternalURLsPrivately";
     public static final String PREFS_VOICE_INPUT_ENABLED = NON_PREF_PREFIX + "voice_input_enabled";
     public static final String PREFS_QRCODE_ENABLED = NON_PREF_PREFIX + "qrcode_enabled";
+    private static final String PREFS_DEVTOOLS = NON_PREF_PREFIX + "devtools.enabled";
 
     private static final String ACTION_STUMBLER_UPLOAD_PREF = AppConstants.ANDROID_PACKAGE_NAME + ".STUMBLER_PREF";
+
 
     // This isn't a Gecko pref, even if it looks like one.
     private static final String PREFS_BROWSER_LOCALE = "locale";
@@ -692,6 +695,13 @@ OnSharedPreferenceChangeListener
                         continue;
                     }
                 }
+                if (PREFS_DEVTOOLS.equals(key) &&
+                    RestrictedProfiles.isUserRestricted()) {
+                    preferences.removePreference(pref);
+                    i--;
+                    continue;
+                }
+
                 setupPreferences((PreferenceGroup) pref, prefs);
             } else {
                 pref.setOnPreferenceChangeListener(this);
@@ -747,10 +757,22 @@ OnSharedPreferenceChangeListener
                         i--;
                         continue;
                     }
-                } else if (PREFS_DEVTOOLS_REMOTE_ENABLED.equals(key)) {
+                } else if (PREFS_DEVTOOLS_REMOTE_USB_ENABLED.equals(key)) {
                     if (!RestrictedProfiles.isAllowed(this, RestrictedProfiles.Restriction.DISALLOW_REMOTE_DEBUGGING)) {
                         preferences.removePreference(pref);
                         i--;
+                        continue;
+                    }
+                } else if (PREFS_DEVTOOLS_REMOTE_WIFI_ENABLED.equals(key)) {
+                    if (!RestrictedProfiles.isAllowed(this, RestrictedProfiles.Restriction.DISALLOW_REMOTE_DEBUGGING)) {
+                        preferences.removePreference(pref);
+                        i--;
+                        continue;
+                    }
+                    if (!InputOptionsUtils.supportsQrCodeReader(getApplicationContext())) {
+                        // WiFi debugging requires a QR code reader
+                        pref.setEnabled(false);
+                        pref.setSummary(getString(R.string.pref_developer_remotedebugging_wifi_disabled_summary));
                         continue;
                     }
                 } else if (PREFS_RESTORE_SESSION.equals(key) ||

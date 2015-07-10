@@ -129,7 +129,18 @@ mozilla::plugins::SetupBridge(uint32_t aPluginId,
         // We'll handle the bridging asynchronously
         return true;
     }
-    return PPluginModule::Bridge(aContentParent, chromeParent);
+    *rv = PPluginModule::Bridge(aContentParent, chromeParent);
+    if (NS_FAILED(*rv)) {
+#if defined(MOZ_CRASHREPORTER)
+        // We are going to abort due to the failure, lets note the cause
+        // in the report for diagnosing.
+        nsAutoCString error;
+        error.AppendPrintf("%X", *rv);
+        CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("BridgePluginError"), error);
+#endif
+      return false;
+    }
+    return true;
 }
 
 #ifdef MOZ_CRASHREPORTER_INJECTOR
@@ -350,7 +361,9 @@ bool PluginModuleMapping::sIsLoadModuleOnStack = false;
 } // anonymous namespace
 
 void
-mozilla::plugins::TerminatePlugin(uint32_t aPluginId, const nsString& aBrowserDumpId)
+mozilla::plugins::TerminatePlugin(uint32_t aPluginId,
+                                  const nsCString& aMonitorDescription,
+                                  const nsAString& aBrowserDumpId)
 {
     MOZ_ASSERT(XRE_IsParentProcess());
 
@@ -360,8 +373,11 @@ mozilla::plugins::TerminatePlugin(uint32_t aPluginId, const nsString& aBrowserDu
         return;
     }
     nsRefPtr<nsNPAPIPlugin> plugin = pluginTag->mPlugin;
-    PluginModuleChromeParent* chromeParent = static_cast<PluginModuleChromeParent*>(plugin->GetLibrary());
-    chromeParent->TerminateChildProcess(MessageLoop::current(), aBrowserDumpId);
+    PluginModuleChromeParent* chromeParent =
+        static_cast<PluginModuleChromeParent*>(plugin->GetLibrary());
+    chromeParent->TerminateChildProcess(MessageLoop::current(),
+                                        aMonitorDescription,
+                                        aBrowserDumpId);
 }
 
 /* static */ PluginLibrary*
@@ -1154,7 +1170,9 @@ PluginModuleChromeParent::ShouldContinueFromReplyTimeout()
     // original plugin hang behaviour and kill the plugin container.
     FinishHangUI();
 #endif // XP_WIN
-    TerminateChildProcess(MessageLoop::current(), EmptyString());
+    TerminateChildProcess(MessageLoop::current(),
+                          NS_LITERAL_CSTRING("ModalHangUI"),
+                          EmptyString());
     GetIPCChannel()->CloseWithTimeout();
     return false;
 }
@@ -1178,6 +1196,7 @@ PluginModuleContentParent::OnExitedSyncSend()
 
 void
 PluginModuleChromeParent::TerminateChildProcess(MessageLoop* aMsgLoop,
+                                                const nsCString& aMonitorDescription,
                                                 const nsAString& aBrowserDumpId)
 {
 #ifdef MOZ_CRASHREPORTER
@@ -1194,6 +1213,8 @@ PluginModuleChromeParent::TerminateChildProcess(MessageLoop* aMsgLoop,
 #endif
     crashReporter->AnnotateCrashReport(NS_LITERAL_CSTRING("PluginHang"),
                                        NS_LITERAL_CSTRING("1"));
+    crashReporter->AnnotateCrashReport(NS_LITERAL_CSTRING("HangMonitorDescription"),
+                                       aMonitorDescription);
 #ifdef XP_WIN
     if (mHangUIParent) {
         unsigned int hangUIDuration = mHangUIParent->LastShowDurationMs();
@@ -2644,35 +2665,34 @@ PluginModuleChromeParent::UpdatePluginTimeout()
 }
 
 nsresult
-PluginModuleParent::NPP_ClearSiteData(const char* site, uint64_t flags,
-                                      uint64_t maxAge)
+PluginModuleParent::NPP_ClearSiteData(const char* site, uint64_t flags, uint64_t maxAge,
+                                      nsCOMPtr<nsIClearSiteDataCallback> callback)
 {
     if (!mClearSiteDataSupported)
         return NS_ERROR_NOT_AVAILABLE;
 
-    NPError result;
-    if (!CallNPP_ClearSiteData(NullableString(site), flags, maxAge, &result))
-        return NS_ERROR_FAILURE;
+    static uint64_t callbackId = 0;
+    callbackId++;
+    mClearSiteDataCallbacks[callbackId] = callback;
 
-    switch (result) {
-    case NPERR_NO_ERROR:
-        return NS_OK;
-    case NPERR_TIME_RANGE_NOT_SUPPORTED:
-        return NS_ERROR_PLUGIN_TIME_RANGE_NOT_SUPPORTED;
-    case NPERR_MALFORMED_SITE:
-        return NS_ERROR_INVALID_ARG;
-    default:
+    if (!SendNPP_ClearSiteData(NullableString(site), flags, maxAge, callbackId)) {
         return NS_ERROR_FAILURE;
     }
+    return NS_OK;
 }
 
+
 nsresult
-PluginModuleParent::NPP_GetSitesWithData(InfallibleTArray<nsCString>& result)
+PluginModuleParent::NPP_GetSitesWithData(nsCOMPtr<nsIGetSitesWithDataCallback> callback)
 {
     if (!mGetSitesWithDataSupported)
         return NS_ERROR_NOT_AVAILABLE;
 
-    if (!CallNPP_GetSitesWithData(&result))
+    static uint64_t callbackId = 0;
+    callbackId++;
+    mSitesWithDataCallbacks[callbackId] = callback;
+
+    if (!SendNPP_GetSitesWithData(callbackId))
         return NS_ERROR_FAILURE;
 
     return NS_OK;
@@ -2923,6 +2943,49 @@ PluginModuleChromeParent::RecvNotifyContentModuleDestroyed()
     if (host) {
         host->NotifyContentModuleDestroyed(mPluginId);
     }
+    return true;
+}
+
+bool
+PluginModuleParent::RecvReturnClearSiteData(const NPError& aRv,
+                                            const uint64_t& aCallbackId)
+{
+    if (mClearSiteDataCallbacks.find(aCallbackId) == mClearSiteDataCallbacks.end()) {
+        return true;
+    }
+    if (!!mClearSiteDataCallbacks[aCallbackId]) {
+        nsresult rv;
+        switch (aRv) {
+        case NPERR_NO_ERROR:
+            rv = NS_OK;
+            break;
+        case NPERR_TIME_RANGE_NOT_SUPPORTED:
+            rv = NS_ERROR_PLUGIN_TIME_RANGE_NOT_SUPPORTED;
+            break;
+        case NPERR_MALFORMED_SITE:
+            rv = NS_ERROR_INVALID_ARG;
+            break;
+        default:
+            rv = NS_ERROR_FAILURE;
+        }
+        mClearSiteDataCallbacks[aCallbackId]->Callback(rv);
+    }
+    mClearSiteDataCallbacks.erase(aCallbackId);
+    return true;
+}
+
+bool
+PluginModuleParent::RecvReturnSitesWithData(nsTArray<nsCString>&& aSites,
+                                            const uint64_t& aCallbackId)
+{
+    if (mSitesWithDataCallbacks.find(aCallbackId) == mSitesWithDataCallbacks.end()) {
+        return true;
+    }
+
+    if (!!mSitesWithDataCallbacks[aCallbackId]) {
+        mSitesWithDataCallbacks[aCallbackId]->SitesWithData(aSites);
+    }
+    mSitesWithDataCallbacks.erase(aCallbackId);
     return true;
 }
 

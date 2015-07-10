@@ -2484,7 +2484,112 @@
     "kind": "exponential",
     "high": "60000",
     "n_buckets": 1000,
-    "description": "Time spend blocked on poll (ms)."
+    "description": "Time spent blocked on poll (ms)."
+  },
+  "PRCONNECT_BLOCKING_TIME_NORMAL": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_Connect when we are not shutting down and there has been niether a network nor an offline state change in the last 60s (ms)."
+  },
+  "PRCONNECT_BLOCKING_TIME_SHUTDOWN": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_Connect during a shutdown (ms)."
+  },
+  "PRCONNECT_BLOCKING_TIME_CONNECTIVITY_CHANGE": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_Connect when there has been the connectiviy change in the last 60s (ms)."
+  },
+  "PRCONNECT_BLOCKING_TIME_LINK_CHANGE": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_Connect when there has been a link change in the last 60s (ms)."
+  },
+  "PRCONNECT_BLOCKING_TIME_OFFLINE": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_Connect when the offline state has changed in the last 60s (ms)."
+  },
+  "PRCONNECTCONTINUE_BLOCKING_TIME_NORMAL": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_ConnectContinue when we are not shutting down and there has been niether a network nor an offline state change in the last 60s (ms)."
+  },
+  "PRCONNECTCONTINUE_BLOCKING_TIME_SHUTDOWN": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_ConnectContinue during a shutdown (ms)."
+  },
+  "PRCONNECTCONTINUE_BLOCKING_TIME_CONNECTIVITY_CHANGE": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_ConnectContinue when there has been the connectivity change in the last 60s (ms)."
+  },
+  "PRCONNECTCONTINUE_BLOCKING_TIME_LINK_CHANGE": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_ConnectContinue when there has been a link change in the last 60s (ms)."
+  },
+  "PRCONNECTCONTINUE_BLOCKING_TIME_OFFLINE": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_ConnectContinue when the offline state has changed in the last 60s (ms)."
+  },
+  "PRCLOSE_BLOCKING_TIME_NORMAL": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_Close when we are not shutting down and there has been niether a network nor an offline state change in the last 60s (ms)."
+  },
+  "PRCLOSE_BLOCKING_TIME_SHUTDOWN": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_Close during a shutdown (ms)."
+  },
+  "PRCLOSE_BLOCKING_TIME_CONNECTIVITY_CHANGE": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_Close when there has been the connectivity change in the last 60s (ms)."
+  },
+  "PRCLOSE_BLOCKING_TIME_LINK_CHANGE": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_Close when there has been a link change in the last 60s (ms)."
+  },
+  "PRCLOSE_BLOCKING_TIME_OFFLINE": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 1000,
+    "description": "Time spent blocked in PR_Close when the offline state has changed in the last 60s (ms)."
   },
   "IPV4_AND_IPV6_ADDRESS_CONNECTIVITY": {
     "expires_in_version": "never",
@@ -4118,6 +4223,18 @@
     "extended_statistics_ok": true,
     "description": "Session restore: Time spent blocking the main thread while restoring a window state (ms)"
   },
+  "FX_URLBAR_SELECTED_RESULT_INDEX": {
+    "expires_in_version": "45",
+    "kind": "enumerated",
+    "n_values": 17,
+    "description": "Firefox: The index of the selected result in the URL bar popup"
+  },
+  "FX_URLBAR_SELECTED_RESULT_TYPE": {
+    "expires_in_version": "45",
+    "kind": "enumerated",
+    "n_values": 14,
+    "description": "Firefox: The type of the selected result in the URL bar popup"
+  },
   "INNERWINDOWS_WITH_MUTATION_LISTENERS": {
     "expires_in_version": "never",
     "kind": "boolean",
@@ -4664,6 +4781,20 @@
     "kind": "boolean",
     "description": "New tab page is enhanced (showing suggestions)."
   },
+  "NEWTAB_PAGE_LIFE_SPAN": {
+    "expires_in_version": "default",
+    "kind": "exponential",
+    "high": "1200",
+    "n_buckets": 100,
+    "description": "Life-span of a new tab without suggested tile: time delta between first-visible and unload events (half-seconds)."
+  },
+  "NEWTAB_PAGE_LIFE_SPAN_SUGGESTED": {
+    "expires_in_version": "default",
+    "kind": "exponential",
+    "high": "1200",
+    "n_buckets": 100,
+    "description": "Life-span of a new tab with suggested tile: time delta between first-visible and unload events (half-seconds)."
+  },
   "NEWTAB_PAGE_PINNED_SITES_COUNT": {
     "expires_in_version": "default",
     "kind": "enumerated",
@@ -4842,6 +4973,12 @@
     "kind": "count",
     "keyed" : true,
     "description" : "Exceptions thrown by add-ons"
+  },
+  "IPC_TRANSACTION_CANCEL": {
+    "alert_emails": ["billm@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "description": "True when an IPC transaction is canceled"
   },
   "MISBEHAVING_ADDONS_CPOW_TIME_MS": {
     "expires_in_version": "never",
@@ -5247,6 +5384,12 @@
     "kind": "enumerated",
     "n_values": 700,
     "description": "The Shumway feature is used during movie execution"
+  },
+  "SHUMWAY_LOAD_RESOURCE_RESULT": {
+    "expires_in_version": "default",
+    "kind": "enumerated",
+    "n_values": 10,
+    "description": "The Shumway external resource loading result"
   },
   "SHUMWAY_FALLBACK": {
     "expires_in_version": "default",
@@ -7385,6 +7528,12 @@
     "n_values": 4,
     "description": "Does enforcing a larger minimum RSA key size cause verification failures? 1 = no, 2 = yes, 3 = another error prevented finding a verified chain"
   },
+  "CERT_CHAIN_SIGNATURE_DIGEST_STATUS": {
+    "expires_in_version": "default",
+    "kind": "enumerated",
+    "n_values": 6,
+    "description": "Information on weak signature digest algorithms in the chain: 1 = Only good algorithms, 2 = a weak algorithm was present in an end entity, 3 = a weak algorithm was present in a CA cert, 4 = a weak algorithm was present in both EE and CA certs, 5 = another error prevented signature algorithm from being determined"
+  },
   "WEAVE_CONFIGURED": {
     "expires_in_version": "default",
     "kind": "boolean",
@@ -7615,6 +7764,45 @@
     "n_values": 8,
     "releaseChannelCollection": "opt-out",
     "description": "Number of times the sharing feature has been enabled and disabled (0=WINDOW_ENABLED, 1=WINDOW_DISABLED, 2=BROWSER_ENABLED, 3=BROWSER_DISABLED)"
+  },
+  "LOOP_SHARING_ROOM_URL": {
+    "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
+    "expires_in_version": "44",
+    "kind": "enumerated",
+    "n_values": 8,
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of times a room URL is shared (0=COPY_FROM_PANEL, 1=COPY_FROM_CONVERSATION, 2=EMAIL_FROM_CALLFAILED, 3=EMAIL_FROM_CONVERSATION)"
+  },
+  "LOOP_ROOM_CREATE": {
+    "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
+    "expires_in_version": "44",
+    "kind": "enumerated",
+    "n_values": 4,
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of times a room create action is performed (0=CREATE_SUCCESS, 1=CREATE_FAIL)"
+  },
+  "LOOP_ROOM_DELETE": {
+    "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
+    "expires_in_version": "44",
+    "kind": "enumerated",
+    "n_values": 4,
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of times a room delete action is performed (0=DELETE_SUCCESS, 2=DELETE_FAIL)"
+  },
+  "LOOP_ROOM_CONTEXT_ADD": {
+    "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
+    "expires_in_version": "44",
+    "kind": "enumerated",
+    "n_values": 8,
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of times a room context action is performed (0=ADD_FROM_PANEL, 1=ADD_FROM_CONVERSATION)"
+  },
+  "LOOP_ROOM_CONTEXT_CLICK": {
+    "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
+    "expires_in_version": "44",
+    "kind": "count",
+    "releaseChannelCollection": "opt-out",
+    "description": "Number times room context is clicked to visit the attached URL"
   },
   "E10S_AUTOSTART": {
     "expires_in_version": "never",

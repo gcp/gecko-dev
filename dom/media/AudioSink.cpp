@@ -68,9 +68,8 @@ AudioSink::AudioSink(MediaDecoderStateMachine* aStateMachine,
   , mSetPlaybackRate(false)
   , mSetPreservesPitch(false)
   , mPlaying(true)
+  , mOnAudioEndTimeUpdateTask(new OnAudioEndTimeUpdateTask(aStateMachine))
 {
-  NS_ASSERTION(mStartTime != -1, "Should have audio start time by now");
-  mOnAudioEndTimeUpdateTask = new OnAudioEndTimeUpdateTask(aStateMachine);
 }
 
 nsresult
@@ -107,7 +106,7 @@ AudioSink::GetPosition()
     mLastGoodPosition = pos;
   }
 
-  return mLastGoodPosition;
+  return mStartTime + mLastGoodPosition;
 }
 
 bool
@@ -200,7 +199,8 @@ AudioSink::AudioLoop()
     CheckedInt64 sampleTime = UsecsToFrames(AudioQueue().PeekFront()->mTime, mInfo.mRate);
 
     // Calculate the number of frames that have been pushed onto the audio hardware.
-    CheckedInt64 playedFrames = UsecsToFrames(mStartTime, mInfo.mRate) + mWritten;
+    CheckedInt64 playedFrames = UsecsToFrames(mStartTime, mInfo.mRate) +
+                                static_cast<int64_t>(mWritten);
 
     CheckedInt64 missingFrames = sampleTime - playedFrames;
     if (!missingFrames.isValid() || !sampleTime.isValid()) {

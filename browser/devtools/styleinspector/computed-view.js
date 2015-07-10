@@ -145,12 +145,14 @@ function CssHtmlTree(aStyleInspector, aPageStyle)
 
   // Create bound methods.
   this.focusWindow = this.focusWindow.bind(this);
+  this._onKeypress = this._onKeypress.bind(this);
   this._onContextMenu = this._onContextMenu.bind(this);
   this._contextMenuUpdate = this._contextMenuUpdate.bind(this);
   this._onSelectAll = this._onSelectAll.bind(this);
   this._onClick = this._onClick.bind(this);
   this._onCopy = this._onCopy.bind(this);
   this._onCopyColor = this._onCopyColor.bind(this);
+  this._onCopyUrl = this._onCopyUrl.bind(this);
   this._onCopyImageDataUrl = this._onCopyImageDataUrl.bind(this);
   this._onFilterStyles = this._onFilterStyles.bind(this);
   this._onFilterKeyPress = this._onFilterKeyPress.bind(this);
@@ -165,6 +167,7 @@ function CssHtmlTree(aStyleInspector, aPageStyle)
   this.searchClearButton = doc.getElementById("computedview-searchinput-clear");
   this.includeBrowserStylesCheckbox = doc.getElementById("browser-style-checkbox");
 
+  this.styleDocument.addEventListener("keypress", this._onKeypress);
   this.styleDocument.addEventListener("mousedown", this.focusWindow);
   this.element.addEventListener("click", this._onClick);
   this.element.addEventListener("copy", this._onCopy);
@@ -521,6 +524,20 @@ CssHtmlTree.prototype = {
   },
 
   /**
+   * Handle the keypress event in the computed view.
+   */
+  _onKeypress: function(event) {
+    let isOSX = Services.appinfo.OS == "Darwin";
+
+    if (((isOSX && event.metaKey && !event.ctrlKey && !event.altKey) ||
+        (!isOSX && event.ctrlKey && !event.metaKey && !event.altKey)) &&
+        event.code === "KeyF") {
+      this.searchField.focus();
+      event.preventDefault();
+    }
+  },
+
+  /**
    * Called when the user enters a search term in the filter style search box.
    *
    * @param {Event} aEvent the DOM Event object.
@@ -716,6 +733,13 @@ CssHtmlTree.prototype = {
       command: this._onCopyColor
     });
 
+    // Copy URL
+    this.menuitemCopyUrl = createMenuItem(this._contextmenu, {
+      label: "styleinspector.contextmenu.copyUrl",
+      accesskey: "styleinspector.contextmenu.copyUrl.accessKey",
+      command: this._onCopyUrl
+    });
+
     // Copy data URI
     this.menuitemCopyImageDataUrl = createMenuItem(this._contextmenu, {
       label: "styleinspector.contextmenu.copyImageDataUrl",
@@ -753,6 +777,7 @@ CssHtmlTree.prototype = {
     this.menuitemSources.setAttribute("checked", showOrig);
 
     this.menuitemCopyColor.hidden = !this._isColorPopup();
+    this.menuitemCopyUrl.hidden = !this._isImageUrlPopup();
     this.menuitemCopyImageDataUrl.hidden = !this._isImageUrlPopup();
   },
 
@@ -875,6 +900,13 @@ CssHtmlTree.prototype = {
   },
 
   /**
+   * Retrieve the url for the selected image and copy it to the clipboard
+   */
+  _onCopyUrl: function() {
+    clipboardHelper.copyString(this._imageUrlToCopy);
+  },
+
+  /**
    * Retrieve the image data for the selected image url and copy it to the clipboard
    */
   _onCopyImageDataUrl: Task.async(function*() {
@@ -979,6 +1011,10 @@ CssHtmlTree.prototype = {
       this.menuitemCopyColor.removeEventListener("command", this._onCopyColor);
       this.menuitemCopyColor = null;
 
+      // Destroy Copy URL menuitem
+      this.menuitemCopyUrl.removeEventListener("command", this._onCopyUrl);
+      this.menuitemCopyUrl = null;
+
       // Destroy Copy Data URI menuitem.
       this.menuitemCopyImageDataUrl.removeEventListener("command", this._onCopyImageDataUrl);
       this.menuitemCopyImageDataUrl = null;
@@ -1047,7 +1083,9 @@ function createMenuItem(aMenu, aAttributes)
   let item = aMenu.ownerDocument.createElementNS(XUL_NS, "menuitem");
 
   item.setAttribute("label", CssHtmlTree.l10n(aAttributes.label));
-  item.setAttribute("accesskey", CssHtmlTree.l10n(aAttributes.accesskey));
+  if (aAttributes.accesskey) {
+    item.setAttribute("accesskey", CssHtmlTree.l10n(aAttributes.accesskey));
+  }
   item.addEventListener("command", aAttributes.command);
 
   if (aAttributes.type) {

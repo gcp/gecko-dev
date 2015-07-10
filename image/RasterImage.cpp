@@ -905,7 +905,10 @@ RasterImage::UpdateImageContainer()
   }
 
   mLastImageContainerDrawResult = result.first();
-  container->SetCurrentImage(result.second());
+  nsAutoTArray<ImageContainer::NonOwningImage,1> imageList;
+  imageList.AppendElement(
+      ImageContainer::NonOwningImage(result.second()));
+  container->SetCurrentImages(imageList);
 }
 
 size_t
@@ -1193,7 +1196,13 @@ RasterImage::OnImageDataComplete(nsIRequest*, nsISupports*, nsresult aStatus,
   // Let decoders know that there won't be any more data coming.
   mSourceBuffer->Complete(aStatus);
 
-  if (mSyncLoad && !mHasSize) {
+  // Allow a synchronous size decode if mSyncLoad was set, or if we're running
+  // on a single thread (in which case waiting for the async size decoder could
+  // delay this image's load event quite a bit), or if this image is transient.
+  bool canSyncSizeDecode = mSyncLoad || mTransient ||
+                           DecodePool::NumberOfCores() < 2;
+
+  if (canSyncSizeDecode && !mHasSize) {
     // We're loading this image synchronously, so it needs to be usable after
     // this call returns.  Since we haven't gotten our size yet, we need to do a
     // synchronous size decode here.
@@ -1216,7 +1225,7 @@ RasterImage::OnImageDataComplete(nsIRequest*, nsISupports*, nsresult aStatus,
 
   if (!mHasSize && !mError) {
     // We don't have our size yet, so we'll fire the load event in SetSize().
-    MOZ_ASSERT(!mSyncLoad, "Firing load asynchronously but mSyncLoad is set?");
+    MOZ_ASSERT(!canSyncSizeDecode, "Firing load async but canSyncSizeDecode?");
     NotifyProgress(FLAG_ONLOAD_BLOCKED);
     mLoadProgress = Some(loadProgress);
     return finalStatus;
@@ -1238,12 +1247,8 @@ RasterImage::NotifyForLoadEvent(Progress aProgress)
   if (mDecodeOnlyOnDraw) {
     // For decode-only-on-draw images, we want to send notifications as if we've
     // already finished decoding. Otherwise some observers will never even try
-    // to draw. (We may have already sent some of these notifications from
-    // NotifyForDecodeOnlyOnDraw(), but ProgressTracker will ensure no duplicate
-    // notifications get sent.)
-    aProgress |= FLAG_DECODE_STARTED |
-                 FLAG_FRAME_COMPLETE |
-                 FLAG_DECODE_COMPLETE;
+    // to draw.
+    aProgress |= FLAG_FRAME_COMPLETE | FLAG_DECODE_COMPLETE;
   }
 
   // If we encountered an error, make sure we notify for that as well.
@@ -1255,19 +1260,6 @@ RasterImage::NotifyForLoadEvent(Progress aProgress)
   NotifyProgress(aProgress);
 }
 
-void
-RasterImage::NotifyForDecodeOnlyOnDraw()
-{
-  if (!NS_IsMainThread()) {
-    nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableMethod(this, &RasterImage::NotifyForDecodeOnlyOnDraw);
-    NS_DispatchToMainThread(runnable);
-    return;
-  }
-
-  NotifyProgress(FLAG_DECODE_STARTED);
-}
-
 nsresult
 RasterImage::OnImageDataAvailable(nsIRequest*,
                                   nsISupports*,
@@ -1276,12 +1268,6 @@ RasterImage::OnImageDataAvailable(nsIRequest*,
                                   uint32_t aCount)
 {
   nsresult rv;
-
-  if (MOZ_UNLIKELY(mDecodeOnlyOnDraw && aOffset == 0)) {
-    // If we're a decode-only-on-draw image, send notifications as if we've just
-    // started decoding.
-    NotifyForDecodeOnlyOnDraw();
-  }
 
   // WriteToSourceBuffer always consumes everything it gets if it doesn't run
   // out of memory.
@@ -1633,14 +1619,6 @@ RasterImage::Decode(const Maybe<IntSize>& aSize, uint32_t aFlags)
   nsRefPtr<Decoder> decoder = CreateDecoder(aSize, aFlags);
   if (!decoder) {
     return NS_ERROR_FAILURE;
-  }
-
-  if (aSize) {
-    // This isn't a size decode (which doesn't send any early notifications), so
-    // send out notifications right away.
-    NotifyProgress(decoder->TakeProgress(),
-                   decoder->TakeInvalidRect(),
-                   decoder->GetDecodeFlags());
   }
 
   if (mHasSourceData) {

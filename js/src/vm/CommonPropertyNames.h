@@ -109,6 +109,8 @@
     macro(InitializeNumberFormat, InitializeNumberFormat, "InitializeNumberFormat") \
     macro(innermost, innermost, "innermost") \
     macro(input, input, "input") \
+    macro(int8x16, int8x16, "int8x16") \
+    macro(int16x8, int16x8, "int16x8") \
     macro(int32x4, int32x4, "int32x4") \
     macro(isFinite, isFinite, "isFinite") \
     macro(isNaN, isNaN, "isNaN") \
@@ -190,6 +192,7 @@
     macro(set, set, "set") \
     macro(shape, shape, "shape") \
     macro(signMask, signMask, "signMask") \
+    macro(size, size, "size") \
     macro(source, source, "source") \
     macro(stack, stack, "stack") \
     macro(star, star, "*") \

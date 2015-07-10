@@ -235,8 +235,10 @@
               align="center">
           <hbox align="center">
             <image id="fxaProfileImage"
-              onclick="gSyncPane.openChangeProfileImage();" hidden="true"/>
+              onclick="gSyncPane.openChangeProfileImage();" hidden="true"
+              tooltiptext="&profilePicture.tooltip;"/>
             <label id="fxaEmailAddress1"/>
+            <label id="fxaDisplayName" hidden="true"/>
           </hbox>
           <spacer flex="1"/>
           <button id="verifiedManage"
@@ -296,6 +298,8 @@
           <checkbox label="&engine.passwords.label;"
                     accesskey="&engine.passwords.accesskey;"
                     preference="engine.passwords"/>
+        </vbox>
+        <vbox align="start">
           <checkbox label="&engine.history.label;"
                     accesskey="&engine.history.accesskey;"
                     preference="engine.history"/>

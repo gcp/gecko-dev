@@ -145,7 +145,6 @@ public:
   
   DrawResult DisplayAltFeedback(nsRenderingContext& aRenderingContext,
                                 const nsRect& aDirtyRect,
-                                imgIRequest* aRequest,
                                 nsPoint aPt,
                                 uint32_t aFlags);
 
@@ -233,6 +232,9 @@ protected:
    */
   void NotifyNewCurrentRequest(imgIRequest *aRequest, nsresult aStatus);
 
+  /// Always sync decode our image when painting if @aForce is true.
+  void SetForceSyncDecoding(bool aForce) { mForceSyncDecoding = aForce; }
+
 private:
   // random helpers
   inline void SpecToURI(const nsAString& aSpec, nsIIOService *aIOService,
@@ -308,6 +310,7 @@ private:
   bool mDisplayingIcon;
   bool mFirstFrameComplete;
   bool mReflowCallbackPosted;
+  bool mForceSyncDecoding;
 
   static nsIIOService* sIOService;
   
@@ -360,6 +363,7 @@ private:
     nsRefPtr<imgRequestProxy> mBrokenImage;
     bool             mPrefForceInlineAltText;
     bool             mPrefShowPlaceholders;
+    bool             mPrefShowLoadingPlaceholder;
   };
   
 public:

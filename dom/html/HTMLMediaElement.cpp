@@ -1076,6 +1076,11 @@ static bool UseAudioChannelService()
   return Preferences::GetBool("media.useAudioChannelService");
 }
 
+static bool UseAudioChannelAPI()
+{
+  return Preferences::GetBool("media.useAudioChannelAPI");
+}
+
 void HTMLMediaElement::UpdatePreloadAction()
 {
   PreloadAction nextAction = PRELOAD_UNDEFINED;
@@ -2090,6 +2095,7 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mAudioChannelFaded(false),
     mPlayingThroughTheAudioChannel(false),
     mDisableVideo(false),
+    mPlayBlockedBecauseHidden(false),
     mElementInTreeState(ELEMENT_NOT_INTREE)
 {
   if (!gMediaElementLog) {
@@ -2219,6 +2225,15 @@ HTMLMediaElement::Play(ErrorResult& aRv)
   if (mSuspendedForPreloadNone) {
     ResumeLoad(PRELOAD_ENOUGH);
   }
+
+  if (Preferences::GetBool("media.block-play-until-visible", false) &&
+      !nsContentUtils::IsCallerChrome() &&
+      OwnerDoc()->Hidden()) {
+    LOG(LogLevel::Debug, ("%p Blocked playback because owner hidden.", this));
+    mPlayBlockedBecauseHidden = true;
+    return;
+  }
+
   // Even if we just did Load() or ResumeLoad(), we could already have a decoder
   // here if we managed to clone an existing decoder.
   if (mDecoder) {
@@ -3747,23 +3762,33 @@ bool HTMLMediaElement::CanActivateAutoplay()
 
 void HTMLMediaElement::CheckAutoplayDataReady()
 {
-  if (CanActivateAutoplay()) {
-    mPaused = false;
-    // We changed mPaused which can affect AddRemoveSelfReference
-    AddRemoveSelfReference();
-
-    if (mDecoder) {
-      SetPlayedOrSeeked(true);
-      if (mCurrentPlayRangeStart == -1.0) {
-        mCurrentPlayRangeStart = CurrentTime();
-      }
-      mDecoder->Play();
-    } else if (mSrcStream) {
-      SetPlayedOrSeeked(true);
-      GetSrcMediaStream()->ChangeExplicitBlockerCount(-1);
-    }
-    DispatchAsyncEvent(NS_LITERAL_STRING("play"));
+  if (!CanActivateAutoplay()) {
+    return;
   }
+
+  if (Preferences::GetBool("media.block-play-until-visible", false) &&
+      OwnerDoc()->Hidden()) {
+    LOG(LogLevel::Debug, ("%p Blocked autoplay because owner hidden.", this));
+    mPlayBlockedBecauseHidden = true;
+    return;
+  }
+
+  mPaused = false;
+  // We changed mPaused which can affect AddRemoveSelfReference
+  AddRemoveSelfReference();
+
+  if (mDecoder) {
+    SetPlayedOrSeeked(true);
+    if (mCurrentPlayRangeStart == -1.0) {
+      mCurrentPlayRangeStart = CurrentTime();
+    }
+    mDecoder->Play();
+  } else if (mSrcStream) {
+    SetPlayedOrSeeked(true);
+    GetSrcMediaStream()->ChangeExplicitBlockerCount(-1);
+  }
+  DispatchAsyncEvent(NS_LITERAL_STRING("play"));
+
 }
 
 bool HTMLMediaElement::IsActive()
@@ -3945,6 +3970,9 @@ void HTMLMediaElement::UpdateInitialMediaSize(const nsIntSize& aSize)
 
 void HTMLMediaElement::SuspendOrResumeElement(bool aPauseElement, bool aSuspendEvents)
 {
+  LOG(LogLevel::Debug, ("%p SuspendOrResumeElement(pause=%d, suspendEvents=%d) hidden=%d",
+      this, aPauseElement, aSuspendEvents, OwnerDoc()->Hidden()));
+
   if (aPauseElement != mPausedForInactiveDocumentOrChannel) {
     mPausedForInactiveDocumentOrChannel = aPauseElement;
     if (aPauseElement) {
@@ -4025,6 +4053,14 @@ void HTMLMediaElement::NotifyOwnerDocumentActivityChanged()
   bool pauseElement = !IsActive() || (mMuted & MUTED_BY_AUDIO_CHANNEL);
 
   SuspendOrResumeElement(pauseElement, !IsActive());
+
+  if (!mPausedForInactiveDocumentOrChannel &&
+      mPlayBlockedBecauseHidden &&
+      !OwnerDoc()->Hidden()) {
+    LOG(LogLevel::Debug, ("%p Resuming playback now that owner doc is visble.", this));
+    mPlayBlockedBecauseHidden = false;
+    Play();
+  }
 
   AddRemoveSelfReference();
 }
@@ -4445,11 +4481,15 @@ nsresult HTMLMediaElement::UpdateChannelMuteState(AudioChannelState aCanPlay)
   // We have to mute this channel.
   if (aCanPlay == AUDIO_CHANNEL_STATE_MUTED && !(mMuted & MUTED_BY_AUDIO_CHANNEL)) {
     SetMutedInternal(mMuted | MUTED_BY_AUDIO_CHANNEL);
-    DispatchAsyncEvent(NS_LITERAL_STRING("mozinterruptbegin"));
+    if (UseAudioChannelAPI()) {
+      DispatchAsyncEvent(NS_LITERAL_STRING("mozinterruptbegin"));
+    }
   } else if (aCanPlay != AUDIO_CHANNEL_STATE_MUTED &&
              (mMuted & MUTED_BY_AUDIO_CHANNEL)) {
     SetMutedInternal(mMuted & ~MUTED_BY_AUDIO_CHANNEL);
-    DispatchAsyncEvent(NS_LITERAL_STRING("mozinterruptend"));
+    if (UseAudioChannelAPI()) {
+      DispatchAsyncEvent(NS_LITERAL_STRING("mozinterruptend"));
+    }
   }
 
   SuspendOrResumeElement(mMuted & MUTED_BY_AUDIO_CHANNEL, false);

@@ -5,9 +5,8 @@
 <panel id="identity-popup"
        type="arrow"
        hidden="true"
-       noautofocus="true"
-       onpopupshown="if (event.target == this)
-                       gIdentityHandler.onPopupShown(event);"
+       onpopupshown="gIdentityHandler.onPopupShown(event);"
+       onpopuphidden="gIdentityHandler.onPopupHidden(event);"
        orient="vertical"
        level="top">
 
@@ -33,7 +32,7 @@
                  value="&identity.connectionInternal;"/>
         </vbox>
         <button class="identity-popup-expander"
-                oncommand="gIdentityHandler.showSubView('security', this)"/>
+                oncommand="gIdentityHandler.toggleSubView('security', this)"/>
       </hbox>
 
       <!-- Tracking Protection Section -->

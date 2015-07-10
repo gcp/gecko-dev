@@ -16,6 +16,7 @@
 #include "nsStringStream.h"
 #include "nsNetUtil.h"
 
+#include "nsIStreamListener.h"
 #include "nsIComponentManager.h"
 #include "nsIServiceManager.h"
 #include "nsIURI.h"
@@ -249,6 +250,7 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
 
     // New script entry point required, due to the "Create a script" step of
     // http://www.whatwg.org/specs/web-apps/current-work/#javascript-protocol
+    nsAutoMicroTask mt;
     AutoEntryScript entryScript(innerGlobal, "javascript: URI", true,
                                 scriptContext->GetNativeContext());
     // We want to make sure we report any exceptions that happen before we
@@ -1219,6 +1221,7 @@ nsJSProtocolHandler::NewChannel2(nsIURI* uri,
     }
 
     rv = channel->Init(uri);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     // set the loadInfo on the new channel
     rv = channel->SetLoadInfo(aLoadInfo);

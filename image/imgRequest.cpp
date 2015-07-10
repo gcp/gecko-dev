@@ -912,6 +912,7 @@ struct NewPartResult final
     : mImage(aExistingImage)
     , mIsFirstPart(!aExistingImage)
     , mSucceeded(false)
+    , mShouldResetCacheEntry(false)
   { }
 
   nsAutoCString mContentType;
@@ -919,6 +920,7 @@ struct NewPartResult final
   nsRefPtr<Image> mImage;
   const bool mIsFirstPart;
   bool mSucceeded;
+  bool mShouldResetCacheEntry;
 };
 
 static NewPartResult
@@ -938,18 +940,18 @@ PrepareForNewPart(nsIRequest* aRequest, nsIInputStream* aInStr, uint32_t aCount,
 
   nsCOMPtr<nsIChannel> chan(do_QueryInterface(aRequest));
   if (result.mContentType.IsEmpty()) {
-    nsresult rv = NS_ERROR_FAILURE;
-    if (chan) {
-      rv = chan->GetContentType(result.mContentType);
-      chan->GetContentDispositionHeader(result.mContentDisposition);
-    }
-
+    nsresult rv = chan ? chan->GetContentType(result.mContentType)
+                       : NS_ERROR_FAILURE;
     if (NS_FAILED(rv)) {
       MOZ_LOG(GetImgLog(),
-             LogLevel::Error, ("imgRequest::PrepareForNewPart "
-                            "-- Content type unavailable from the channel\n"));
+              LogLevel::Error, ("imgRequest::PrepareForNewPart -- "
+                                "Content type unavailable from the channel\n"));
       return result;
     }
+  }
+
+  if (chan) {
+    chan->GetContentDispositionHeader(result.mContentDisposition);
   }
 
   MOZ_LOG(GetImgLog(), LogLevel::Debug,
@@ -978,6 +980,9 @@ PrepareForNewPart(nsIRequest* aRequest, nsIInputStream* aInStr, uint32_t aCount,
       // Transition to the new part.
       auto multipartImage = static_cast<MultipartImage*>(aExistingImage);
       multipartImage->BeginTransitionToPart(partImage);
+
+      // Reset our cache entry size so it doesn't keep growing without bound.
+      result.mShouldResetCacheEntry = true;
     }
   } else {
     MOZ_ASSERT(!aExistingImage, "New part for non-multipart channel?");
@@ -1037,6 +1042,10 @@ imgRequest::FinishPreparingForNewPart(const NewPartResult& aResult)
     nsRefPtr<ProgressTracker> progressTracker = GetProgressTracker();
     progressTracker->OnImageAvailable();
     MOZ_ASSERT(progressTracker->HasImage());
+  }
+
+  if (aResult.mShouldResetCacheEntry) {
+    ResetCacheEntry();
   }
 
   if (IsDecodeRequested()) {

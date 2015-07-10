@@ -252,10 +252,12 @@ let gFxAccounts = {
 
     // Make sure the button is disabled in customization mode.
     if (this._inCustomizationMode) {
+      this.panelUIStatus.setAttribute("disabled", "true");
       this.panelUILabel.setAttribute("disabled", "true");
       this.panelUIAvatar.setAttribute("disabled", "true");
       this.panelUIIcon.setAttribute("disabled", "true");
     } else {
+      this.panelUIStatus.removeAttribute("disabled");
       this.panelUILabel.removeAttribute("disabled");
       this.panelUIAvatar.removeAttribute("disabled");
       this.panelUIIcon.removeAttribute("disabled");
@@ -266,6 +268,11 @@ let gFxAccounts = {
     let signedInTooltiptext = this.panelUIStatus.getAttribute("signedinTooltiptext");
 
     let updateWithUserData = (userData) => {
+      // Window might have been closed while fetching data.
+      if (window.closed) {
+        return;
+      }
+
       // Reset the button to its original state.
       this.panelUILabel.setAttribute("label", defaultLabel);
       this.panelUIStatus.removeAttribute("tooltiptext");

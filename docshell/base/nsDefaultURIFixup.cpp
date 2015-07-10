@@ -4,7 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsNetCID.h"
 #include "nsNetUtil.h"
+#include "nsIProtocolHandler.h"
 #include "nsCRT.h"
 
 #include "nsIFile.h"
@@ -158,7 +160,10 @@ nsDefaultURIFixup::GetFixupURIInfo(const nsACString& aStringURI,
 
   if (scheme.LowerCaseEqualsLiteral("view-source")) {
     nsCOMPtr<nsIURIFixupInfo> uriInfo;
-    uint32_t newFixupFlags = aFixupFlags & ~FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP;
+    // We disable keyword lookup and alternate URIs so that small typos don't
+    // cause us to look at very different domains
+    uint32_t newFixupFlags = aFixupFlags & ~FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP
+                                         & ~FIXUP_FLAGS_MAKE_ALTERNATE_URI;
 
     rv = GetFixupURIInfo(Substring(uriString,
                                    sizeof("view-source:") - 1,

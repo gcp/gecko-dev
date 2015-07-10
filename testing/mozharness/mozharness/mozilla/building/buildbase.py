@@ -1054,7 +1054,6 @@ or run without that action (ie: --no-{action})"
                           os.path.join(dirs['abs_src_dir'], '.mozconfig'))
             self.info("mozconfig content:")
             with open(abs_src_mozconfig) as mozconfig:
-                next(mozconfig)
                 for line in mozconfig:
                     self.info(line)
         else:
@@ -1067,12 +1066,18 @@ or run without that action (ie: --no-{action})"
         # set the default authentication file based on platform; this
         # corresponds to where puppet puts the token
         if 'tooltool_authentication_file' in self.config:
-            return self.config['tooltool_authentication_file']
-
-        if self._is_windows():
-            return r'c:\builds\relengapi.tok'
+            fn = self.config['tooltool_authentication_file']
+        elif self._is_windows():
+            fn = r'c:\builds\relengapi.tok'
         else:
-            return '/builds/relengapi.tok'
+            fn = '/builds/relengapi.tok'
+
+        # if the file doesn't exist, don't pass it to tooltool (it will just
+        # fail).  In taskcluster, this will work OK as the relengapi-proxy will
+        # take care of auth.  Everywhere else, we'll get auth failures if
+        # necessary.
+        if os.path.exists(fn):
+            return fn
 
     def _run_tooltool(self):
         self._assert_cfg_valid_for_action(
@@ -1095,7 +1100,9 @@ or run without that action (ie: --no-{action})"
             c['tooltool_bootstrap'],
         ]
         cmd.extend(c['tooltool_script'])
-        cmd.extend(['--authentication-file', self._get_tooltool_auth_file()])
+        auth_file = self._get_tooltool_auth_file()
+        if auth_file:
+            cmd.extend(['--authentication-file', auth_file])
         self.info(str(cmd))
         self.run_command(cmd, cwd=dirs['abs_src_dir'], halt_on_failure=True)
 

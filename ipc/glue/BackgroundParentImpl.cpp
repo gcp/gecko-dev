@@ -25,6 +25,7 @@
 #include "mozilla/dom/network/UDPSocketParent.h"
 #include "nsIAppsService.h"
 #include "nsNetUtil.h"
+#include "nsIScriptSecurityManager.h"
 #include "nsRefPtr.h"
 #include "nsThreadUtils.h"
 #include "nsTraceRefcnt.h"
@@ -369,7 +370,7 @@ BackgroundParentImpl::DeallocPUDPSocketParent(PUDPSocketParent* actor)
 mozilla::dom::PBroadcastChannelParent*
 BackgroundParentImpl::AllocPBroadcastChannelParent(
                                             const PrincipalInfo& aPrincipalInfo,
-                                            const nsString& aOrigin,
+                                            const nsCString& aOrigin,
                                             const nsString& aChannel,
                                             const bool& aPrivateBrowsing)
 {
@@ -387,7 +388,7 @@ class CheckPrincipalRunnable final : public nsRunnable
 public:
   CheckPrincipalRunnable(already_AddRefed<ContentParent> aParent,
                          const PrincipalInfo& aPrincipalInfo,
-                         const nsString& aOrigin)
+                         const nsCString& aOrigin)
     : mContentParent(aParent)
     , mPrincipalInfo(aPrincipalInfo)
     , mOrigin(aOrigin)
@@ -430,16 +431,15 @@ public:
       return NS_OK;
     }
 
-    nsCOMPtr<nsIURI> uri;
-    rv = NS_NewURI(getter_AddRefs(uri), mOrigin);
-    if (NS_FAILED(rv) || !uri) {
-      mContentParent->KillHard("BroadcastChannel killed: invalid origin URI.");
+    nsAutoCString origin;
+    rv = principal->GetOrigin(origin);
+    if (NS_FAILED(rv)) {
+      mContentParent->KillHard("BroadcastChannel killed: principal::GetOrigin failed.");
       return NS_OK;
     }
 
-    rv = principal->CheckMayLoad(uri, false, false);
-    if (NS_FAILED(rv)) {
-      mContentParent->KillHard("BroadcastChannel killed: the url cannot be loaded by the principal.");
+    if (NS_WARN_IF(!mOrigin.Equals(origin))) {
+      mContentParent->KillHard("BroadcastChannel killed: origins do not match.");
       return NS_OK;
     }
 
@@ -449,7 +449,7 @@ public:
 private:
   nsRefPtr<ContentParent> mContentParent;
   PrincipalInfo mPrincipalInfo;
-  nsString mOrigin;
+  nsCString mOrigin;
   nsCOMPtr<nsIThread> mBackgroundThread;
 };
 
@@ -459,7 +459,7 @@ bool
 BackgroundParentImpl::RecvPBroadcastChannelConstructor(
                                             PBroadcastChannelParent* actor,
                                             const PrincipalInfo& aPrincipalInfo,
-                                            const nsString& aOrigin,
+                                            const nsCString& aOrigin,
                                             const nsString& aChannel,
                                             const bool& aPrivateBrowsing)
 {

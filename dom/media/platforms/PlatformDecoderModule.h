@@ -27,7 +27,6 @@ class MediaDataDecoder;
 class MediaDataDecoderCallback;
 class FlushableMediaTaskQueue;
 class CDMProxy;
-typedef int64_t Microseconds;
 
 // The PlatformDecoderModule interface is used by the MP4Reader to abstract
 // access to the H264 and Audio (AAC/MP3) decoders provided by various platforms.
@@ -76,9 +75,7 @@ public:
   // that we use on on aTaskQueue to decode the decrypted stream.
   // This is called on the decode task queue.
   static already_AddRefed<PlatformDecoderModule>
-  CreateCDMWrapper(CDMProxy* aProxy,
-                   bool aHasAudio,
-                   bool aHasVideo);
+  CreateCDMWrapper(CDMProxy* aProxy);
 #endif
 
   // Creates a decoder.

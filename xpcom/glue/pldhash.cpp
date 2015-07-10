@@ -20,50 +20,51 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ChaosMode.h"
 
-/*
- * The following DEBUG-only code is used to assert that calls to one of
- * table->mOps or to an enumerator do not cause re-entry into a call that
- * can mutate the table.
- */
+using namespace mozilla;
+
 #ifdef DEBUG
 
-/*
- * Most callers that assert about the recursion level don't care about
- * this magical value because they are asserting that mutation is
- * allowed (and therefore the level is 0 or 1, depending on whether they
- * incremented it).
- *
- * Only the destructor needs to allow this special value.
- */
-#define IMMUTABLE_RECURSION_LEVEL UINT32_MAX
+class AutoReadOp
+{
+  Checker& mChk;
+public:
+  explicit AutoReadOp(Checker& aChk) : mChk(aChk) { mChk.StartReadOp(); }
+  ~AutoReadOp() { mChk.EndReadOp(); }
+};
 
-#define RECURSION_LEVEL_SAFE_TO_FINISH(table_)                                \
-    (table_->mRecursionLevel == 0 ||                                          \
-     table_->mRecursionLevel == IMMUTABLE_RECURSION_LEVEL)
+class AutoWriteOp
+{
+  Checker& mChk;
+public:
+  explicit AutoWriteOp(Checker& aChk) : mChk(aChk) { mChk.StartWriteOp(); }
+  ~AutoWriteOp() { mChk.EndWriteOp(); }
+};
 
-#define INCREMENT_RECURSION_LEVEL(table_)                                     \
-    do {                                                                      \
-        if (table_->mRecursionLevel != IMMUTABLE_RECURSION_LEVEL) {           \
-            const uint32_t oldRecursionLevel = table_->mRecursionLevel++;     \
-            MOZ_ASSERT(oldRecursionLevel < IMMUTABLE_RECURSION_LEVEL - 1);    \
-        }                                                                     \
-    } while(0)
-#define DECREMENT_RECURSION_LEVEL(table_)                                     \
-    do {                                                                      \
-        if (table_->mRecursionLevel != IMMUTABLE_RECURSION_LEVEL) {           \
-            const uint32_t oldRecursionLevel = table_->mRecursionLevel--;     \
-            MOZ_ASSERT(oldRecursionLevel > 0);                                \
-        }                                                                     \
-    } while(0)
+class AutoIteratorRemovalOp
+{
+  Checker& mChk;
+public:
+  explicit AutoIteratorRemovalOp(Checker& aChk)
+    : mChk(aChk)
+  {
+    mChk.StartIteratorRemovalOp();
+  }
+  ~AutoIteratorRemovalOp() { mChk.EndIteratorRemovalOp(); }
+};
 
-#else
+class AutoDestructorOp
+{
+  Checker& mChk;
+public:
+  explicit AutoDestructorOp(Checker& aChk)
+    : mChk(aChk)
+  {
+    mChk.StartDestructorOp();
+  }
+  ~AutoDestructorOp() { mChk.EndDestructorOp(); }
+};
 
-#define INCREMENT_RECURSION_LEVEL(table_)   do { } while(0)
-#define DECREMENT_RECURSION_LEVEL(table_)   do { } while(0)
-
-#endif /* defined(DEBUG) */
-
-using namespace mozilla;
+#endif
 
 PLDHashNumber
 PL_DHashStringKey(PLDHashTable* aTable, const void* aKey)
@@ -226,7 +227,7 @@ PLDHashTable::PLDHashTable(const PLDHashTableOps* aOps, uint32_t aEntrySize,
   , mGeneration(0)
   , mEntryStore(nullptr)
 #ifdef DEBUG
-  , mRecursionLevel(0)
+  , mChecker()
 #endif
 {
 }
@@ -256,15 +257,16 @@ PLDHashTable::operator=(PLDHashTable&& aOther)
   mGeneration = Move(aOther.mGeneration);
   mEntryStore = Move(aOther.mEntryStore);
 #ifdef DEBUG
-  // Atomic<> doesn't have an |operator=(Atomic<>&&)|.
-  mRecursionLevel = uint32_t(aOther.mRecursionLevel);
+  mChecker = Move(aOther.mChecker);
 #endif
 
   // Clear up |aOther| so its destruction will be a no-op.
-  aOther.mEntryStore = nullptr;
+  {
 #ifdef DEBUG
-  aOther.mRecursionLevel = 0;
+    AutoDestructorOp op(mChecker);
 #endif
+    aOther.mEntryStore = nullptr;
+  }
 
   return *this;
 }
@@ -307,11 +309,13 @@ PLDHashTable::EntryIsFree(PLDHashEntryHdr* aEntry)
 
 PLDHashTable::~PLDHashTable()
 {
+#ifdef DEBUG
+  AutoDestructorOp op(mChecker);
+#endif
+
   if (!mEntryStore) {
     return;
   }
-
-  INCREMENT_RECURSION_LEVEL(this);
 
   /* Clear any remaining live entries. */
   char* entryAddr = mEntryStore;
@@ -323,9 +327,6 @@ PLDHashTable::~PLDHashTable()
     }
     entryAddr += mEntrySize;
   }
-
-  DECREMENT_RECURSION_LEVEL(this);
-  MOZ_ASSERT(RECURSION_LEVEL_SAFE_TO_FINISH(this));
 
   /* Free entry storage last. */
   free(mEntryStore);
@@ -540,13 +541,13 @@ PLDHashTable::ComputeKeyHash(const void* aKey)
 MOZ_ALWAYS_INLINE PLDHashEntryHdr*
 PLDHashTable::Search(const void* aKey)
 {
-  INCREMENT_RECURSION_LEVEL(this);
+#ifdef DEBUG
+  AutoReadOp op(mChecker);
+#endif
 
   PLDHashEntryHdr* entry =
     mEntryStore ? SearchTable<ForSearchOrRemove>(aKey, ComputeKeyHash(aKey))
                 : nullptr;
-
-  DECREMENT_RECURSION_LEVEL(this);
 
   return entry;
 }
@@ -554,12 +555,9 @@ PLDHashTable::Search(const void* aKey)
 MOZ_ALWAYS_INLINE PLDHashEntryHdr*
 PLDHashTable::Add(const void* aKey, const mozilla::fallible_t&)
 {
-  PLDHashNumber keyHash;
-  PLDHashEntryHdr* entry;
-  uint32_t capacity;
-
-  MOZ_ASSERT(mRecursionLevel == 0);
-  INCREMENT_RECURSION_LEVEL(this);
+#ifdef DEBUG
+  AutoWriteOp op(mChecker);
+#endif
 
   // Allocate the entry storage if it hasn't already been allocated.
   if (!mEntryStore) {
@@ -569,8 +567,7 @@ PLDHashTable::Add(const void* aKey, const mozilla::fallible_t&)
                                         &nbytes));
     mEntryStore = (char*)malloc(nbytes);
     if (!mEntryStore) {
-      entry = nullptr;
-      goto exit;
+      return nullptr;
     }
     memset(mEntryStore, 0, nbytes);
   }
@@ -580,7 +577,7 @@ PLDHashTable::Add(const void* aKey, const mozilla::fallible_t&)
    * in the table, we may grow once more than necessary, but only if we
    * are on the edge of being overloaded.
    */
-  capacity = Capacity();
+  uint32_t capacity = Capacity();
   if (mEntryCount + mRemovedCount >= MaxLoad(capacity)) {
     /* Compress if a quarter or more of all entries are removed. */
     int deltaLog2;
@@ -597,8 +594,7 @@ PLDHashTable::Add(const void* aKey, const mozilla::fallible_t&)
      */
     if (!ChangeTable(deltaLog2) &&
         mEntryCount + mRemovedCount >= MaxLoadOnGrowthFailure(capacity)) {
-      entry = nullptr;
-      goto exit;
+      return nullptr;
     }
   }
 
@@ -606,8 +602,8 @@ PLDHashTable::Add(const void* aKey, const mozilla::fallible_t&)
    * Look for entry after possibly growing, so we don't have to add it,
    * then skip it while growing the table and re-add it after.
    */
-  keyHash = ComputeKeyHash(aKey);
-  entry = SearchTable<ForAdd>(aKey, keyHash);
+  PLDHashNumber keyHash = ComputeKeyHash(aKey);
+  PLDHashEntryHdr* entry = SearchTable<ForAdd>(aKey, keyHash);
   if (!ENTRY_IS_LIVE(entry)) {
     /* Initialize the entry, indicating that it's no longer free. */
     if (ENTRY_IS_REMOVED(entry)) {
@@ -621,8 +617,6 @@ PLDHashTable::Add(const void* aKey, const mozilla::fallible_t&)
     mEntryCount++;
   }
 
-exit:
-  DECREMENT_RECURSION_LEVEL(this);
   return entry;
 }
 
@@ -650,8 +644,9 @@ PLDHashTable::Add(const void* aKey)
 MOZ_ALWAYS_INLINE void
 PLDHashTable::Remove(const void* aKey)
 {
-  MOZ_ASSERT(mRecursionLevel == 0);
-  INCREMENT_RECURSION_LEVEL(this);
+#ifdef DEBUG
+  AutoWriteOp op(mChecker);
+#endif
 
   PLDHashEntryHdr* entry =
     mEntryStore ? SearchTable<ForSearchOrRemove>(aKey, ComputeKeyHash(aKey))
@@ -667,8 +662,6 @@ PLDHashTable::Remove(const void* aKey)
       (void) ChangeTable(-1);
     }
   }
-
-  DECREMENT_RECURSION_LEVEL(this);
 }
 
 PLDHashEntryHdr* PL_DHASH_FASTCALL
@@ -699,9 +692,12 @@ PL_DHashTableRemove(PLDHashTable* aTable, const void* aKey)
 MOZ_ALWAYS_INLINE void
 PLDHashTable::RawRemove(PLDHashEntryHdr* aEntry)
 {
-  MOZ_ASSERT(mEntryStore);
+  // Unfortunately, we can only do weak checking here. That's because
+  // RawRemove() can be called legitimately while an Enumerate() call is
+  // active, which doesn't fit well into how Checker's mState variable works.
+  MOZ_ASSERT(mChecker.IsWritable());
 
-  MOZ_ASSERT(mRecursionLevel != IMMUTABLE_RECURSION_LEVEL);
+  MOZ_ASSERT(mEntryStore);
 
   NS_ASSERTION(ENTRY_IS_LIVE(aEntry), "ENTRY_IS_LIVE(aEntry)");
 
@@ -732,7 +728,6 @@ PLDHashTable::ShrinkIfAppropriate()
   uint32_t capacity = Capacity();
   if (mRemovedCount >= capacity >> 2 ||
       (capacity > PL_DHASH_MIN_CAPACITY && mEntryCount <= MinLoad(capacity))) {
-
     uint32_t log2;
     BestCapacity(mEntryCount, &capacity, &log2);
 
@@ -743,83 +738,26 @@ PLDHashTable::ShrinkIfAppropriate()
   }
 }
 
-MOZ_ALWAYS_INLINE uint32_t
-PLDHashTable::Enumerate(PLDHashEnumerator aEtor, void* aArg)
-{
-  if (!mEntryStore) {
-    return 0;
-  }
-
-  INCREMENT_RECURSION_LEVEL(this);
-
-  char* entryAddr = mEntryStore;
-  uint32_t capacity = Capacity();
-  uint32_t tableSize = capacity * mEntrySize;
-  char* entryLimit = mEntryStore + tableSize;
-  uint32_t i = 0;
-  bool didRemove = false;
-
-  if (ChaosMode::isActive(ChaosMode::HashTableIteration)) {
-    // Start iterating at a random point in the hashtable. It would be
-    // even more chaotic to iterate in fully random order, but that's a lot
-    // more work.
-    entryAddr += ChaosMode::randomUint32LessThan(capacity) * mEntrySize;
-  }
-
-  for (uint32_t e = 0; e < capacity; ++e) {
-    PLDHashEntryHdr* entry = (PLDHashEntryHdr*)entryAddr;
-    if (ENTRY_IS_LIVE(entry)) {
-      PLDHashOperator op = aEtor(this, entry, i++, aArg);
-      if (op & PL_DHASH_REMOVE) {
-        PL_DHashTableRawRemove(this, entry);
-        didRemove = true;
-      }
-      if (op & PL_DHASH_STOP) {
-        break;
-      }
-    }
-    entryAddr += mEntrySize;
-    if (entryAddr >= entryLimit) {
-      entryAddr -= tableSize;
-    }
-  }
-
-  MOZ_ASSERT(!didRemove || mRecursionLevel == 1);
-
-  // Shrink the table if appropriate. Do this only if we removed above, so
-  // non-removing enumerations can count on stable |mEntryStore| until the next
-  // Add, Remove, or removing-Enumerate.
-  if (didRemove) {
-    ShrinkIfAppropriate();
-  }
-
-  DECREMENT_RECURSION_LEVEL(this);
-
-  return i;
-}
-
-uint32_t
-PL_DHashTableEnumerate(PLDHashTable* aTable, PLDHashEnumerator aEtor,
-                       void* aArg)
-{
-  return aTable->Enumerate(aEtor, aArg);
-}
-
 MOZ_ALWAYS_INLINE size_t
 PLDHashTable::SizeOfExcludingThis(
     PLDHashSizeOfEntryExcludingThisFun aSizeOfEntryExcludingThis,
     MallocSizeOf aMallocSizeOf, void* aArg /* = nullptr */) const
 {
+#ifdef DEBUG
+  AutoReadOp op(mChecker);
+#endif
+
   if (!mEntryStore) {
     return 0;
   }
 
   size_t n = aMallocSizeOf(mEntryStore);
   if (aSizeOfEntryExcludingThis) {
-    for (auto iter = Iter(); !iter.Done(); iter.Next()) {
+    for (auto iter = ConstIter(); !iter.Done(); iter.Next()) {
       n += aSizeOfEntryExcludingThis(iter.Get(), aMallocSizeOf, aArg);
     }
   }
+
   return n;
 }
 
@@ -856,21 +794,24 @@ PLDHashTable::Iterator::Iterator(Iterator&& aOther)
   : mTable(aOther.mTable)
   , mCurrent(aOther.mCurrent)
   , mLimit(aOther.mLimit)
+  , mHaveRemoved(aOther.mHaveRemoved)
 {
-  // No need to change mRecursionLevel here.
+  // No need to change |mChecker| here.
   aOther.mTable = nullptr;
   aOther.mCurrent = nullptr;
   aOther.mLimit = nullptr;
+  aOther.mHaveRemoved = false;
 }
 
-PLDHashTable::Iterator::Iterator(const PLDHashTable* aTable)
+PLDHashTable::Iterator::Iterator(PLDHashTable* aTable)
   : mTable(aTable)
   , mCurrent(mTable->mEntryStore)
   , mLimit(mTable->mEntryStore + mTable->Capacity() * mTable->mEntrySize)
+  , mHaveRemoved(false)
 {
-  // Make sure that modifications can't simultaneously happen while the
-  // iterator is active.
-  INCREMENT_RECURSION_LEVEL(mTable);
+#ifdef DEBUG
+  mTable->mChecker.StartReadOp();
+#endif
 
   // Advance to the first live entry, or to the end if there are none.
   while (IsOnNonLiveEntry()) {
@@ -881,7 +822,12 @@ PLDHashTable::Iterator::Iterator(const PLDHashTable* aTable)
 PLDHashTable::Iterator::~Iterator()
 {
   if (mTable) {
-    DECREMENT_RECURSION_LEVEL(mTable);
+    if (mHaveRemoved) {
+      mTable->ShrinkIfAppropriate();
+    }
+#ifdef DEBUG
+    mTable->mChecker.EndReadOp();
+#endif
   }
 }
 
@@ -917,34 +863,11 @@ PLDHashTable::Iterator::Next()
   } while (IsOnNonLiveEntry());
 }
 
-PLDHashTable::RemovingIterator::RemovingIterator(RemovingIterator&& aOther)
-  : Iterator(mozilla::Move(aOther.mTable))
-  , mHaveRemoved(aOther.mHaveRemoved)
-{
-}
-
-PLDHashTable::RemovingIterator::RemovingIterator(PLDHashTable* aTable)
-  : Iterator(aTable)
-  , mHaveRemoved(false)
-{
-}
-
-PLDHashTable::RemovingIterator::~RemovingIterator()
-{
-  if (mHaveRemoved) {
-    // Why is this cast needed? In Iterator, |mTable| is const. In
-    // RemovingIterator it should be non-const, but it inherits from Iterator
-    // so that's not possible. But it's ok because RemovingIterator's
-    // constructor takes a pointer to a non-const table in the first place.
-    const_cast<PLDHashTable*>(mTable)->ShrinkIfAppropriate();
-  }
-}
-
 void
-PLDHashTable::RemovingIterator::Remove()
+PLDHashTable::Iterator::Remove()
 {
   // This cast is needed for the same reason as the one in the destructor.
-  const_cast<PLDHashTable*>(mTable)->RawRemove(Get());
+  mTable->RawRemove(Get());
   mHaveRemoved = true;
 }
 
@@ -952,7 +875,7 @@ PLDHashTable::RemovingIterator::Remove()
 MOZ_ALWAYS_INLINE void
 PLDHashTable::MarkImmutable()
 {
-  mRecursionLevel = IMMUTABLE_RECURSION_LEVEL;
+  mChecker.SetNonWritable();
 }
 
 void

@@ -1,6 +1,6 @@
 #identity-popup-securityView:not(.verifiedIdentity) > #identity-popup-content-owner,
 #identity-popup-securityView:not(.verifiedIdentity):not(.verifiedDomain) > #identity-popup-content-verifier,
-#identity-popup-securityView:not(.unknownIdentity):not(.verifiedIdentity):not(.mixedContent) > #identity-popup-content-supplemental,
+#identity-popup-securityView:not(.unknownIdentity):not(.verifiedIdentity):not(.mixedContent):not(.weakCipher) > #identity-popup-content-supplemental,
 #identity-popup-security-content:not(.verifiedIdentity):not(.verifiedDomain) > .identity-popup-connection-secure,
 #identity-popup-securityView:not(.verifiedIdentity):not(.verifiedDomain) > #identity-popup-securityView-header > .identity-popup-connection-secure,
 #identity-popup-securityView:not(.unknownIdentity) > #identity-popup-securityView-header > .identity-popup-connection-not-secure,
@@ -19,6 +19,11 @@
   /* Tiny hack to ensure the panel shrinks back to its original
      size after closing a subview that is bigger than the main view. */
   max-height: 0;
+}
+
+.panel-mainview[panelid=identity-popup][viewtype=subview] > #identity-popup-mainView menulist,
+.panel-mainview[panelid=identity-popup][viewtype=subview] > #identity-popup-mainView button:not([panel-multiview-anchor]) {
+  -moz-user-focus: ignore;
 }
 
 #identity-popup > .panel-arrowcontainer > .panel-arrowcontent {
@@ -98,6 +103,10 @@
   opacity: 0.5;
 }
 
+.identity-popup-button:-moz-focusring {
+  border-color: transparent;
+}
+
 /* EXPAND BUTTON */
 
 .identity-popup-expander {
@@ -133,16 +142,15 @@
   }
 }
 
-.identity-popup-expander > .button-box,
-.identity-popup-expander > .button-box:focus {
+.identity-popup-expander > .button-box {
   padding: 0;
   -moz-appearance: none;
   border: solid #e5e5e5;
   border-width: 0 0 0 1px;
 }
 
-.identity-popup-expander[panel-multiview-anchor] > .button-box,
-.identity-popup-expander[panel-multiview-anchor] > .button-box:focus {
+.identity-popup-expander:-moz-focusring > .button-box,
+.identity-popup-expander[panel-multiview-anchor] > .button-box {
   border: 0 none;
 }
 
@@ -199,13 +207,10 @@
 }
 
 #identity-popup-securityView.verifiedDomain,
-#identity-popup-security-content.verifiedDomain {
-  background-image: url(chrome://browser/skin/controlcenter/conn-secure-dv.svg);
-}
-
 #identity-popup-securityView.verifiedIdentity,
+#identity-popup-security-content.verifiedDomain,
 #identity-popup-security-content.verifiedIdentity {
-  background-image: url(chrome://browser/skin/controlcenter/conn-secure-ev.svg);
+  background-image: url(chrome://browser/skin/controlcenter/conn-secure.svg);
 }
 
 #identity-popup-securityView.mixedActiveContent,
@@ -283,8 +288,12 @@
   background: transparent;
   -moz-appearance: none;
   margin-top: 5px;
-  padding: 1.1em;
   margin: 0;
+}
+
+#identity-popup-more-info-button > .button-box {
+  -moz-appearance: none;
+  padding: 1em;
 }
 
 #identity-popup-more-info-button:hover {
@@ -295,4 +304,8 @@
   color: inherit;
   background-color: hsla(210,4%,10%,.12);
   box-shadow: 0 1px 0 hsla(210,4%,10%,.05) inset;
+}
+
+#identity-popup-more-info-button:-moz-focusring {
+  border-color: transparent;
 }
