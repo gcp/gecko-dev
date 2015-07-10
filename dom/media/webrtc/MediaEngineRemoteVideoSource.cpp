@@ -28,6 +28,7 @@ MediaEngineRemoteVideoSource::MediaEngineRemoteVideoSource(
     mMediaSource(aMediaSource),
     mCapEngine(aCapEngine)
 {
+  MOZ_ASSERT(aMediaSource != dom::MediaSourceEnum::Other);
   Init();
 }
 
@@ -89,7 +90,8 @@ MediaEngineRemoteVideoSource::Shutdown() {
 
 nsresult
 MediaEngineRemoteVideoSource::Allocate(const dom::MediaTrackConstraints& aConstraints,
-                                       const MediaEnginePrefs& aPrefs)
+                                       const MediaEnginePrefs& aPrefs,
+                                       const nsString& aDeviceId)
 {
   LOG((__PRETTY_FUNCTION__));
 
@@ -97,7 +99,7 @@ MediaEngineRemoteVideoSource::Allocate(const dom::MediaTrackConstraints& aConstr
     // Note: if shared, we don't allow a later opener to affect the resolution.
     // (This may change depending on spec changes for Constraints/settings)
 
-    if (!ChooseCapability(aConstraints, aPrefs)) {
+    if (!ChooseCapability(aConstraints, aPrefs, aDeviceId)) {
       return NS_ERROR_UNEXPECTED;
     }
 

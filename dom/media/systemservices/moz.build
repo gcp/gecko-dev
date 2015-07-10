@@ -51,15 +51,28 @@ if CONFIG['_MSC_VER']:
     DEFINES['__PRETTY_FUNCTION__'] = '__FUNCSIG__'
 
 EXPORTS.mozilla.media += ['MediaChild.h',
-            'MediaParent.h',
-            'MediaUtils.h'
+                          'MediaParent.h',
+                          'MediaSystemResourceClient.h',
+                          'MediaSystemResourceManager.h',
+                          'MediaSystemResourceManagerChild.h',
+                          'MediaSystemResourceManagerParent.h',
+                          'MediaSystemResourceMessageUtils.h',
+                          'MediaSystemResourceService.h',
+                          'MediaSystemResourceTypes.h',
+                          'MediaUtils.h'
 ]
 UNIFIED_SOURCES += ['MediaChild.cpp',
                     'MediaParent.cpp',
-                    'MediaUtils.cpp'
+                    'MediaSystemResourceClient.cpp',
+                    'MediaSystemResourceManager.cpp',
+                    'MediaSystemResourceManagerChild.cpp',
+                    'MediaSystemResourceManagerParent.cpp',
+                    'MediaSystemResourceService.cpp',
+                    'MediaUtils.cpp',
 ]
 IPDL_SOURCES += [
     'PMedia.ipdl',
+    'PMediaSystemResourceManager.ipdl',
 ]
 # /dom/base needed for nsGlobalWindow.h in MediaChild.cpp
 LOCAL_INCLUDES += [

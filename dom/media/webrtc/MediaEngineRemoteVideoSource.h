@@ -66,7 +66,8 @@ public:
                                const char* aMonitorName = "RemoteVideo.Monitor");
 
   virtual nsresult Allocate(const dom::MediaTrackConstraints& aConstraints,
-                            const MediaEnginePrefs& aPrefs) override;
+                            const MediaEnginePrefs& aPrefs,
+                            const nsString& aDeviceId) override;
   virtual nsresult Deallocate() override;;
   virtual nsresult Start(SourceMediaStream*, TrackID) override;
   virtual nsresult Stop(SourceMediaStream*, TrackID) override;
