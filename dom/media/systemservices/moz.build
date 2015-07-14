@@ -50,6 +50,8 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
 if CONFIG['_MSC_VER']:
     DEFINES['__PRETTY_FUNCTION__'] = '__FUNCSIG__'
 
+EXPORTS.mozilla += ['ShmemPool.h',]
+
 EXPORTS.mozilla.media += ['MediaChild.h',
                           'MediaParent.h',
                           'MediaSystemResourceClient.h',
@@ -59,7 +61,7 @@ EXPORTS.mozilla.media += ['MediaChild.h',
                           'MediaSystemResourceMessageUtils.h',
                           'MediaSystemResourceService.h',
                           'MediaSystemResourceTypes.h',
-                          'MediaUtils.h'
+                          'MediaUtils.h',
 ]
 UNIFIED_SOURCES += ['MediaChild.cpp',
                     'MediaParent.cpp',
@@ -69,6 +71,7 @@ UNIFIED_SOURCES += ['MediaChild.cpp',
                     'MediaSystemResourceManagerParent.cpp',
                     'MediaSystemResourceService.cpp',
                     'MediaUtils.cpp',
+                    'ShmemPool.cpp',
 ]
 IPDL_SOURCES += [
     'PMedia.ipdl',

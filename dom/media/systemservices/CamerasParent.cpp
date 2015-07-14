@@ -77,19 +77,25 @@ public:
   DeliverFrameRunnable(CamerasParent *aParent,
                        CaptureEngine engine,
                        int cap_id,
-                       unsigned char* buffer,
+                       ShmemBuffer buffer,
+                       unsigned char* altbuffer,
                        int size,
                        uint32_t time_stamp,
                        int64_t ntp_time,
                        int64_t render_time)
-    : mParent(aParent), mCapEngine(engine), mCapId(cap_id), mSize(size),
-      mTimeStamp(time_stamp), mNtpTime(ntp_time), mRenderTime(render_time) {
-    mBuffer.reset(new unsigned char[size]);
-    // There is an extra copy here. We can't copy into Shmem yet
-    // because we have no idea if the next frame will arrive before
-    // us copying the data into the Shmem will have finished. We need
-    // multiple Shmem to avoid this.
-    memcpy(mBuffer.get(), buffer, size);
+    : mParent(aParent), mCapEngine(engine), mCapId(cap_id), mBuffer(Move(buffer)),
+      mSize(size), mTimeStamp(time_stamp), mNtpTime(ntp_time),
+      mRenderTime(render_time) {
+    // No ShmemBuffer was available, so make an extra buffer here.
+    // We/ have no idea when we are going to run and it will be
+    // potentially long after the webrtc frame callback has
+    // returned, so the copy needs to be no later than here.
+    // We will need to copy this back into a Shmem so we prefer
+    // using ShmemBuffers.
+    if (altbuffer != nullptr) {
+      mAlternateBuffer.reset(new unsigned char[size]);
+      memcpy(mAlternateBuffer.get(), altbuffer, size);
+    }
   };
 
   NS_IMETHOD Run() {
@@ -99,7 +105,8 @@ public:
       return NS_OK;
     }
     if (!mParent->DeliverFrameOverIPC(mCapEngine, mCapId,
-                                      mBuffer.get(), mSize, mTimeStamp,
+                                      Move(mBuffer), mAlternateBuffer.get(),
+                                      mSize, mTimeStamp,
                                       mNtpTime, mRenderTime)) {
       mResult = -1;
     } else {
@@ -116,7 +123,8 @@ private:
   CamerasParent *mParent;
   CaptureEngine mCapEngine;
   int mCapId;
-  mozilla::UniquePtr<unsigned char[]> mBuffer;
+  ShmemBuffer mBuffer;
+  mozilla::UniquePtr<unsigned char[]> mAlternateBuffer;
   int mSize;
   uint32_t mTimeStamp;
   int64_t mNtpTime;
@@ -127,45 +135,51 @@ private:
 int
 CamerasParent::DeliverFrameOverIPC(CaptureEngine cap_engine,
                                    int cap_id,
-                                   unsigned char* buffer,
+                                   ShmemBuffer buffer,
+                                   unsigned char* altbuffer,
                                    int size,
                                    uint32_t time_stamp,
                                    int64_t ntp_time,
                                    int64_t render_time)
 {
-  if (!mShmemInitialized) {
-    LOG(("Initializing Shmem"));
-    AllocShmem(size, SharedMemory::TYPE_BASIC, &mShmem);
-    mShmemInitialized = true;
-  }
+  // No ShmemBuffers were available, so construct one now
+  // of the right size and copy into it. That is an extra
+  // copy, but we expect this to be the exceptional case.
+  if (altbuffer != nullptr) {
+    // Get a shared memory buffer from the pool, at least size big
+    ShmemBuffer shMemBuff = mShmemPool.Get(this, size);
 
-  if (!mShmem.IsWritable()) {
-    LOG(("Video shmem is not writeable in DeliverFrame"));
-    // We can skip this frame if the buffer wasn't handed back
-    // to us yet, it's not a real error.
-    return 0;
-  }
+    if (!shMemBuff.Valid()) {
+      LOG(("Video shmem is not writeable in DeliverFrame"));
+      // We can skip this frame if we run out of buffers, it's not a real error.
+      return 0;
+    }
 
-  // Prepare video buffer
-  if (mShmem.Size<char>() != static_cast<size_t>(size)) {
-    LOG(("Frame size change in Shmem"));
-    DeallocShmem(mShmem);
-    // this may fail; always check return value
-    if (!AllocShmem(size, SharedMemory::TYPE_BASIC, &mShmem)) {
-      LOG(("Failure allocating new size video buffer"));
+    // get() and Size() check for proper alignment of the segment
+    memcpy(shMemBuff.GetBytes(), altbuffer, size);
+
+    if (!SendDeliverFrame(cap_engine, cap_id,
+                          shMemBuff.Get(), size,
+                          time_stamp, ntp_time, render_time)) {
+      return -1;
+    }
+  } else {
+    // ShmemBuffer was available, we're all good. A single copy happened
+    // in the original webrtc callback.
+    if (!SendDeliverFrame(cap_engine, cap_id,
+                          buffer.Get(), size,
+                          time_stamp, ntp_time, render_time)) {
       return -1;
     }
   }
 
-  // get() and Size() check for proper alignment of the segment
-  memcpy(mShmem.get<char>(), buffer, size);
-
-  if (!SendDeliverFrame(cap_engine, cap_id,
-                        mShmem, size, time_stamp, ntp_time, render_time)) {
-    return -1;
-  }
-
   return 0;
+}
+
+ShmemBuffer
+CamerasParent::GetBuffer(size_t aSize)
+{
+  return mShmemPool.GetIfAvailable(aSize);
 }
 
 int
@@ -176,9 +190,22 @@ CallbackHelper::DeliverFrame(unsigned char* buffer,
                              int64_t render_time,
                              void *handle)
 {
+  // Get a shared memory buffer to copy the frame data into
+  ShmemBuffer shMemBuffer = mParent->GetBuffer(size);
+  if (!shMemBuffer.Valid()) {
+    // Either we ran out of buffers or they're not the right size yet
+    LOG(("Video shmem is not available in DeliverFrame"));
+    // We will do a(n extra) copy into a temporary buffer in DeliverFrame
+  } else {
+    // Shared memory buffers of the right size are available, do the copy here.
+    memcpy(shMemBuffer.GetBytes(), buffer, size);
+    // Mark the original buffer as cleared.
+    buffer = nullptr;
+  }
   nsRefPtr<DeliverFrameRunnable> runnable =
     new DeliverFrameRunnable(mParent, mCapEngine, mCapturerId,
-                             buffer, size, time_stamp, ntp_time, render_time);
+                             Move(shMemBuffer), buffer, size, time_stamp,
+                             ntp_time, render_time);
   MOZ_ASSERT(mParent);
   nsIThread * thread = mParent->GetBackgroundThread();
   MOZ_ASSERT(thread != nullptr);
@@ -188,7 +215,7 @@ CallbackHelper::DeliverFrame(unsigned char* buffer,
 
 bool
 CamerasParent::RecvReleaseFrame(mozilla::ipc::Shmem&& s) {
-  mShmem = s;
+  mShmemPool.Put(ShmemBuffer(s));
   return true;
 }
 
@@ -679,10 +706,7 @@ void CamerasParent::DoShutdown()
     }
   }
 
-  if (mShmemInitialized) {
-    DeallocShmem(mShmem);
-    mShmemInitialized = false;
-  }
+  mShmemPool.Cleanup(this);
 
   mPBackgroundThread = nullptr;
 
@@ -708,7 +732,7 @@ CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
 
 CamerasParent::CamerasParent()
   : mCallbackMutex("CamerasParent.mCallbackMutex"),
-    mShmemInitialized(false),
+    mShmemPool(CaptureEngine::MaxEngine),
     mVideoCaptureThread(nullptr),
     mChildIsAlive(true)
 {

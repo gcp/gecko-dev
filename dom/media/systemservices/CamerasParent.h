@@ -10,6 +10,7 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/camera/PCamerasParent.h"
 #include "mozilla/ipc/Shmem.h"
+#include "mozilla/ShmemPool.h"
 
 // conflicts with #include of scoped_ptr.h
 #undef FF
@@ -90,11 +91,13 @@ public:
 
   nsIThread* GetBackgroundThread() { return mPBackgroundThread; };
   bool ChildIsAlive() { return mChildIsAlive; };
+  ShmemBuffer GetBuffer(size_t aSize);
 
   // forwarded to PBackground thread
   int DeliverFrameOverIPC(CaptureEngine capEng,
                           int cap_id,
-                          unsigned char* buffer,
+                          ShmemBuffer buffer,
+                          unsigned char* altbuffer,
                           int size,
                           uint32_t time_stamp,
                           int64_t ntp_time,
@@ -115,9 +118,8 @@ private:
   // Protects the callback arrays
   Mutex mCallbackMutex;
 
-  // image buffer
-  bool mShmemInitialized;
-  mozilla::ipc::Shmem mShmem;
+  // image buffers
+  mozilla::ShmemPool mShmemPool;
 
   // PBackground parent thread
   nsCOMPtr<nsIThread> mPBackgroundThread;
