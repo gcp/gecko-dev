@@ -7112,8 +7112,10 @@ var gIdentityHandler = {
     let elem = document.activeElement;
     let position = elem.compareDocumentPosition(this._identityPopup);
 
-    if (!(position & Node.DOCUMENT_POSITION_CONTAINS)) {
-      // Hide the panel when some element outside the panel received focus.
+    if (!(position & (Node.DOCUMENT_POSITION_CONTAINS |
+                      Node.DOCUMENT_POSITION_CONTAINED_BY))) {
+      // Hide the panel when focusing an element that is
+      // neither an ancestor nor descendant.
       this._identityPopup.hidePopup();
     }
   },
@@ -7645,16 +7647,6 @@ var MousePosTracker = {
     }
   }
 };
-
-function focusNextFrame(event) {
-  let fm = Services.focus;
-  let dir = event.shiftKey ? fm.MOVEFOCUS_BACKWARDDOC : fm.MOVEFOCUS_FORWARDDOC;
-  let element = fm.moveFocus(window, null, dir, fm.FLAG_BYKEY);
-  let panelOrNotificationSelector = "popupnotification " + element.localName + ", " +
-                                    "panel " + element.localName;
-  if (element.ownerDocument == document && !element.matches(panelOrNotificationSelector))
-    focusAndSelectUrlBar();
-}
 
 function BrowserOpenNewTabOrWindow(event) {
   if (event.shiftKey) {

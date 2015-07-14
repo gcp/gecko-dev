@@ -16,6 +16,7 @@
 #include "GLDefs.h"
 #include "WebGLActiveInfo.h"
 #include "WebGLContextUnchecked.h"
+#include "WebGLFormats.h"
 #include "WebGLObjectModel.h"
 #include "WebGLRenderbuffer.h"
 #include "WebGLTexture.h"
@@ -99,15 +100,15 @@ class Element;
 class ImageData;
 struct WebGLContextAttributes;
 template<typename> struct Nullable;
-}
+} // namespace dom
 
 namespace gfx {
 class SourceSurface;
-}
+} // namespace gfx
 
 namespace webgl {
 struct LinkedProgramInfo;
-}
+} // namespace webgl
 
 WebGLTexelFormat GetWebGLTexelFormat(TexInternalFormat format);
 
@@ -1608,6 +1609,9 @@ public:
     void GenerateWarning(const char* fmt, ...);
     void GenerateWarning(const char* fmt, va_list ap);
 
+    UniquePtr<webgl::FormatUsageAuthority> mFormatUsage;
+
+    // Friend list
     friend class WebGLTexture;
     friend class WebGLFramebuffer;
     friend class WebGLRenderbuffer;

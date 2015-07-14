@@ -591,6 +591,7 @@ struct PositionComparator
     return 1;
   }
 };
+
 } // namespace
 
 bool
@@ -1552,6 +1553,7 @@ nsIDocument::nsIDocument()
   : nsINode(nullNodeInfo),
     mReferrerPolicySet(false),
     mReferrerPolicy(mozilla::net::RP_Default),
+    mUpgradeInsecureRequests(false),
     mCharacterSet(NS_LITERAL_CSTRING("ISO-8859-1")),
     mNodeInfoManager(nullptr),
     mCompatMode(eCompatibility_FullStandards),
@@ -2706,6 +2708,19 @@ nsDocument::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
     WarnIfSandboxIneffective(docShell, mSandboxFlags, GetChannel());
   }
 
+  // The CSP directive upgrade-insecure-requests not only applies to the
+  // toplevel document, but also to nested documents. Let's propagate that
+  // flag from the parent to the nested document.
+  nsCOMPtr<nsIDocShellTreeItem> treeItem = this->GetDocShell();
+  if (treeItem) {
+    nsCOMPtr<nsIDocShellTreeItem> sameTypeParent;
+    treeItem->GetSameTypeParent(getter_AddRefs(sameTypeParent));
+    if (sameTypeParent) {
+      mUpgradeInsecureRequests =
+        sameTypeParent->GetDocument()->GetUpgradeInsecureRequests();
+    }
+  }
+
   // If this is not a data document, set CSP.
   if (!mLoadedAsData) {
     nsresult rv = InitCSP(aChannel);
@@ -2976,6 +2991,13 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     // Referrer Policy is set separately for the speculative parser in
     // nsHTMLDocument::StartDocumentLoad() so there's nothing to do here for
     // speculative loads.
+  }
+
+  // ------ Set flag for 'upgrade-insecure-requests' if not already
+  //        inherited from the parent context.
+  if (!mUpgradeInsecureRequests) {
+    rv = csp->GetUpgradeInsecureRequests(&mUpgradeInsecureRequests);
+    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   rv = principal->SetCsp(csp);
@@ -5912,7 +5934,7 @@ public:
 
 NS_IMPL_ISUPPORTS(ProcessStackRunner, nsIRunnable);
 
-} // anonymous namespace
+} // namespace
 
 void
 nsDocument::EnqueueLifecycleCallback(nsIDocument::ElementCallbackType aType,
@@ -9614,7 +9636,7 @@ struct SuppressArgs
   uint32_t mIncrease;
 };
 
-}
+} // namespace
 
 static bool
 SuppressEventHandlingInDocument(nsIDocument* aDocument, void* aData)
@@ -9891,7 +9913,7 @@ public:
 };
 NS_IMPL_ISUPPORTS(StubCSSLoaderObserver, nsICSSLoaderObserver)
 
-}
+} // namespace
 
 void
 nsDocument::PreloadStyle(nsIURI* uri, const nsAString& charset,
@@ -9948,7 +9970,7 @@ struct UnsuppressArgs
   nsTArray<nsCOMPtr<nsIDocument>> mDocs;
 };
 
-}
+} // namespace
 
 static bool
 GetAndUnsuppressSubDocuments(nsIDocument* aDocument,

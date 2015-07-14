@@ -125,13 +125,6 @@ GetOrCreateFunctionScript(JSContext* cx, HandleFunction fun)
     return fun->nonLazyScript();
 }
 
-bool
-js::ReportObjectRequired(JSContext* cx)
-{
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT, "value");
-    return false;
-}
-
 static bool
 ValueToIdentifier(JSContext* cx, HandleValue v, MutableHandleId id)
 {
@@ -363,11 +356,15 @@ Debugger::Debugger(JSContext* cx, NativeObject* dbg)
     uncaughtExceptionHook(nullptr),
     enabled(true),
     observedGCs(cx),
+    trackingTenurePromotions(false),
+    tenurePromotionsLogLength(0),
+    maxTenurePromotionsLogLength(DEFAULT_MAX_LOG_LENGTH),
+    tenurePromotionsLogOverflowed(false),
     allowUnobservedAsmJS(false),
     trackingAllocationSites(false),
     allocationSamplingProbability(1.0),
     allocationsLogLength(0),
-    maxAllocationsLogLength(DEFAULT_MAX_ALLOCATIONS_LOG_LENGTH),
+    maxAllocationsLogLength(DEFAULT_MAX_LOG_LENGTH),
     allocationsLogOverflowed(false),
     frames(cx->runtime()),
     scripts(cx),
@@ -392,6 +389,7 @@ Debugger::~Debugger()
 {
     MOZ_ASSERT_IF(debuggees.initialized(), debuggees.empty());
     emptyAllocationsLog();
+    emptyTenurePromotionsLog();
 
     /*
      * Since the inactive state for this link is a singleton cycle, it's always
@@ -407,6 +405,7 @@ bool
 Debugger::init(JSContext* cx)
 {
     bool ok = debuggees.init() &&
+              debuggeeZones.init() &&
               frames.init() &&
               scripts.init() &&
               sources.init() &&
@@ -1700,6 +1699,22 @@ Debugger::isDebuggee(const JSCompartment* compartment) const
     return compartment->isDebuggee() && debuggees.has(compartment->maybeGlobal());
 }
 
+void
+Debugger::logTenurePromotion(JSObject& obj, double when)
+{
+    auto* entry = js_new<TenurePromotionsEntry>(obj, when);
+    if (!entry)
+        CrashAtUnhandlableOOM("Debugger::logTenurePromotion");
+
+    tenurePromotionsLog.insertBack(entry);
+    if (tenurePromotionsLogLength >= maxTenurePromotionsLogLength) {
+        js_delete(tenurePromotionsLog.popFirst());
+        tenurePromotionsLogOverflowed = true;
+    } else {
+        tenurePromotionsLogLength++;
+    }
+}
+
 /* static */ Debugger::AllocationSite*
 Debugger::AllocationSite::create(JSContext* cx, HandleObject frame, double when, HandleObject obj)
 {
@@ -1742,7 +1757,7 @@ Debugger::appendAllocationSite(JSContext* cx, HandleObject obj, HandleSavedFrame
     allocationsLog.insertBack(allocSite);
 
     if (allocationsLogLength >= maxAllocationsLogLength) {
-        js_delete(allocationsLog.getFirst());
+        js_delete(allocationsLog.popFirst());
         allocationsLogOverflowed = true;
     } else {
         allocationsLogLength++;
@@ -1755,8 +1770,16 @@ void
 Debugger::emptyAllocationsLog()
 {
     while (!allocationsLog.isEmpty())
-        js_delete(allocationsLog.getFirst());
+        js_delete(allocationsLog.popFirst());
     allocationsLogLength = 0;
+}
+
+void
+Debugger::emptyTenurePromotionsLog()
+{
+    while (!tenurePromotionsLog.isEmpty())
+        js_delete(tenurePromotionsLog.popFirst());
+    tenurePromotionsLogLength = 0;
 }
 
 JSTrapStatus
@@ -2213,7 +2236,6 @@ Debugger::updateObservesAsmJSOnDebuggees(IsObserving observing)
     }
 }
 
-
 
 /*** Allocations Tracking *************************************************************************/
 
@@ -2314,6 +2336,24 @@ Debugger::markCrossCompartmentEdges(JSTracer* trc)
     environments.markCrossCompartmentEdges<DebuggerEnv_trace>(trc);
     scripts.markCrossCompartmentEdges<DebuggerScript_trace>(trc);
     sources.markCrossCompartmentEdges<DebuggerSource_trace>(trc);
+
+    // Because we don't have access to a `cx` inside
+    // `Debugger::logTenurePromotion`, we can't hold onto CCWs inside the log,
+    // and instead have unwrapped cross-compartment edges. We need to be sure to
+    // mark those here.
+    traceTenurePromotionsLog(trc);
+}
+
+/*
+ * Trace every entry in the promoted to tenured heap log.
+ */
+void
+Debugger::traceTenurePromotionsLog(JSTracer* trc)
+{
+    for (TenurePromotionsEntry* e = tenurePromotionsLog.getFirst(); e; e = e->getNext()) {
+        if (e->frame)
+            TraceEdge(trc, &e->frame, "Debugger::tenurePromotionsLog SavedFrame");
+    }
 }
 
 /*
@@ -2504,6 +2544,8 @@ Debugger::trace(JSTracer* trc)
             TraceEdge(trc, &s->ctorName, "allocation log constructor name");
     }
 
+    traceTenurePromotionsLog(trc);
+
     /* Trace the weak map from JSScript instances to Debugger.Script objects. */
     scripts.trace(trc);
 
@@ -2545,7 +2587,7 @@ Debugger::detachAllDebuggersFromGlobal(FreeOp* fop, GlobalObject* global)
 }
 
 /* static */ void
-Debugger::findCompartmentEdges(Zone* zone, js::gc::ComponentFinder<Zone>& finder)
+Debugger::findZoneEdges(Zone* zone, js::gc::ComponentFinder<Zone>& finder)
 {
     /*
      * For debugger cross compartment wrappers, add edges in the opposite
@@ -2560,7 +2602,8 @@ Debugger::findCompartmentEdges(Zone* zone, js::gc::ComponentFinder<Zone>& finder
         Zone* w = dbg->object->zone();
         if (w == zone || !w->isGCMarking())
             continue;
-        if (dbg->scripts.hasKeyInZone(zone) ||
+        if (dbg->debuggeeZones.has(zone) ||
+            dbg->scripts.hasKeyInZone(zone) ||
             dbg->sources.hasKeyInZone(zone) ||
             dbg->objects.hasKeyInZone(zone) ||
             dbg->environments.hasKeyInZone(zone))
@@ -2594,11 +2637,9 @@ const Class Debugger::jsclass = {
 /* static */ Debugger*
 Debugger::fromThisValue(JSContext* cx, const CallArgs& args, const char* fnname)
 {
-    if (!args.thisv().isObject()) {
-        ReportObjectRequired(cx);
+    JSObject* thisobj = NonNullObject(cx, args.thisv());
+    if (!thisobj)
         return nullptr;
-    }
-    JSObject* thisobj = &args.thisv().toObject();
     if (thisobj->getClass() != &Debugger::jsclass) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
                              "Debugger", fnname, thisobj->getClass()->name);
@@ -3155,10 +3196,9 @@ Debugger::construct(JSContext* cx, unsigned argc, Value* vp)
 
     /* Check that the arguments, if any, are cross-compartment wrappers. */
     for (unsigned i = 0; i < args.length(); i++) {
-        const Value& arg = args[i];
-        if (!arg.isObject())
-            return ReportObjectRequired(cx);
-        JSObject* argobj = &arg.toObject();
+        JSObject* argobj = NonNullObject(cx, args[i]);
+        if (!argobj)
+            return false;
         if (!argobj->is<CrossCompartmentWrapperObject>()) {
             JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_CCW_REQUIRED,
                                  "Debugger");
@@ -3257,39 +3297,100 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
 
     /*
      * For global to become this js::Debugger's debuggee:
-     * - global must be in this->debuggees,
-     * - this js::Debugger must be in global->getDebuggers(), and
-     * - JSCompartment::isDebuggee()'s bit must be set.
-     * - If we are tracking allocations, the SavedStacksMetadataCallback must be
-     *   installed for this compartment.
-     * All four indications must be kept consistent.
+     *
+     * 1. global must be in this->debuggees,
+     * 2. this js::Debugger must be in global->getDebuggers(),
+     * 3. it must be in zone->getDebuggers(),
+     * 4. JSCompartment::isDebuggee()'s bit must be set, and
+     * 5. if we are tracking allocations, the SavedStacksMetadataCallback must be
+     *    installed for this compartment.
+     *
+     * All five indications must be kept consistent.
      */
+
+    bool inDebuggees = false;
+    bool inGlobalDebuggers = false;
+    bool inZoneDebuggers = false;
+    bool inDebuggeeZones = false;
+
     AutoCompartment ac(cx, global);
-    GlobalObject::DebuggerVector* v = GlobalObject::getOrCreateDebuggers(cx, global);
-    if (!v || !v->append(this)) {
-        ReportOutOfMemory(cx);
-    } else {
-        if (!debuggees.put(global)) {
-            ReportOutOfMemory(cx);
-        } else {
-            if (!trackingAllocationSites || Debugger::addAllocationsTracking(cx, *global)) {
-                debuggeeCompartment->setIsDebuggee();
-                debuggeeCompartment->updateDebuggerObservesAsmJS();
-                if (!observesAllExecution())
-                    return true;
-                if (ensureExecutionObservabilityOfCompartment(cx, debuggeeCompartment))
-                    return true;
-            }
+    Zone* zone = global->zone();
 
-            /* Maintain consistency on error. */
-            debuggees.remove(global);
-        }
+    auto* globalDebuggers = GlobalObject::getOrCreateDebuggers(cx, global);
+    if (!globalDebuggers)
+        goto error;
+    if (!globalDebuggers->append(this))
+        goto oom;
+    inGlobalDebuggers = true;
 
-        MOZ_ASSERT(v->back() == this);
-        v->popBack();
+    if (!debuggees.put(global))
+        goto oom;
+    inDebuggees = true;
+
+    Zone::DebuggerVector* zoneDebuggers;
+    if (!debuggeeZones.has(zone)) {
+        zoneDebuggers = zone->getOrCreateDebuggers(cx);
+        if (!zoneDebuggers)
+            goto error;
+        if (!zoneDebuggers->append(this))
+            goto oom;
+        inZoneDebuggers = true;
+
+        if (!debuggeeZones.put(zone))
+            goto oom;
+        inDebuggeeZones = true;
     }
 
+    if (trackingAllocationSites && !Debugger::addAllocationsTracking(cx, *global))
+        goto error;
+
+    debuggeeCompartment->setIsDebuggee();
+    debuggeeCompartment->updateDebuggerObservesAsmJS();
+
+    if (observesAllExecution() && !ensureExecutionObservabilityOfCompartment(cx, debuggeeCompartment))
+        goto error;
+
+    return true;
+
+  oom:
+    ReportOutOfMemory(cx);
+    // Fall through...
+
+  error:
+    // Maintain consistency on error.
+    if (inGlobalDebuggers)
+        globalDebuggers->popBack();
+    if (inDebuggees)
+        debuggees.remove(global);
+    if (inZoneDebuggers)
+        zoneDebuggers->popBack();
+    if (inDebuggeeZones)
+        debuggeeZones.remove(zone);
     return false;
+}
+
+bool
+Debugger::recomputeDebuggeeZoneSet()
+{
+    debuggeeZones.clear();
+    for (auto range = debuggees.all(); !range.empty(); range.popFront()) {
+        if (!debuggeeZones.put(range.front()->zone()))
+            return false;
+    }
+    return true;
+}
+
+template<typename V>
+static Debugger**
+findDebuggerInVector(Debugger* dbg, V* vec)
+{
+    Debugger** p;
+    for (p = vec->begin(); p != vec->end(); p++) {
+        if (*p == dbg)
+            break;
+    }
+    MOZ_ASSERT(p != vec->end());
+    return p;
 }
 
 void
@@ -3302,6 +3403,7 @@ Debugger::removeDebuggeeGlobal(FreeOp* fop, GlobalObject* global,
      * to avoid invalidating the live enumerator.
      */
     MOZ_ASSERT(debuggees.has(global));
+    MOZ_ASSERT(debuggeeZones.has(global->zone()));
     MOZ_ASSERT_IF(debugEnum, debugEnum->front() == global);
 
     /*
@@ -3323,23 +3425,31 @@ Debugger::removeDebuggeeGlobal(FreeOp* fop, GlobalObject* global,
         }
     }
 
-    GlobalObject::DebuggerVector* v = global->getDebuggers();
-    Debugger** p;
-    for (p = v->begin(); p != v->end(); p++) {
-        if (*p == this)
-            break;
-    }
-    MOZ_ASSERT(p != v->end());
+    auto *globalDebuggersVector = global->getDebuggers();
+    auto *zoneDebuggersVector = global->zone()->getDebuggers();
 
     /*
-     * The relation must be removed from up to three places: *v and debuggees
-     * for sure, and possibly the compartment's debuggee set.
+     * The relation must be removed from up to three places:
+     * globalDebuggersVector and debuggees for sure, and possibly the
+     * compartment's debuggee set.
+     *
+     * The debuggee zone set is recomputed on demand. This avoids refcounting
+     * and in practice we have relatively few debuggees that tend to all be in
+     * the same zone. If after recomputing the debuggee zone set, this global's
+     * zone is not in the set, then we must remove ourselves from the zone's
+     * vector of observing debuggers.
      */
-    v->erase(p);
+    globalDebuggersVector->erase(findDebuggerInVector(this, globalDebuggersVector));
+
     if (debugEnum)
         debugEnum->removeFront();
     else
         debuggees.remove(global);
+
+    if (!recomputeDebuggeeZoneSet())
+        CrashAtUnhandlableOOM("Debugger::removeDebuggeeGlobal");
+    if (!debuggeeZones.has(global->zone()))
+        zoneDebuggersVector->erase(findDebuggerInVector(this, zoneDebuggersVector));
 
     /* Remove all breakpoints for the debuggee. */
     Breakpoint* nextbp;
@@ -4444,11 +4554,9 @@ Debugger::wrapScript(JSContext* cx, HandleScript script)
 static JSObject*
 DebuggerScript_check(JSContext* cx, const Value& v, const char* clsname, const char* fnname)
 {
-    if (!v.isObject()) {
-        ReportObjectRequired(cx);
+    JSObject* thisobj = NonNullObject(cx, v);
+    if (!thisobj)
         return nullptr;
-    }
-    JSObject* thisobj = &v.toObject();
     if (thisobj->getClass() != &DebuggerScript_class) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
                              clsname, fnname, thisobj->getClass()->name);
@@ -5471,12 +5579,9 @@ DebuggerSource_construct(JSContext* cx, unsigned argc, Value* vp)
 static NativeObject*
 DebuggerSource_checkThis(JSContext* cx, const CallArgs& args, const char* fnname)
 {
-    if (!args.thisv().isObject()) {
-        ReportObjectRequired(cx);
+    JSObject* thisobj = NonNullObject(cx, args.thisv());
+    if (!thisobj)
         return nullptr;
-    }
-
-    JSObject* thisobj = &args.thisv().toObject();
     if (thisobj->getClass() != &DebuggerSource_class) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
                              "Debugger.Source", fnname, thisobj->getClass()->name);
@@ -5769,11 +5874,9 @@ const Class DebuggerFrame_class = {
 static NativeObject*
 CheckThisFrame(JSContext* cx, const CallArgs& args, const char* fnname, bool checkLive)
 {
-    if (!args.thisv().isObject()) {
-        ReportObjectRequired(cx);
+    JSObject* thisobj = NonNullObject(cx, args.thisv());
+    if (!thisobj)
         return nullptr;
-    }
-    JSObject* thisobj = &args.thisv().toObject();
     if (thisobj->getClass() != &DebuggerFrame_class) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
                              "Debugger.Frame", fnname, thisobj->getClass()->name);
@@ -5992,11 +6095,9 @@ DebuggerArguments_getArg(JSContext* cx, unsigned argc, Value* vp)
     int32_t i = args.callee().as<JSFunction>().getExtendedSlot(0).toInt32();
 
     /* Check that the this value is an Arguments object. */
-    if (!args.thisv().isObject()) {
-        ReportObjectRequired(cx);
+    RootedObject argsobj(cx, NonNullObject(cx, args.thisv()));
+    if (!argsobj)
         return false;
-    }
-    RootedObject argsobj(cx, &args.thisv().toObject());
     if (argsobj->getClass() != &DebuggerArguments_class) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
                              "Arguments", "getArgument", argsobj->getClass()->name);
@@ -6539,11 +6640,9 @@ const Class DebuggerObject_class = {
 static NativeObject*
 DebuggerObject_checkThis(JSContext* cx, const CallArgs& args, const char* fnname)
 {
-    if (!args.thisv().isObject()) {
-        ReportObjectRequired(cx);
+    JSObject* thisobj = NonNullObject(cx, args.thisv());
+    if (!thisobj)
         return nullptr;
-    }
-    JSObject* thisobj = &args.thisv().toObject();
     if (thisobj->getClass() != &DebuggerObject_class) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
                              "Debugger.Object", fnname, thisobj->getClass()->name);
@@ -6880,24 +6979,30 @@ null(CallArgs& args)
     return true;
 }
 
+/* static */ JSObject*
+Debugger::getObjectAllocationSite(JSObject& obj)
+{
+    JSObject* metadata = GetObjectMetadata(&obj);
+    if (!metadata)
+        return nullptr;
+
+    MOZ_ASSERT(!metadata->is<WrapperObject>());
+    return SavedFrame::isSavedFrameAndNotProto(*metadata)
+        ? metadata
+        : nullptr;
+}
+
 static bool
 DebuggerObject_getAllocationSite(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT_REFERENT(cx, argc, vp, "get allocationSite", args, obj);
 
-    RootedObject metadata(cx, GetObjectMetadata(obj));
-    if (!metadata)
+    RootedObject allocSite(cx, Debugger::getObjectAllocationSite(*obj));
+    if (!allocSite)
         return null(args);
-
-    MOZ_ASSERT(!metadata->is<WrapperObject>());
-
-    if (!SavedFrame::isSavedFrameAndNotProto(*metadata))
-        return null(args);
-
-    if (!cx->compartment()->wrap(cx, &metadata))
+    if (!cx->compartment()->wrap(cx, &allocSite))
         return false;
-
-    args.rval().setObject(*metadata);
+    args.rval().setObject(*allocSite);
     return true;
 }
 
@@ -7481,11 +7586,9 @@ static NativeObject*
 DebuggerEnv_checkThis(JSContext* cx, const CallArgs& args, const char* fnname,
                       bool requireDebuggee = true)
 {
-    if (!args.thisv().isObject()) {
-        ReportObjectRequired(cx);
+    JSObject* thisobj = NonNullObject(cx, args.thisv());
+    if (!thisobj)
         return nullptr;
-    }
-    JSObject* thisobj = &args.thisv().toObject();
     if (thisobj->getClass() != &DebuggerEnv_class) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
                              "Debugger.Environment", fnname, thisobj->getClass()->name);

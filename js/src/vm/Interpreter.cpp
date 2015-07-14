@@ -612,7 +612,7 @@ struct AutoStopwatch final
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-}
+} // namespace js
 
 // MSVC with PGO inlines a lot of functions in RunScript, resulting in large
 // stack frames and stack overflow issues, see bug 1167883. Turn off PGO to
@@ -2317,7 +2317,13 @@ CASE(JSOP_SETCONST)
 END_CASE(JSOP_SETCONST)
 
 CASE(JSOP_BINDINTRINSIC)
-    PUSH_OBJECT(*cx->global()->intrinsicsHolder());
+{
+    NativeObject* holder = GlobalObject::getIntrinsicsHolder(cx, cx->global());
+    if (!holder)
+        goto error;
+
+    PUSH_OBJECT(*holder);
+}
 END_CASE(JSOP_BINDINTRINSIC)
 
 CASE(JSOP_BINDGNAME)

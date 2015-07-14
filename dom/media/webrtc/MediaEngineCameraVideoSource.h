@@ -126,4 +126,5 @@ private:
 
 
 } // namespace mozilla
+
 #endif // MediaEngineCameraVideoSource_h

@@ -40,25 +40,25 @@ namespace mozilla {
 
 namespace jsipc {
 class CpowHolder;
-}
+} // namespace jsipc
 
 namespace layers {
 struct FrameMetrics;
 struct TextureFactoryIdentifier;
-}
+} // namespace layers
 
 namespace layout {
 class RenderFrameParent;
-}
+} // namespace layout
 
 namespace widget {
 struct IMENotification;
-}
+} // namespace widget
 
 namespace gfx {
 class SourceSurface;
 class DataSourceSurface;
-}
+} // namespace gfx
 
 namespace dom {
 
@@ -125,7 +125,8 @@ public:
     void AddWindowListeners();
     void DidRefresh() override;
 
-    virtual bool RecvMoveFocus(const bool& aForward) override;
+    virtual bool RecvMoveFocus(const bool& aForward,
+                               const bool& aForDocumentNavigation) override;
     virtual bool RecvEvent(const RemoteDOMEvent& aEvent) override;
     virtual bool RecvReplyKeyEvent(const WidgetKeyboardEvent& aEvent) override;
     virtual bool RecvDispatchAfterKeyboardEvent(const WidgetKeyboardEvent& aEvent) override;
@@ -167,8 +168,8 @@ public:
                                       override;
     virtual bool RecvNotifyIMETextChange(const ContentCache& aContentCache,
                                          const uint32_t& aStart,
-                                         const uint32_t& aEnd,
-                                         const uint32_t& aNewEnd,
+                                         const uint32_t& aRemovedEnd,
+                                         const uint32_t& aAddedEnd,
                                          const bool& aCausedByComposition) override;
     virtual bool RecvNotifyIMESelectedCompositionRect(const ContentCache& aContentCache) override;
     virtual bool RecvNotifyIMESelection(const ContentCache& aContentCache,
@@ -177,6 +178,7 @@ public:
     virtual bool RecvNotifyIMEMouseButtonEvent(const widget::IMENotification& aEventMessage,
                                                bool* aConsumedByIME) override;
     virtual bool RecvNotifyIMEPositionChange(const ContentCache& aContentCache) override;
+    virtual bool RecvOnEventNeedingAckReceived(const uint32_t& aMessage) override;
     virtual bool RecvEndIMEComposition(const bool& aCancel,
                                        bool* aNoCompositionEvent,
                                        nsString* aComposition) override;
@@ -460,6 +462,9 @@ protected:
     virtual bool RecvSetDimensions(const uint32_t& aFlags,
                                    const int32_t& aX, const int32_t& aY,
                                    const int32_t& aCx, const int32_t& aCy) override;
+
+    virtual bool RecvAudioChannelActivityNotification(const uint32_t& aAudioChannel,
+                                                      const bool& aActive) override;
 
     bool InitBrowserConfiguration(const nsCString& aURI,
                                   BrowserConfiguration& aConfiguration);

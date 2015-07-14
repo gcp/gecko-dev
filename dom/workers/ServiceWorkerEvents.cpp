@@ -147,6 +147,8 @@ class RespondWithHandler final : public PromiseNativeHandler
   nsMainThreadPtrHandle<ServiceWorker> mServiceWorker;
   RequestMode mRequestMode;
 public:
+  NS_DECL_ISUPPORTS
+
   RespondWithHandler(nsMainThreadPtrHandle<nsIInterceptedChannel>& aChannel,
                      nsMainThreadPtrHandle<ServiceWorker>& aServiceWorker,
                      RequestMode aRequestMode)
@@ -161,6 +163,8 @@ public:
   void RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override;
 
   void CancelRequest();
+private:
+  ~RespondWithHandler() {}
 };
 
 struct RespondWithClosure
@@ -215,6 +219,8 @@ public:
     mOwner = nullptr;
   }
 };
+
+NS_IMPL_ISUPPORTS0(RespondWithHandler)
 
 void
 RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue)
@@ -306,7 +312,7 @@ RespondWithHandler::CancelRequest()
   NS_DispatchToMainThread(runnable);
 }
 
-} // anonymous namespace
+} // namespace
 
 void
 FetchEvent::RespondWith(const ResponseOrPromise& aArg, ErrorResult& aRv)

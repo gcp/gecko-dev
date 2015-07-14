@@ -8,6 +8,7 @@
 
 #include "TabParent.h"
 
+#include "AudioChannelService.h"
 #include "AppProcessChecker.h"
 #include "mozIApplication.h"
 #ifdef ACCESSIBILITY
@@ -224,7 +225,7 @@ private:
             // Intentionally leak the runnable (but not the fd) rather
             // than crash when trying to release a main thread object
             // off the main thread.
-            mTabParent.forget();
+            mozilla::unused << mTabParent.forget();
             CloseFile();
         }
     }
@@ -508,13 +509,17 @@ TabParent::ActorDestroy(ActorDestroyReason why)
 }
 
 bool
-TabParent::RecvMoveFocus(const bool& aForward)
+TabParent::RecvMoveFocus(const bool& aForward, const bool& aForDocumentNavigation)
 {
   nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
   if (fm) {
     nsCOMPtr<nsIDOMElement> dummy;
-    uint32_t type = aForward ? uint32_t(nsIFocusManager::MOVEFOCUS_FORWARD)
-                             : uint32_t(nsIFocusManager::MOVEFOCUS_BACKWARD);
+
+    uint32_t type = aForward ?
+      (aForDocumentNavigation ? static_cast<uint32_t>(nsIFocusManager::MOVEFOCUS_FORWARDDOC) :
+                                static_cast<uint32_t>(nsIFocusManager::MOVEFOCUS_FORWARD)) :
+      (aForDocumentNavigation ? static_cast<uint32_t>(nsIFocusManager::MOVEFOCUS_BACKWARDDOC) :
+                                static_cast<uint32_t>(nsIFocusManager::MOVEFOCUS_BACKWARD));
     nsCOMPtr<nsIDOMElement> frame = do_QueryInterface(mFrameElement);
     fm->MoveFocus(nullptr, frame, type, nsIFocusManager::FLAG_BYKEY,
                   getter_AddRefs(dummy));
@@ -1971,8 +1976,8 @@ TabParent::RecvNotifyIMEFocus(const bool& aFocus,
 bool
 TabParent::RecvNotifyIMETextChange(const ContentCache& aContentCache,
                                    const uint32_t& aStart,
-                                   const uint32_t& aEnd,
-                                   const uint32_t& aNewEnd,
+                                   const uint32_t& aRemovedEnd,
+                                   const uint32_t& aAddedEnd,
                                    const bool& aCausedByComposition)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
@@ -1990,12 +1995,12 @@ TabParent::RecvNotifyIMETextChange(const ContentCache& aContentCache,
 
   IMENotification notification(NOTIFY_IME_OF_TEXT_CHANGE);
   notification.mTextChangeData.mStartOffset = aStart;
-  notification.mTextChangeData.mOldEndOffset = aEnd;
-  notification.mTextChangeData.mNewEndOffset = aNewEnd;
+  notification.mTextChangeData.mRemovedEndOffset = aRemovedEnd;
+  notification.mTextChangeData.mAddedEndOffset = aAddedEnd;
   notification.mTextChangeData.mCausedByComposition = aCausedByComposition;
 
   mContentCache.AssignContent(aContentCache, &notification);
-  IMEStateManager::NotifyIME(notification, widget, true);
+  mContentCache.MaybeNotifyIME(widget, notification);
   return true;
 }
 
@@ -2010,8 +2015,7 @@ TabParent::RecvNotifyIMESelectedCompositionRect(
 
   IMENotification notification(NOTIFY_IME_OF_COMPOSITION_UPDATE);
   mContentCache.AssignContent(aContentCache, &notification);
-
-  IMEStateManager::NotifyIME(notification, widget, true);
+  mContentCache.MaybeNotifyIME(widget, notification);
   return true;
 }
 
@@ -2031,10 +2035,9 @@ TabParent::RecvNotifyIMESelection(const ContentCache& aContentCache,
   if (updatePreference.WantSelectionChange() &&
       (updatePreference.WantChangesCausedByComposition() ||
        !aCausedByComposition)) {
-    mContentCache.InitNotification(notification);
     notification.mSelectionChangeData.mCausedByComposition =
       aCausedByComposition;
-    IMEStateManager::NotifyIME(notification, widget, true);
+    mContentCache.MaybeNotifyIME(widget, notification);
   }
   return true;
 }
@@ -2083,6 +2086,23 @@ TabParent::RecvNotifyIMEPositionChange(const ContentCache& aContentCache)
   if (updatePreference.WantPositionChanged()) {
     IMEStateManager::NotifyIME(notification, widget, true);
   }
+  return true;
+}
+
+bool
+TabParent::RecvOnEventNeedingAckReceived(const uint32_t& aMessage)
+{
+  // This is called when the child process receives WidgetCompositionEvent or
+  // WidgetSelectionEvent.
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) {
+    return true;
+  }
+
+  // While calling OnEventNeedingAckReceived(), TabParent *might* be destroyed
+  // since it may send notifications to IME.
+  nsRefPtr<TabParent> kungFuDeathGrip(this);
+  mContentCache.OnEventNeedingAckReceived(widget, aMessage);
   return true;
 }
 
@@ -2277,6 +2297,7 @@ TabParent::SendSelectionEvent(WidgetSelectionEvent& event)
   if (!widget) {
     return true;
   }
+  mContentCache.OnSelectionEvent(event);
   return PBrowserParent::SendSelectionEvent(event);
 }
 
@@ -2630,6 +2651,29 @@ TabParent::RecvGetRenderFrameInfo(PRenderFrameParent* aRenderFrame,
   return true;
 }
 
+bool
+TabParent::RecvAudioChannelActivityNotification(const uint32_t& aAudioChannel,
+                                                const bool& aActive)
+{
+  if (aAudioChannel >= NUMBER_OF_AUDIO_CHANNELS) {
+    return false;
+  }
+
+  nsCOMPtr<nsIObserverService> os = services::GetObserverService();
+  if (os) {
+    nsRefPtr<AudioChannelService> service = AudioChannelService::GetOrCreate();
+    nsAutoCString topic;
+    topic.Assign("audiochannel-activity-");
+    topic.Append(AudioChannelService::GetAudioChannelTable()[aAudioChannel].tag);
+
+    os->NotifyObservers(NS_ISUPPORTS_CAST(nsITabParent*, this),
+                        topic.get(),
+                        aActive ? MOZ_UTF16("active") : MOZ_UTF16("inactive"));
+  }
+
+  return true;
+}
+
 already_AddRefed<nsFrameLoader>
 TabParent::GetFrameLoader(bool aUseCachedFrameLoaderAfterDestroy) const
 {
@@ -2890,6 +2934,13 @@ void
 TabParent::SetHasContentOpener(bool aHasContentOpener)
 {
   mHasContentOpener = aHasContentOpener;
+}
+
+NS_IMETHODIMP
+TabParent::NavigateDocument(bool aForward)
+{
+  unused << SendNavigateDocument(aForward);
+  return NS_OK;
 }
 
 class LayerTreeUpdateRunnable final
@@ -3300,5 +3351,5 @@ FakeChannel::OnAuthCancelled(nsISupports *aContext, bool userCancel)
 }
 
 
-} // namespace tabs
+} // namespace dom
 } // namespace mozilla
