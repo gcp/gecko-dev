@@ -375,8 +375,8 @@ private: // data
   // Image locking.
   uint32_t                   mLockCount;
 
-  // Source data members
-  nsCString                  mSourceDataMimeType;
+  // The type of decoder this image needs. Computed from the MIME type in Init().
+  eDecoderType               mDecoderType;
 
   // How many times we've decoded this image.
   // This is currently only used for statistics
@@ -407,12 +407,8 @@ private: // data
   // The number of frames this image has.
   uint32_t                   mFrameCount;
 
-  // The number of times we've retried decoding this image.
-  uint8_t                    mRetryCount;
-
   // Boolean flags (clustered together to conserve space):
   bool                       mHasSize:1;       // Has SetSize() been called?
-  bool                       mDecodeOnlyOnDraw:1; // Decoding only on draw?
   bool                       mTransient:1;     // Is the image short-lived?
   bool                       mSyncLoad:1;      // Are we loading synchronously?
   bool                       mDiscardable:1;   // Is container discardable?

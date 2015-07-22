@@ -734,14 +734,14 @@ typedef void*
 
 /************************************************************************/
 
-static MOZ_ALWAYS_INLINE jsval
+static MOZ_ALWAYS_INLINE JS::Value
 JS_NumberValue(double d)
 {
     int32_t i;
     d = JS::CanonicalizeNaN(d);
     if (mozilla::NumberIsInt32(d, &i))
         return JS::Int32Value(i);
-    return DOUBLE_TO_JSVAL(d);
+    return JS::DoubleValue(d);
 }
 
 /************************************************************************/
@@ -936,17 +936,17 @@ JS_CallOnce(JSCallOnceType* once, JSInitCallback func);
 extern JS_PUBLIC_API(int64_t)
 JS_Now(void);
 
-/* Don't want to export data, so provide accessors for non-inline jsvals. */
-extern JS_PUBLIC_API(jsval)
+/* Don't want to export data, so provide accessors for non-inline Values. */
+extern JS_PUBLIC_API(JS::Value)
 JS_GetNaNValue(JSContext* cx);
 
-extern JS_PUBLIC_API(jsval)
+extern JS_PUBLIC_API(JS::Value)
 JS_GetNegativeInfinityValue(JSContext* cx);
 
-extern JS_PUBLIC_API(jsval)
+extern JS_PUBLIC_API(JS::Value)
 JS_GetPositiveInfinityValue(JSContext* cx);
 
-extern JS_PUBLIC_API(jsval)
+extern JS_PUBLIC_API(JS::Value)
 JS_GetEmptyStringValue(JSContext* cx);
 
 extern JS_PUBLIC_API(JSString*)
@@ -1597,10 +1597,11 @@ CurrentGlobalOrNull(JSContext* cx);
 } // namespace JS
 
 /*
- * Initialize the 'Reflect' object on a global object.
+ * Add 'Reflect.parse', a SpiderMonkey extension, to the Reflect object on the
+ * given global.
  */
-extern JS_PUBLIC_API(JSObject*)
-JS_InitReflect(JSContext* cx, JS::HandleObject global);
+extern JS_PUBLIC_API(bool)
+JS_InitReflectParse(JSContext* cx, JS::HandleObject global);
 
 /*
  * Add various profiling-related functions as properties of the given object.
@@ -2506,7 +2507,7 @@ JS_New(JSContext* cx, JS::HandleObject ctor, const JS::HandleValueArray& args);
 
 /*** Property descriptors ************************************************************************/
 
-struct JSPropertyDescriptor {
+struct JSPropertyDescriptor : public JS::StaticTraceable {
     JSObject* obj;
     unsigned attrs;
     JSGetterOp getter;
@@ -2517,9 +2518,8 @@ struct JSPropertyDescriptor {
       : obj(nullptr), attrs(0), getter(nullptr), setter(nullptr), value(JS::UndefinedValue())
     {}
 
+    static void trace(JSPropertyDescriptor* self, JSTracer* trc) { self->trace(trc); }
     void trace(JSTracer* trc);
-
-    static js::ThingRootKind rootKind() { return js::THING_ROOT_PROPERTY_DESCRIPTOR; }
 };
 
 namespace JS {
@@ -2527,7 +2527,7 @@ namespace JS {
 template <typename Outer>
 class PropertyDescriptorOperations
 {
-    const JSPropertyDescriptor * desc() const { return static_cast<const Outer*>(this)->extract(); }
+    const JSPropertyDescriptor* desc() const { return static_cast<const Outer*>(this)->extract(); }
 
     bool has(unsigned bit) const {
         MOZ_ASSERT(bit != 0);
@@ -2770,16 +2770,11 @@ class MutablePropertyDescriptorOperations : public PropertyDescriptorOperations<
 namespace js {
 
 template <>
-struct GCMethods<JSPropertyDescriptor> {
-    static JSPropertyDescriptor initial() { return JSPropertyDescriptor(); }
-};
-
-template <>
 class RootedBase<JSPropertyDescriptor>
-  : public JS::MutablePropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor> >
+  : public JS::MutablePropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor>>
 {
-    friend class JS::PropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor> >;
-    friend class JS::MutablePropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor> >;
+    friend class JS::PropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor>>;
+    friend class JS::MutablePropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor>>;
     const JSPropertyDescriptor* extract() const {
         return static_cast<const JS::Rooted<JSPropertyDescriptor>*>(this)->address();
     }
@@ -2790,9 +2785,9 @@ class RootedBase<JSPropertyDescriptor>
 
 template <>
 class HandleBase<JSPropertyDescriptor>
-  : public JS::PropertyDescriptorOperations<JS::Handle<JSPropertyDescriptor> >
+  : public JS::PropertyDescriptorOperations<JS::Handle<JSPropertyDescriptor>>
 {
-    friend class JS::PropertyDescriptorOperations<JS::Handle<JSPropertyDescriptor> >;
+    friend class JS::PropertyDescriptorOperations<JS::Handle<JSPropertyDescriptor>>;
     const JSPropertyDescriptor* extract() const {
         return static_cast<const JS::Handle<JSPropertyDescriptor>*>(this)->address();
     }
@@ -2800,10 +2795,10 @@ class HandleBase<JSPropertyDescriptor>
 
 template <>
 class MutableHandleBase<JSPropertyDescriptor>
-  : public JS::MutablePropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor> >
+  : public JS::MutablePropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor>>
 {
-    friend class JS::PropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor> >;
-    friend class JS::MutablePropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor> >;
+    friend class JS::PropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor>>;
+    friend class JS::MutablePropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor>>;
     const JSPropertyDescriptor* extract() const {
         return static_cast<const JS::MutableHandle<JSPropertyDescriptor>*>(this)->address();
     }
@@ -3191,11 +3186,11 @@ JS_ReleaseMappedArrayBufferContents(void* contents, size_t length);
 extern JS_PUBLIC_API(JSIdArray*)
 JS_Enumerate(JSContext* cx, JS::HandleObject obj);
 
-extern JS_PUBLIC_API(jsval)
+extern JS_PUBLIC_API(JS::Value)
 JS_GetReservedSlot(JSObject* obj, uint32_t index);
 
 extern JS_PUBLIC_API(void)
-JS_SetReservedSlot(JSObject* obj, uint32_t index, jsval v);
+JS_SetReservedSlot(JSObject* obj, uint32_t index, JS::Value v);
 
 /************************************************************************/
 
@@ -4915,6 +4910,9 @@ JS_DropExceptionState(JSContext* cx, JSExceptionState* state);
 extern JS_PUBLIC_API(JSErrorReport*)
 JS_ErrorFromException(JSContext* cx, JS::HandleObject obj);
 
+extern JS_PUBLIC_API(JSObject*)
+ExceptionStackOrNull(JSContext* cx, JS::HandleObject obj);
+
 /*
  * Throws a StopIteration exception on cx.
  */
@@ -4922,7 +4920,7 @@ extern JS_PUBLIC_API(bool)
 JS_ThrowStopIteration(JSContext* cx);
 
 extern JS_PUBLIC_API(bool)
-JS_IsStopIteration(jsval v);
+JS_IsStopIteration(JS::Value v);
 
 extern JS_PUBLIC_API(intptr_t)
 JS_GetCurrentThread();

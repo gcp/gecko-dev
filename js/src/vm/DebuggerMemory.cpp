@@ -14,6 +14,7 @@
 #include <stdlib.h>
 
 #include "jsalloc.h"
+#include "jscntxt.h"
 #include "jscompartment.h"
 
 #include "builtin/MapObject.h"
@@ -385,6 +386,10 @@ DebuggerMemory::drainTenurePromotionsLog(JSContext* cx, unsigned argc, Value* vp
             return false;
         RootedValue classNameValue(cx, StringValue(className));
         if (!DefineProperty(cx, obj, cx->names().class_, classNameValue))
+            return false;
+
+        RootedValue sizeValue(cx, NumberValue(entry->size));
+        if (!DefineProperty(cx, obj, cx->names().size, sizeValue))
             return false;
 
         result->setDenseElement(i, ObjectValue(*obj));

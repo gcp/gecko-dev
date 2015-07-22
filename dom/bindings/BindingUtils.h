@@ -35,7 +35,6 @@
 #include "qsObjectHelper.h"
 #include "xpcpublic.h"
 #include "nsIVariant.h"
-#include "pldhash.h" // For PLDHashOperator
 
 #include "nsWrapperCacheInlines.h"
 
@@ -2146,17 +2145,13 @@ public:
   }
 };
 
-// XXXbz It's not clear whether it's better to add a pldhash dependency here
-// (for PLDHashOperator) or add a BindingUtils.h dependency (for
-// SequenceTracer) to MozMap.h...
 template<typename T>
-static PLDHashOperator
+static void
 TraceMozMapValue(T* aValue, void* aClosure)
 {
   JSTracer* trc = static_cast<JSTracer*>(aClosure);
   // Act like it's a one-element sequence to leverage all that infrastructure.
   SequenceTracer<T>::TraceSequence(trc, aValue, aValue + 1);
-  return PL_DHASH_NEXT;
 }
 
 template<typename T>
@@ -3099,7 +3094,12 @@ AssertReturnTypeMatchesJitinfo(const JSJitInfo* aJitinfo,
 // Returns true if aObj's global has any of the permissions named in aPermissions
 // set to nsIPermissionManager::ALLOW_ACTION. aPermissions must be null-terminated.
 bool
-CheckPermissions(JSContext* aCx, JSObject* aObj, const char* const aPermissions[]);
+CheckAnyPermissions(JSContext* aCx, JSObject* aObj, const char* const aPermissions[]);
+
+// Returns true if aObj's global has all of the permissions named in aPermissions
+// set to nsIPermissionManager::ALLOW_ACTION. aPermissions must be null-terminated.
+bool
+CheckAllPermissions(JSContext* aCx, JSObject* aObj, const char* const aPermissions[]);
 
 // This function is called by the bindings layer for methods/getters/setters
 // that are not safe to be called in prerendering mode.  It checks to make sure

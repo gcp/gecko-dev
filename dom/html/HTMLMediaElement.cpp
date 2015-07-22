@@ -1172,25 +1172,6 @@ nsresult HTMLMediaElement::LoadResource()
     return NS_ERROR_FAILURE;
   }
 
-  MOZ_ASSERT(IsAnyOfHTMLElements(nsGkAtoms::audio, nsGkAtoms::video));
-  nsContentPolicyType contentPolicyType = IsHTMLElement(nsGkAtoms::audio) ?
-    nsIContentPolicy::TYPE_INTERNAL_AUDIO : nsIContentPolicy::TYPE_INTERNAL_VIDEO;
-
-  int16_t shouldLoad = nsIContentPolicy::ACCEPT;
-  nsresult rv = NS_CheckContentLoadPolicy(contentPolicyType,
-                                          mLoadingSrc,
-                                          NodePrincipal(),
-                                          static_cast<Element*>(this),
-                                          EmptyCString(), // mime type
-                                          nullptr, // extra
-                                          &shouldLoad,
-                                          nsContentUtils::GetContentPolicy(),
-                                          nsContentUtils::GetSecurityManager());
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (NS_CP_REJECTED(shouldLoad)) {
-    return NS_ERROR_FAILURE;
-  }
-
   // Set the media element's CORS mode only when loading a resource
   mCORSMode = AttrValueToCORSMode(GetParsedAttr(nsGkAtoms::crossorigin));
 
@@ -1212,7 +1193,7 @@ nsresult HTMLMediaElement::LoadResource()
 
   if (IsMediaStreamURI(mLoadingSrc)) {
     nsRefPtr<DOMMediaStream> stream;
-    rv = NS_GetStreamForMediaStreamURI(mLoadingSrc, getter_AddRefs(stream));
+    nsresult rv = NS_GetStreamForMediaStreamURI(mLoadingSrc, getter_AddRefs(stream));
     if (NS_FAILED(rv)) {
       nsAutoString spec;
       GetCurrentSrc(spec);
@@ -1240,27 +1221,31 @@ nsresult HTMLMediaElement::LoadResource()
     return FinishDecoderSetup(decoder, resource, nullptr, nullptr);
   }
 
-  nsSecurityFlags securityFlags = nsILoadInfo::SEC_NORMAL;
-  if (nsContentUtils::ChannelShouldInheritPrincipal(NodePrincipal(),
-                                                    mLoadingSrc,
-                                                    false, // aInheritForAboutBlank
-                                                    false // aForceInherit
-                                                    )) {
-    securityFlags = nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL;
+  // determine what security checks need to be performed in AsyncOpen2().
+  nsSecurityFlags securityFlags =
+    ShouldCheckAllowOrigin() ? nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS :
+                               nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS;
+
+  if (GetCORSMode() == CORS_USE_CREDENTIALS) {
+    securityFlags |= nsILoadInfo::SEC_REQUIRE_CORS_WITH_CREDENTIALS;
   }
+
+  MOZ_ASSERT(IsAnyOfHTMLElements(nsGkAtoms::audio, nsGkAtoms::video));
+  nsContentPolicyType contentPolicyType = IsHTMLElement(nsGkAtoms::audio) ?
+    nsIContentPolicy::TYPE_INTERNAL_AUDIO : nsIContentPolicy::TYPE_INTERNAL_VIDEO;
 
   nsCOMPtr<nsILoadGroup> loadGroup = GetDocumentLoadGroup();
   nsCOMPtr<nsIChannel> channel;
-  rv = NS_NewChannel(getter_AddRefs(channel),
-                     mLoadingSrc,
-                     static_cast<Element*>(this),
-                     securityFlags,
-                     contentPolicyType,
-                     loadGroup,
-                     nullptr,   // aCallbacks
-                     nsICachingChannel::LOAD_BYPASS_LOCAL_CACHE_IF_BUSY |
-                     nsIChannel::LOAD_MEDIA_SNIFFER_OVERRIDES_CONTENT_TYPE |
-                     nsIChannel::LOAD_CALL_CONTENT_SNIFFERS);
+  nsresult rv = NS_NewChannel(getter_AddRefs(channel),
+                              mLoadingSrc,
+                              static_cast<Element*>(this),
+                              securityFlags,
+                              contentPolicyType,
+                              loadGroup,
+                              nullptr,   // aCallbacks
+                              nsICachingChannel::LOAD_BYPASS_LOCAL_CACHE_IF_BUSY |
+                              nsIChannel::LOAD_MEDIA_SNIFFER_OVERRIDES_CONTENT_TYPE |
+                              nsIChannel::LOAD_CALL_CONTENT_SNIFFERS);
 
   NS_ENSURE_SUCCESS(rv,rv);
 
@@ -1274,24 +1259,6 @@ nsresult HTMLMediaElement::LoadResource()
 
   channel->SetNotificationCallbacks(loadListener);
 
-  nsCOMPtr<nsIStreamListener> listener;
-  if (ShouldCheckAllowOrigin()) {
-    nsRefPtr<nsCORSListenerProxy> corsListener =
-      new nsCORSListenerProxy(loadListener,
-                              NodePrincipal(),
-                              GetCORSMode() == CORS_USE_CREDENTIALS);
-    rv = corsListener->Init(channel, DataURIHandling::Allow);
-    NS_ENSURE_SUCCESS(rv, rv);
-    listener = corsListener;
-  } else {
-    rv = nsContentUtils::GetSecurityManager()->
-           CheckLoadURIWithPrincipal(NodePrincipal(),
-                                     mLoadingSrc,
-                                     nsIScriptSecurityManager::STANDARD);
-    listener = loadListener;
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
   nsCOMPtr<nsIHttpChannel> hc = do_QueryInterface(channel);
   if (hc) {
     // Use a byte range request from the start of the resource.
@@ -1304,7 +1271,7 @@ nsresult HTMLMediaElement::LoadResource()
     SetRequestHeaders(hc);
   }
 
-  rv = channel->AsyncOpen(listener, nullptr);
+  rv = channel->AsyncOpen2(loadListener);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Else the channel must be open and starting to download. If it encounters
@@ -1831,7 +1798,7 @@ void HTMLMediaElement::SetMutedInternal(uint32_t aMuted)
 
 void HTMLMediaElement::SetVolumeInternal()
 {
-  float effectiveVolume = mMuted ? 0.0f : float(mVolume * mAudioChannelVolume);
+  float effectiveVolume = ComputedVolume();
 
   if (mDecoder) {
     mDecoder->SetVolume(effectiveVolume);
@@ -3217,11 +3184,6 @@ void HTMLMediaElement::MetadataLoaded(const MediaInfo* aInfo,
   mLoadedDataFired = false;
   ChangeReadyState(nsIDOMHTMLMediaElement::HAVE_METADATA);
 
-  if (mIsEncrypted) {
-    nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-    obs->NotifyObservers(static_cast<nsIContent*>(this), "media-eme-metadataloaded", nullptr);
-  }
-
   DispatchAsyncEvent(NS_LITERAL_STRING("durationchange"));
   if (IsVideo() && HasVideo()) {
     DispatchAsyncEvent(NS_LITERAL_STRING("resize"));
@@ -3574,6 +3536,12 @@ HTMLMediaElement::UpdateReadyStateInternal()
     // We are playing a stream that has video and a video frame is now set.
     // This means we have all metadata needed to change ready state.
     MediaInfo mediaInfo = mMediaInfo;
+    if (hasAudio) {
+      mediaInfo.EnableAudio();
+    }
+    if (hasVideo) {
+      mediaInfo.EnableVideo();
+    }
     MetadataLoaded(&mediaInfo, nsAutoPtr<const MetadataTags>(nullptr));
   }
 
@@ -4045,7 +4013,10 @@ HTMLMediaElement::NotifyOwnerDocumentActivityChangedInternal()
     mDecoder->NotifyOwnerActivityChanged();
   }
 
-  bool pauseElement = !IsActive() || (mMuted & MUTED_BY_AUDIO_CHANNEL);
+  bool pauseElement = !IsActive();
+#ifdef MOZ_B2G
+  pauseElement |= ComputedMuted();
+#endif
 
   SuspendOrResumeElement(pauseElement, !IsActive());
 
@@ -4475,19 +4446,21 @@ nsresult HTMLMediaElement::UpdateChannelMuteState(float aVolume, bool aMuted)
   }
 
   // We have to mute this channel.
-  if (aMuted && !(mMuted & MUTED_BY_AUDIO_CHANNEL)) {
+  if (aMuted && !ComputedMuted()) {
     SetMutedInternal(mMuted | MUTED_BY_AUDIO_CHANNEL);
     if (UseAudioChannelAPI()) {
       DispatchAsyncEvent(NS_LITERAL_STRING("mozinterruptbegin"));
     }
-  } else if (!aMuted && (mMuted & MUTED_BY_AUDIO_CHANNEL)) {
+  } else if (!aMuted && ComputedMuted()) {
     SetMutedInternal(mMuted & ~MUTED_BY_AUDIO_CHANNEL);
     if (UseAudioChannelAPI()) {
       DispatchAsyncEvent(NS_LITERAL_STRING("mozinterruptend"));
     }
   }
 
-  SuspendOrResumeElement(mMuted & MUTED_BY_AUDIO_CHANNEL, false);
+#ifdef MOZ_B2G
+  SuspendOrResumeElement(ComputedMuted(), false);
+#endif
   return NS_OK;
 }
 
@@ -4551,7 +4524,11 @@ NS_IMETHODIMP HTMLMediaElement::WindowVolumeChanged(float aVolume, bool aMuted)
   NS_ENSURE_TRUE(nsContentUtils::IsCallerChrome(), NS_ERROR_NOT_AVAILABLE);
 
   UpdateChannelMuteState(aVolume, aMuted);
+
+#ifdef MOZ_B2G
   mPaused.SetCanPlay(!aMuted);
+#endif
+
   return NS_OK;
 }
 
@@ -4771,6 +4748,18 @@ HTMLMediaElement::NextFrameStatus()
     return mMediaStreamListener->NextFrameStatus();
   }
   return NEXT_FRAME_UNINITIALIZED;
+}
+
+float
+HTMLMediaElement::ComputedVolume() const
+{
+  return mMuted ? 0.0f : float(mVolume * mAudioChannelVolume);
+}
+
+bool
+HTMLMediaElement::ComputedMuted() const
+{
+  return (mMuted & MUTED_BY_AUDIO_CHANNEL);
 }
 
 } // namespace dom

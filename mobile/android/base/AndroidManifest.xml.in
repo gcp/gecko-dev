@@ -8,6 +8,7 @@
 #ifdef MOZ_ANDROID_SHARED_ID
       android:sharedUserId="@MOZ_ANDROID_SHARED_ID@"
 #endif
+      android:theme="@style/FilteredTouches"
       >
     <uses-sdk android:minSdkVersion="@MOZ_ANDROID_MIN_SDK_VERSION@"
 #ifdef MOZ_ANDROID_MAX_SDK_VERSION
@@ -240,6 +241,10 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity-alias>
+
+        <activity android:name="org.mozilla.gecko.trackingprotection.TrackingProtectionPrompt"
+                  android:launchMode="singleTop"
+                  android:theme="@style/OverlayActivity" />
 
 #ifdef MOZ_ANDROID_TAB_QUEUE
         <!-- The main reason for the Tab Queue build flag is to not mess with the VIEW intent filter

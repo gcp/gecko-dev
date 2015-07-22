@@ -4,6 +4,8 @@
 
 #filter substitution
 
+// For the all MOZ_MULET ifdef conditions in this file: see bug 1174234
+
 #ifndef MOZ_MULET
 pref("toolkit.defaultChromeURI", "chrome://b2g/content/shell.html");
 pref("browser.chromeURL", "chrome://b2g/content/");
@@ -333,9 +335,7 @@ pref("media.video-queue.default-size", 3);
 
 // optimize images' memory usage
 pref("image.downscale-during-decode.enabled", true);
-pref("image.decode-only-on-draw.enabled", false);
 pref("image.mem.allow_locking_in_content_processes", true);
-pref("image.decode.retry-on-alloc-failure", true);
 // Limit the surface cache to 1/8 of main memory or 128MB, whichever is smaller.
 // Almost everything that was factored into 'max_decoded_image_kb' is now stored
 // in the surface cache.  1/8 of main memory is 32MB on a 256MB device, which is
@@ -459,7 +459,9 @@ pref("dom.ipc.processCount", 100000);
 
 pref("dom.ipc.browser_frames.oop_by_default", false);
 
+#ifndef MOZ_MULET
 pref("dom.meta-viewport.enabled", true);
+#endif
 
 // SMS/MMS
 pref("dom.sms.enabled", true);
@@ -1157,3 +1159,6 @@ pref("dom.serviceWorkers.enabled", false);
 
 // Retain at most 10 processes' layers buffers
 pref("layers.compositor-lru-size", 10);
+
+// In B2G by deafult any AudioChannelAgent is muted when created.
+pref("dom.audiochannel.mutedByDefault", true);

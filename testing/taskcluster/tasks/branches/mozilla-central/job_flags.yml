@@ -6,26 +6,18 @@ $inherits:
   from: tasks/branches/base_jobs.yml
 
 builds:
-  aries-blobfree:
+  android-api-11:
     platforms:
-      - b2g
+      - Android
     types:
       opt:
-        task: tasks/builds/b2g_aries_spark_opt_blobfree.yml
-      debug:
-        task: tasks/builds/b2g_aries_spark_debug_blobfree.yml
+        task: tasks/builds/android_api_11.yml
   aries-dogfood:
     platforms:
       - b2g
     types:
       opt:
         task: tasks/builds/b2g_aries_spark_dogfood.yml
-  aries-eng-blobfree:
-    platforms:
-      - b2g
-    types:
-      opt:
-        task: tasks/builds/b2g_aries_spark_eng_blobfree.yml
   aries-ota:
     platforms:
       - b2g
@@ -34,20 +26,6 @@ builds:
         task: tasks/builds/b2g_aries_spark_ota_opt.yml
       debug:
         task: tasks/builds/b2g_aries_spark_ota_debug.yml
-  flame-kk-blobfree:
-    platforms:
-      - b2g
-    types:
-      opt:
-        task: tasks/builds/b2g_flame_kk_opt_blobfree.yml
-      debug:
-        task: tasks/builds/b2g_flame_kk_debug_blobfree.yml
-  flame-kk-eng-blobfree:
-    platforms:
-      - b2g
-    types:
-      opt:
-        task: tasks/builds/b2g_flame_kk_eng_blobfree.yml
   flame-kk-ota:
     platforms:
       - b2g
@@ -56,3 +34,11 @@ builds:
         task: tasks/builds/b2g_flame_kk_ota_opt.yml
       debug:
         task: tasks/builds/b2g_flame_kk_ota_debug.yml
+  linux64:
+    platforms:
+      - Linux64
+    types:
+      opt:
+        task: tasks/builds/opt_linux64.yml
+      debug:
+        task: tasks/builds/dbg_linux64.yml

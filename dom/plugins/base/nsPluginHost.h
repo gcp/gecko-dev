@@ -114,7 +114,9 @@ public:
                               /* out */ nsACString & aMimeType,
                               PluginFilter aFilter = eExcludeDisabled);
 
-  void GetPlugins(nsTArray<nsRefPtr<nsPluginTag> >& aPluginArray);
+  void GetPlugins(nsTArray<nsRefPtr<nsPluginTag> >& aPluginArray,
+                  bool aIncludeDisabled = false);
+
   void FindPluginsForContent(uint32_t aPluginEpoch,
                              nsTArray<mozilla::plugins::PluginTag>* aPlugins,
                              uint32_t* aNewPluginEpoch);
@@ -337,6 +339,10 @@ private:
   // from the chrome process.
   uint32_t ChromeEpochForContent();
   void SetChromeEpochForContent(uint32_t aEpoch);
+
+  // On certain platforms, we only want to load certain plugins. This function
+  // centralizes loading rules.
+  bool ShouldAddPlugin(nsPluginTag* aPluginTag);
 
   nsRefPtr<nsPluginTag> mPlugins;
   nsRefPtr<nsPluginTag> mCachedPlugins;

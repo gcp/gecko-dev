@@ -49,7 +49,6 @@
 #include "RestyleManager.h"
 #include "Layers.h"
 #include "imgIContainer.h"
-#include "nsIFrameRequestCallback.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "nsDocShell.h"
 #include "nsISimpleEnumerator.h"
@@ -64,6 +63,7 @@
 #include "mozilla/VsyncDispatcher.h"
 #include "nsThreadUtils.h"
 #include "mozilla/unused.h"
+#include "mozilla/TimelineConsumers.h"
 
 #ifdef MOZ_NUWA_PROCESS
 #include "ipc/Nuwa.h"
@@ -993,7 +993,7 @@ RefreshDriverTimer*
 nsRefreshDriver::ChooseTimer() const
 {
   if (mThrottled) {
-    if (!sThrottledRateTimer) 
+    if (!sThrottledRateTimer)
       sThrottledRateTimer = new InactiveRefreshDriverTimer(GetThrottledTimerInterval(),
                                                            DEFAULT_INACTIVE_TIMER_DISABLE_SECONDS * 1000.0);
     return sThrottledRateTimer;
@@ -1051,7 +1051,7 @@ nsRefreshDriver::~nsRefreshDriver()
   MOZ_ASSERT(ObserverCount() == 0,
              "observers should have unregistered");
   MOZ_ASSERT(!mActiveTimer, "timer should be gone");
-  
+
   if (mRootRefresh) {
     mRootRefresh->RemoveRefreshObserver(this, Flush_Style);
     mRootRefresh = nullptr;
@@ -1436,7 +1436,7 @@ HasPendingAnimations(nsIPresShell* aShell)
 static void GetProfileTimelineSubDocShells(nsDocShell* aRootDocShell,
                                            nsTArray<nsDocShell*>& aShells)
 {
-  if (!aRootDocShell || nsDocShell::gProfileTimelineRecordingsCount == 0) {
+  if (!aRootDocShell || TimelineConsumers::IsEmpty()) {
     return;
   }
 
@@ -1552,7 +1552,6 @@ nsRefreshDriver::RunFrameRequestCallbacks(int64_t aNowEpoch, TimeStamp aNowTime)
 
   if (!frameRequestCallbacks.IsEmpty()) {
     profiler_tracing("Paint", "Scripts", TRACING_INTERVAL_START);
-    int64_t eventTime = aNowEpoch / PR_USEC_PER_MSEC;
     for (const DocumentFrameCallbacks& docCallbacks : frameRequestCallbacks) {
       // XXXbz Bug 863140: GetInnerWindow can return the outer
       // window in some cases.
@@ -1565,15 +1564,10 @@ nsRefreshDriver::RunFrameRequestCallbacks(int64_t aNowEpoch, TimeStamp aNowTime)
         }
         // else window is partially torn down already
       }
-      for (const nsIDocument::FrameRequestCallbackHolder& holder :
-           docCallbacks.mCallbacks) {
-        nsAutoMicroTask mt;
-        if (holder.HasWebIDLCallback()) {
-          ErrorResult ignored;
-          holder.GetWebIDLCallback()->Call(timeStamp, ignored);
-        } else {
-          holder.GetXPCOMCallback()->Sample(eventTime);
-        }
+      for (auto& callback : docCallbacks.mCallbacks) {
+        ErrorResult ignored;
+        callback->Call(timeStamp, ignored);
+        ignored.SuppressException();
       }
     }
     profiler_tracing("Paint", "Scripts", TRACING_INTERVAL_END);
@@ -1791,8 +1785,16 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
     // script modifies the hashtable. Instead, we build a (local) array of
     // images to refresh, and then we refresh each image in that array.
     nsCOMArray<imgIContainer> imagesToRefresh(mRequests.Count());
-    mRequests.EnumerateEntries(nsRefreshDriver::ImageRequestEnumerator,
-                               &imagesToRefresh);
+
+    for (auto iter = mRequests.Iter(); !iter.Done(); iter.Next()) {
+      nsISupportsHashKey* entry = iter.Get();
+      auto req = static_cast<imgIRequest*>(entry->GetKey());
+      MOZ_ASSERT(req, "Unable to retrieve the image request");
+      nsCOMPtr<imgIContainer> image;
+      if (NS_SUCCEEDED(req->GetImage(getter_AddRefs(image)))) {
+        imagesToRefresh.AppendElement(image);
+      }
+    }
 
     for (uint32_t i = 0; i < imagesToRefresh.Length(); i++) {
       imagesToRefresh[i]->RequestRefresh(aNowTime);
@@ -1849,40 +1851,22 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
   NS_ASSERTION(mInRefresh, "Still in refresh");
 }
 
-/* static */ PLDHashOperator
-nsRefreshDriver::ImageRequestEnumerator(nsISupportsHashKey* aEntry,
-                                        void* aUserArg)
+void
+nsRefreshDriver::BeginRefreshingImages(RequestTable& aEntries,
+                                       ImageRequestParameters* aParms)
 {
-  nsCOMArray<imgIContainer>* imagesToRefresh =
-    static_cast<nsCOMArray<imgIContainer>*> (aUserArg);
-  imgIRequest* req = static_cast<imgIRequest*>(aEntry->GetKey());
-  MOZ_ASSERT(req, "Unable to retrieve the image request");
-  nsCOMPtr<imgIContainer> image;
-  if (NS_SUCCEEDED(req->GetImage(getter_AddRefs(image)))) {
-    imagesToRefresh->AppendElement(image);
+  for (auto iter = aEntries.Iter(); !iter.Done(); iter.Next()) {
+    auto req = static_cast<imgIRequest*>(iter.Get()->GetKey());
+    MOZ_ASSERT(req, "Unable to retrieve the image request");
+
+    aParms->mRequests->PutEntry(req);
+
+    nsCOMPtr<imgIContainer> image;
+    if (NS_SUCCEEDED(req->GetImage(getter_AddRefs(image)))) {
+      image->SetAnimationStartTime(aParms->mDesired);
+    }
   }
-
-  return PL_DHASH_NEXT;
-}
-
-/* static */ PLDHashOperator
-nsRefreshDriver::BeginRefreshingImages(nsISupportsHashKey* aEntry,
-                                       void* aUserArg)
-{
-  ImageRequestParameters* parms =
-    static_cast<ImageRequestParameters*> (aUserArg);
-
-  imgIRequest* req = static_cast<imgIRequest*>(aEntry->GetKey());
-  MOZ_ASSERT(req, "Unable to retrieve the image request");
-
-  parms->mRequests->PutEntry(req);
-
-  nsCOMPtr<imgIContainer> image;
-  if (NS_SUCCEEDED(req->GetImage(getter_AddRefs(image)))) {
-    image->SetAnimationStartTime(parms->mDesired);
-  }
-
-  return PL_DHASH_REMOVE;
+  aEntries.Clear();
 }
 
 /* static */ PLDHashOperator
@@ -1905,14 +1889,14 @@ nsRefreshDriver::StartTableRefresh(const uint32_t& aDelay,
     // to the main requests table.
     if (prevMultiple != static_cast<uint32_t>(curr.ToMilliseconds()) / aDelay) {
       parms->mDesired = start + TimeDuration::FromMilliseconds(prevMultiple * aDelay);
-      aData->mEntries.EnumerateEntries(nsRefreshDriver::BeginRefreshingImages, parms);
+      BeginRefreshingImages(aData->mEntries, parms);
     }
   } else {
     // This is the very first time we've drawn images with this time delay.
     // Set the animation start time to "now" and move all the images in this
     // table to the main requests table.
     parms->mDesired = parms->mCurrent;
-    aData->mEntries.EnumerateEntries(nsRefreshDriver::BeginRefreshingImages, parms);
+    BeginRefreshingImages(aData->mEntries, parms);
     aData->mStartTime.emplace(parms->mCurrent);
   }
 

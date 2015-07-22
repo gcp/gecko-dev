@@ -1351,14 +1351,14 @@ NS_IMETHODIMP nsChildView::Invalidate(const nsIntRect &aRect)
 }
 
 bool
-nsChildView::ComputeShouldAccelerate(bool aDefault)
+nsChildView::ComputeShouldAccelerate()
 {
   // Don't use OpenGL for transparent windows or for popup windows.
   if (!mView || ![[mView window] isOpaque] ||
       [[mView window] isKindOfClass:[PopupWindow class]])
     return false;
 
-  return nsBaseWidget::ComputeShouldAccelerate(aDefault);
+  return nsBaseWidget::ComputeShouldAccelerate();
 }
 
 bool
@@ -1635,7 +1635,7 @@ nsChildView::NotifyIMEInternal(const IMENotification& aIMENotification)
       return NS_OK;
     case NOTIFY_IME_OF_SELECTION_CHANGE:
       NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
-      mTextInputHandler->OnSelectionChange();
+      mTextInputHandler->OnSelectionChange(aIMENotification);
     default:
       return NS_ERROR_NOT_IMPLEMENTED;
   }

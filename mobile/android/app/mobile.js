@@ -177,8 +177,8 @@ pref("dom.forms.number", true);
 /* extension manager and xpinstall */
 pref("xpinstall.whitelist.directRequest", false);
 pref("xpinstall.whitelist.fileRequest", false);
-pref("xpinstall.whitelist.add", "addons.mozilla.org");
-pref("xpinstall.whitelist.add.180", "marketplace.firefox.com");
+pref("xpinstall.whitelist.add", "https://addons.mozilla.org");
+pref("xpinstall.whitelist.add.180", "https://marketplace.firefox.com");
 
 pref("xpinstall.signatures.required", false);
 
@@ -266,10 +266,8 @@ pref("browser.search.order.2", "chrome://browser/locale/region.properties");
 pref("browser.search.order.3", "chrome://browser/locale/region.properties");
 
 // Market-specific search defaults
-// This is disabled globally, and then enabled for individual locales
-// in firefox-l10n.js (eg. it's enabled for en-US).
-pref("browser.search.geoSpecificDefaults", false);
-pref("browser.search.geoSpecificDefaults.url", "");
+pref("browser.search.geoSpecificDefaults", true);
+pref("browser.search.geoSpecificDefaults.url", "https://search.services.mozilla.com/1/%APP%/%VERSION%/%CHANNEL%/%LOCALE%/%REGION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%");
 
 // US specific default (used as a fallback if the geoSpecificDefaults request fails).
 pref("browser.search.defaultenginename.US", "chrome://browser/locale/region.properties");
@@ -599,7 +597,6 @@ pref("media.mediasource.enabled", true);
 
 // optimize images memory usage
 pref("image.downscale-during-decode.enabled", true);
-pref("image.decode-only-on-draw.enabled", false);
 
 #ifdef NIGHTLY_BUILD
 // Shumway component (SWF player) is disabled by default. Also see bug 904346.
@@ -800,22 +797,15 @@ pref("dom.phonenumber.substringmatching.BR", 8);
 pref("dom.phonenumber.substringmatching.CO", 10);
 pref("dom.phonenumber.substringmatching.VE", 7);
 
-// Support for the mozAudioChannel attribute on media elements is disabled in non-webapps
-pref("media.useAudioChannelService", false);
-
 // Enable hardware-accelerated Skia canvas
 pref("gfx.canvas.azure.backends", "skia");
 pref("gfx.canvas.azure.accelerated", true);
 
 // See ua-update.json.in for the packaged UA override list
-// Disabling until we understand the cause of Bug 1178760
-pref("general.useragent.updates.enabled", false);
+pref("general.useragent.updates.enabled", true);
 pref("general.useragent.updates.url", "https://dynamicua.cdn.mozilla.net/0/%APP_ID%");
 pref("general.useragent.updates.interval", 604800); // 1 week
 pref("general.useragent.updates.retry", 86400); // 1 day
-
-// Youtube is broken with Android version in UA string. Bug 1174784.
-pref("general.useragent.override.youtube.com", "Android\\s\\d.+?;#Android;");
 
 // When true, phone number linkification is enabled.
 pref("browser.ui.linkify.phone", false);

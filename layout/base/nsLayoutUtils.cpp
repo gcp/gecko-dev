@@ -443,38 +443,6 @@ nsLayoutUtils::HasCurrentAnimationsForProperties(const nsIFrame* aFrame,
   return false;
 }
 
-static gfxSize
-GetScaleForValue(const StyleAnimationValue& aValue, const nsIFrame* aFrame)
-{
-  if (!aFrame) {
-    NS_WARNING("No frame.");
-    return gfxSize();
-  }
-  if (aValue.GetUnit() != StyleAnimationValue::eUnit_Transform) {
-    NS_WARNING("Expected a transform.");
-    return gfxSize();
-  }
-
-  nsCSSValueSharedList* list = aValue.GetCSSValueSharedListValue();
-  MOZ_ASSERT(list->mHead);
-
-  RuleNodeCacheConditions dontCare;
-  TransformReferenceBox refBox(aFrame);
-  gfx3DMatrix transform = nsStyleTransformMatrix::ReadTransforms(
-                            list->mHead,
-                            aFrame->StyleContext(),
-                            aFrame->PresContext(), dontCare, refBox,
-                            aFrame->PresContext()->AppUnitsPerDevPixel());
-
-  gfxMatrix transform2d;
-  bool canDraw2D = transform.CanDraw2D(&transform2d);
-  if (!canDraw2D) {
-    return gfxSize();
-  }
-
-  return transform2d.ScaleFactors(true);
-}
-
 static float
 GetSuitableScale(float aMaxScale, float aMinScale,
                  nscoord aVisibleDimension, nscoord aDisplayDimension)
@@ -505,12 +473,12 @@ GetMinAndMaxScaleForAnimationProperty(const nsIFrame* aFrame,
       if (prop.mProperty == eCSSProperty_transform) {
         for (uint32_t segIdx = prop.mSegments.Length(); segIdx-- != 0; ) {
           AnimationPropertySegment& segment = prop.mSegments[segIdx];
-          gfxSize from = GetScaleForValue(segment.mFromValue, aFrame);
+          gfxSize from = segment.mFromValue.GetScaleValue(aFrame);
           aMaxScale.width = std::max<float>(aMaxScale.width, from.width);
           aMaxScale.height = std::max<float>(aMaxScale.height, from.height);
           aMinScale.width = std::min<float>(aMinScale.width, from.width);
           aMinScale.height = std::min<float>(aMinScale.height, from.height);
-          gfxSize to = GetScaleForValue(segment.mToValue, aFrame);
+          gfxSize to = segment.mToValue.GetScaleValue(aFrame);
           aMaxScale.width = std::max<float>(aMaxScale.width, to.width);
           aMaxScale.height = std::max<float>(aMaxScale.height, to.height);
           aMinScale.width = std::min<float>(aMinScale.width, to.width);
@@ -824,7 +792,7 @@ nsLayoutUtils::AsyncPanZoomEnabled(nsIFrame* aFrame)
 {
   // We use this as a shortcut, since if the compositor will never use APZ,
   // no widget will either.
-  if (!gfxPrefs::AsyncPanZoomEnabledDoNotUseDirectly()) {
+  if (!gfxPlatform::AsyncPanZoomEnabled()) {
     return false;
   }
 
@@ -2406,6 +2374,42 @@ nsLayoutUtils::GetTransformToAncestorScale(nsIFrame* aFrame)
   return gfxSize(1, 1);
 }
 
+static Matrix4x4
+GetTransformToAncestorExcludingAnimated(nsIFrame* aFrame,
+                                        const nsIFrame* aAncestor)
+{
+  nsIFrame* parent;
+  Matrix4x4 ctm;
+  if (aFrame == aAncestor) {
+    return ctm;
+  }
+  if (ActiveLayerTracker::IsScaleSubjectToAnimation(aFrame)) {
+    return ctm;
+  }
+  ctm = aFrame->GetTransformMatrix(aAncestor, &parent);
+  while (parent && parent != aAncestor) {
+    if (ActiveLayerTracker::IsScaleSubjectToAnimation(parent)) {
+      return Matrix4x4();
+    }
+    if (!parent->Preserves3DChildren()) {
+      ctm.ProjectTo2D();
+    }
+    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent);
+  }
+  return ctm;
+}
+
+gfxSize
+nsLayoutUtils::GetTransformToAncestorScaleExcludingAnimated(nsIFrame* aFrame)
+{
+  Matrix4x4 transform = GetTransformToAncestorExcludingAnimated(aFrame,
+      nsLayoutUtils::GetDisplayRootFrame(aFrame));
+  Matrix transform2D;
+  if (transform.Is2D(&transform2D)) {
+    return ThebesMatrix(transform2D).ScaleFactors(true);
+  }
+  return gfxSize(1, 1);
+}
 
 nsIFrame*
 nsLayoutUtils::FindNearestCommonAncestorFrame(nsIFrame* aFrame1, nsIFrame* aFrame2)
@@ -5619,7 +5623,7 @@ nsLayoutUtils::GetFirstLinePosition(WritingMode aWM,
       // kid might be a legend frame here, but that's ok.
       if (GetFirstLinePosition(aWM, kid, &kidPosition)) {
         *aResult = kidPosition +
-          kid->GetLogicalNormalPosition(aWM, aFrame->GetSize().width).B(aWM);
+          kid->GetLogicalNormalPosition(aWM, aFrame->GetSize()).B(aWM);
         return true;
       }
       return false;
@@ -5639,9 +5643,9 @@ nsLayoutUtils::GetFirstLinePosition(WritingMode aWM,
         //XXX Not sure if this is the correct value to use for container
         //    width here. It will only be used in vertical-rl layout,
         //    which we don't have full support and testing for yet.
-        nscoord containerWidth = line->mContainerWidth;
+        const nsSize& containerSize = line->mContainerSize;
         *aResult = kidPosition +
-                   kid->GetLogicalNormalPosition(aWM, containerWidth).B(aWM);
+                   kid->GetLogicalNormalPosition(aWM, containerSize).B(aWM);
         return true;
       }
     } else {
@@ -5674,16 +5678,16 @@ nsLayoutUtils::GetLastLineBaseline(WritingMode aWM,
     if (line->IsBlock()) {
       nsIFrame *kid = line->mFirstChild;
       nscoord kidBaseline;
-      nscoord containerWidth = line->mContainerWidth;
+      const nsSize& containerSize = line->mContainerSize;
       if (GetLastLineBaseline(aWM, kid, &kidBaseline)) {
         // Ignore relative positioning for baseline calculations
         *aResult = kidBaseline +
-          kid->GetLogicalNormalPosition(aWM, containerWidth).B(aWM);
+          kid->GetLogicalNormalPosition(aWM, containerSize).B(aWM);
         return true;
       } else if (kid->GetType() == nsGkAtoms::scrollFrame) {
         // Use the bottom of the scroll frame.
         // XXX CSS2.1 really doesn't say what to do here.
-        *aResult = kid->GetLogicalNormalPosition(aWM, containerWidth).B(aWM) +
+        *aResult = kid->GetLogicalNormalPosition(aWM, containerSize).B(aWM) +
                    kid->BSize(aWM);
         return true;
       }
@@ -5711,9 +5715,9 @@ CalculateBlockContentBEnd(WritingMode aWM, nsBlockFrame* aFrame)
        line != line_end; ++line) {
     if (line->IsBlock()) {
       nsIFrame* child = line->mFirstChild;
-      nscoord containerWidth = line->mContainerWidth;
+      const nsSize& containerSize = line->mContainerSize;
       nscoord offset =
-        child->GetLogicalNormalPosition(aWM, containerWidth).B(aWM);
+        child->GetLogicalNormalPosition(aWM, containerSize).B(aWM);
       contentBEnd =
         std::max(contentBEnd,
                  nsLayoutUtils::CalculateContentBEnd(aWM, child) + offset);
@@ -5753,7 +5757,7 @@ nsLayoutUtils::CalculateContentBEnd(WritingMode aWM, nsIFrame* aFrame)
           nsIFrame* child = childFrames.get();
           nscoord offset =
             child->GetLogicalNormalPosition(aWM,
-                                            aFrame->GetSize().width).B(aWM);
+                                            aFrame->GetSize()).B(aWM);
           contentBEnd = std::max(contentBEnd,
                                  CalculateContentBEnd(aWM, child) + offset);
         }

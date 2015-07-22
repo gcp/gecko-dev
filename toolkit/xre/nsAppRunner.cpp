@@ -19,6 +19,7 @@
 #include "mozilla/Likely.h"
 #include "mozilla/Poison.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
 
 #include "nsAppRunner.h"
@@ -1790,8 +1791,8 @@ RemoteCommandLine(const char* aDesktopStartupID)
 
   ar = CheckArg("p", false, &profile, false);
   if (ar == ARG_BAD) {
-    PR_fprintf(PR_STDERR, "Error: argument -p requires a profile name\n");
-    return REMOTE_ARG_BAD;
+    // Leave it to the normal command line handling to handle this situation.
+    return REMOTE_NOT_FOUND;
   }
 
   const char *temp = nullptr;
@@ -3122,7 +3123,17 @@ XREMain::XRE_mainInit(bool* aExitFlag)
 
   StartupTimeline::Record(StartupTimeline::MAIN);
 
-  if (ChaosMode::isActive(ChaosMode::Any)) {
+  if (PR_GetEnv("MOZ_CHAOSMODE")) {
+    ChaosFeature feature = ChaosFeature::Any;
+    long featureInt = strtol(PR_GetEnv("MOZ_CHAOSMODE"), nullptr, 16);
+    if (featureInt) {
+      // NOTE: MOZ_CHAOSMODE=0 or a non-hex value maps to Any feature.
+      feature = static_cast<ChaosFeature>(featureInt);
+    }
+    ChaosMode::SetChaosFeature(feature);
+  }
+
+  if (ChaosMode::isActive(ChaosFeature::Any)) {
     printf_stderr("*** You are running in chaos test mode. See ChaosMode.h. ***\n");
   }
 
@@ -4649,7 +4660,7 @@ mozilla::BrowserTabsRemoteAutostart()
 
     // Check for blocked drivers
     if (!accelDisabled) {
-      nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
+      nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
       if (gfxInfo) {
         int32_t status;
         if (NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_OPENGL_LAYERS, &status)) &&

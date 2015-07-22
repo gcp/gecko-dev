@@ -237,6 +237,8 @@ struct InternalGCMethods<T*>
 {
     static bool isMarkable(T* v) { return v != nullptr; }
 
+    static bool isMarkableTaggedPointer(T* v) { return !IsNullTaggedPointer(v); }
+
     static void preBarrier(T* v) { T::writeBarrierPre(v); }
 
     static void postBarrier(T** vp, T* prev, T* next) { T::writeBarrierPost(vp, prev, next); }
@@ -256,6 +258,7 @@ template <>
 struct InternalGCMethods<Value>
 {
     static bool isMarkable(Value v) { return v.isMarkable(); }
+    static bool isMarkableTaggedPointer(Value v) { return isMarkable(v); }
 
     static void preBarrier(Value v) {
         DispatchValueTyped(PreBarrierFunctor<Value>(), v);
@@ -291,6 +294,7 @@ template <>
 struct InternalGCMethods<jsid>
 {
     static bool isMarkable(jsid id) { return JSID_IS_STRING(id) || JSID_IS_SYMBOL(id); }
+    static bool isMarkableTaggedPointer(jsid id) { return isMarkable(id); }
 
     static void preBarrier(jsid id) { DispatchIdTyped(PreBarrierFunctor<jsid>(), id); }
     static void postBarrier(jsid* idp, jsid prev, jsid next) {}
@@ -403,7 +407,7 @@ class HeapPtr : public BarrieredBase<T>
 #ifdef DEBUG
     ~HeapPtr() {
         // No prebarrier necessary as this only happens when we are sweeping or
-        // before the containing obect becomes part of the GC graph.
+        // before the containing object becomes part of the GC graph.
         MOZ_ASSERT(CurrentThreadIsGCSweeping() || CurrentThreadIsHandlingInitFailure());
     }
 #endif

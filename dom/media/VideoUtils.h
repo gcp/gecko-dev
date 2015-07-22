@@ -8,12 +8,14 @@
 #define VideoUtils_h
 
 #include "mozilla/Attributes.h"
-#include "mozilla/ReentrantMonitor.h"
 #include "mozilla/CheckedInt.h"
+#include "mozilla/MozPromise.h"
+#include "mozilla/ReentrantMonitor.h"
+#include "mozilla/RefPtr.h"
+
 #include "nsIThread.h"
 #include "nsSize.h"
 #include "nsRect.h"
-#include "MediaPromise.h"
 
 #if !(defined(XP_WIN) || defined(XP_MACOSX) || defined(LINUX)) || \
     defined(MOZ_ASAN)
@@ -23,7 +25,6 @@
 #include "nsThreadUtils.h"
 #include "prtime.h"
 #include "AudioSampleFormat.h"
-#include "mozilla/RefPtr.h"
 #include "TimeUnits.h"
 
 using mozilla::CheckedInt64;
@@ -139,6 +140,9 @@ media::TimeUnit FramesToTimeUnit(int64_t aFrames, uint32_t aRate);
 // overflow while calulating the conversion.
 CheckedInt64 UsecsToFrames(int64_t aUsecs, uint32_t aRate);
 
+// Format TimeUnit as number of frames at given rate.
+CheckedInt64 TimeUnitToFrames(const media::TimeUnit& aTime, uint32_t aRate);
+
 // Converts milliseconds to seconds.
 #define MS_TO_SECONDS(ms) ((double)(ms) / (PR_MSEC_PER_SEC))
 
@@ -215,7 +219,7 @@ class SharedThreadPool;
 // wait on tasks in the PLAYBACK thread pool.
 //
 // No new dependencies on this mechanism should be added, as methods are being
-// made async supported by MediaPromise, making this unnecessary and
+// made async supported by MozPromise, making this unnecessary and
 // permitting unifying the pool.
 enum class MediaThreadType {
   PLAYBACK, // MediaDecoderStateMachine and MediaDecoderReader
@@ -274,13 +278,13 @@ GenerateRandomName(nsCString& aOutSalt, uint32_t aLength);
 nsresult
 GenerateRandomPathName(nsCString& aOutSalt, uint32_t aLength);
 
-class MediaTaskQueue;
-class FlushableMediaTaskQueue;
+class TaskQueue;
+class FlushableTaskQueue;
 
-already_AddRefed<MediaTaskQueue>
+already_AddRefed<TaskQueue>
 CreateMediaDecodeTaskQueue();
 
-already_AddRefed<FlushableMediaTaskQueue>
+already_AddRefed<FlushableTaskQueue>
 CreateFlushableMediaDecodeTaskQueue();
 
 // Iteratively invokes aWork until aCondition returns true, or aWork returns false.

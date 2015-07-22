@@ -12,7 +12,7 @@
 #include "VideoUtils.h"
 #include "ImageContainer.h"
 #include "MediaInfo.h"
-#include "MediaTaskQueue.h"
+#include "mozilla/TaskQueue.h"
 #include "TimeUnits.h"
 
 namespace mozilla {
@@ -24,7 +24,7 @@ class BlankMediaDataDecoder : public MediaDataDecoder {
 public:
 
   BlankMediaDataDecoder(BlankMediaDataCreator* aCreator,
-                        FlushableMediaTaskQueue* aTaskQueue,
+                        FlushableTaskQueue* aTaskQueue,
                         MediaDataDecoderCallback* aCallback)
     : mCreator(aCreator)
     , mTaskQueue(aTaskQueue)
@@ -87,7 +87,7 @@ public:
 
 private:
   nsAutoPtr<BlankMediaDataCreator> mCreator;
-  RefPtr<FlushableMediaTaskQueue> mTaskQueue;
+  RefPtr<FlushableTaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
 };
 
@@ -214,7 +214,7 @@ public:
   CreateVideoDecoder(const VideoInfo& aConfig,
                      layers::LayersBackend aLayersBackend,
                      layers::ImageContainer* aImageContainer,
-                     FlushableMediaTaskQueue* aVideoTaskQueue,
+                     FlushableTaskQueue* aVideoTaskQueue,
                      MediaDataDecoderCallback* aCallback) override {
     BlankVideoDataCreator* creator = new BlankVideoDataCreator(
       aConfig.mDisplay.width, aConfig.mDisplay.height, aImageContainer);
@@ -228,7 +228,7 @@ public:
   // Decode thread.
   virtual already_AddRefed<MediaDataDecoder>
   CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableMediaTaskQueue* aAudioTaskQueue,
+                     FlushableTaskQueue* aAudioTaskQueue,
                      MediaDataDecoderCallback* aCallback) override {
     BlankAudioDataCreator* creator = new BlankAudioDataCreator(
       aConfig.mChannels, aConfig.mRate);
@@ -246,6 +246,11 @@ public:
     return true;
   }
 
+  virtual bool
+  SupportsSharedDecoders(const VideoInfo& aConfig) const override {
+    return false;
+  }
+
   virtual ConversionRequired
   DecoderNeedsConversion(const TrackInfo& aConfig) const override
   {
@@ -254,10 +259,27 @@ public:
 
 };
 
+class AgnosticDecoderModule : public BlankDecoderModule {
+public:
+
+  bool SupportsMimeType(const nsACString& aMimeType) override
+  {
+    // This module does not support any decoders itself,
+    // agnostic decoders are created in PlatformDecoderModule::CreateDecoder
+    return false;
+  }
+};
+
 already_AddRefed<PlatformDecoderModule> CreateBlankDecoderModule()
 {
   nsRefPtr<PlatformDecoderModule> pdm = new BlankDecoderModule();
   return pdm.forget();
+}
+
+already_AddRefed<PlatformDecoderModule> CreateAgnosticDecoderModule()
+{
+  nsRefPtr<PlatformDecoderModule> adm = new AgnosticDecoderModule();
+  return adm.forget();
 }
 
 } // namespace mozilla

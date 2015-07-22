@@ -612,7 +612,7 @@ TabParent::RecvCreateWindow(PBrowserParent* aNewTab,
                             const bool& aSizeSpecified,
                             const nsString& aURI,
                             const nsString& aName,
-                            const nsString& aFeatures,
+                            const nsCString& aFeatures,
                             const nsString& aBaseURI,
                             nsresult* aResult,
                             bool* aWindowIsNew,
@@ -621,6 +621,13 @@ TabParent::RecvCreateWindow(PBrowserParent* aNewTab,
 {
   // We always expect to open a new window here. If we don't, it's an error.
   *aWindowIsNew = true;
+
+  // The content process should never be in charge of computing whether or
+  // not a window should be private or remote - the parent will do that.
+  MOZ_ASSERT(!(aChromeFlags & nsIWebBrowserChrome::CHROME_PRIVATE_WINDOW));
+  MOZ_ASSERT(!(aChromeFlags & nsIWebBrowserChrome::CHROME_NON_PRIVATE_WINDOW));
+  MOZ_ASSERT(!(aChromeFlags & nsIWebBrowserChrome::CHROME_PRIVATE_LIFETIME));
+  MOZ_ASSERT(!(aChromeFlags & nsIWebBrowserChrome::CHROME_REMOTE_WINDOW));
 
   if (NS_WARN_IF(IsBrowserOrApp()))
     return false;
@@ -735,9 +742,11 @@ TabParent::RecvCreateWindow(PBrowserParent* aNewTab,
 
   AutoUseNewTab aunt(newTab, aWindowIsNew, aURLToLoad);
 
+  const char* features = aFeatures.Length() ? aFeatures.get() : nullptr;
+
   *aResult = pwwatch->OpenWindow2(parent, finalURIString.get(),
                                   NS_ConvertUTF16toUTF8(aName).get(),
-                                  NS_ConvertUTF16toUTF8(aFeatures).get(), aCalledFromJS,
+                                  features, aCalledFromJS,
                                   false, false, this, nullptr, getter_AddRefs(window));
 
   if (NS_WARN_IF(NS_FAILED(*aResult)))
@@ -1202,11 +1211,25 @@ TabParent::RecvPDocAccessibleConstructor(PDocAccessibleParent* aDoc,
 #ifdef ACCESSIBILITY
   auto doc = static_cast<a11y::DocAccessibleParent*>(aDoc);
   if (aParentDoc) {
+    // A document should never directly be the parent of another document.
+    // There should always be an outer doc accessible child of the outer
+    // document containing the child.
     MOZ_ASSERT(aParentID);
+    if (!aParentID) {
+      return false;
+    }
+
     auto parentDoc = static_cast<a11y::DocAccessibleParent*>(aParentDoc);
     return parentDoc->AddChildDoc(doc, aParentID);
   } else {
+    // null aParentDoc means this document is at the top level in the child
+    // process.  That means it makes no sense to get an id for an accessible
+    // that is its parent.
     MOZ_ASSERT(!aParentID);
+    if (aParentID) {
+      return false;
+    }
+
     doc->SetTopLevel();
     a11y::DocManager::RemoteDocAdded(doc);
   }
@@ -1952,8 +1975,8 @@ TabParent::RecvHideTooltip()
 }
 
 bool
-TabParent::RecvNotifyIMEFocus(const bool& aFocus,
-                              const ContentCache& aContentCache,
+TabParent::RecvNotifyIMEFocus(const ContentCache& aContentCache,
+                              const IMENotification& aIMENotification,
                               nsIMEUpdatePreference* aPreference)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
@@ -1962,12 +1985,10 @@ TabParent::RecvNotifyIMEFocus(const bool& aFocus,
     return true;
   }
 
-  IMENotification notification(aFocus ? NOTIFY_IME_OF_FOCUS :
-                                        NOTIFY_IME_OF_BLUR);
-  mContentCache.AssignContent(aContentCache, &notification);
-  IMEStateManager::NotifyIME(notification, widget, true);
+  mContentCache.AssignContent(aContentCache, &aIMENotification);
+  IMEStateManager::NotifyIME(aIMENotification, widget, true);
 
-  if (aFocus) {
+  if (aIMENotification.mMessage == NOTIFY_IME_OF_FOCUS) {
     *aPreference = widget->GetIMEUpdatePreference();
   }
   return true;
@@ -1975,10 +1996,7 @@ TabParent::RecvNotifyIMEFocus(const bool& aFocus,
 
 bool
 TabParent::RecvNotifyIMETextChange(const ContentCache& aContentCache,
-                                   const uint32_t& aStart,
-                                   const uint32_t& aRemovedEnd,
-                                   const uint32_t& aAddedEnd,
-                                   const bool& aCausedByComposition)
+                                   const IMENotification& aIMENotification)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (!widget)
@@ -1988,56 +2006,47 @@ TabParent::RecvNotifyIMETextChange(const ContentCache& aContentCache,
   nsIMEUpdatePreference updatePreference = widget->GetIMEUpdatePreference();
   NS_ASSERTION(updatePreference.WantTextChange(),
                "Don't call Send/RecvNotifyIMETextChange without NOTIFY_TEXT_CHANGE");
-  MOZ_ASSERT(!aCausedByComposition ||
+  MOZ_ASSERT(!aIMENotification.mTextChangeData.mCausedByComposition ||
                updatePreference.WantChangesCausedByComposition(),
     "The widget doesn't want text change notification caused by composition");
 #endif
 
-  IMENotification notification(NOTIFY_IME_OF_TEXT_CHANGE);
-  notification.mTextChangeData.mStartOffset = aStart;
-  notification.mTextChangeData.mRemovedEndOffset = aRemovedEnd;
-  notification.mTextChangeData.mAddedEndOffset = aAddedEnd;
-  notification.mTextChangeData.mCausedByComposition = aCausedByComposition;
-
-  mContentCache.AssignContent(aContentCache, &notification);
-  mContentCache.MaybeNotifyIME(widget, notification);
+  mContentCache.AssignContent(aContentCache, &aIMENotification);
+  mContentCache.MaybeNotifyIME(widget, aIMENotification);
   return true;
 }
 
 bool
-TabParent::RecvNotifyIMESelectedCompositionRect(
-             const ContentCache& aContentCache)
+TabParent::RecvNotifyIMECompositionUpdate(
+             const ContentCache& aContentCache,
+             const IMENotification& aIMENotification)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (!widget) {
     return true;
   }
 
-  IMENotification notification(NOTIFY_IME_OF_COMPOSITION_UPDATE);
-  mContentCache.AssignContent(aContentCache, &notification);
-  mContentCache.MaybeNotifyIME(widget, notification);
+  mContentCache.AssignContent(aContentCache, &aIMENotification);
+  mContentCache.MaybeNotifyIME(widget, aIMENotification);
   return true;
 }
 
 bool
 TabParent::RecvNotifyIMESelection(const ContentCache& aContentCache,
-                                  const bool& aCausedByComposition)
+                                  const IMENotification& aIMENotification)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (!widget)
     return true;
 
-  IMENotification notification(NOTIFY_IME_OF_SELECTION_CHANGE);
-  mContentCache.AssignContent(aContentCache, &notification);
+  mContentCache.AssignContent(aContentCache, &aIMENotification);
 
   const nsIMEUpdatePreference updatePreference =
     widget->GetIMEUpdatePreference();
   if (updatePreference.WantSelectionChange() &&
       (updatePreference.WantChangesCausedByComposition() ||
-       !aCausedByComposition)) {
-    notification.mSelectionChangeData.mCausedByComposition =
-      aCausedByComposition;
-    mContentCache.MaybeNotifyIME(widget, notification);
+       !aIMENotification.mSelectionChangeData.mCausedByComposition)) {
+    mContentCache.MaybeNotifyIME(widget, aIMENotification);
   }
   return true;
 }
@@ -2071,26 +2080,26 @@ TabParent::RecvNotifyIMEMouseButtonEvent(
 }
 
 bool
-TabParent::RecvNotifyIMEPositionChange(const ContentCache& aContentCache)
+TabParent::RecvNotifyIMEPositionChange(const ContentCache& aContentCache,
+                                       const IMENotification& aIMENotification)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (!widget) {
     return true;
   }
 
-  IMENotification notification(NOTIFY_IME_OF_POSITION_CHANGE);
-  mContentCache.AssignContent(aContentCache, &notification);
+  mContentCache.AssignContent(aContentCache, &aIMENotification);
 
   const nsIMEUpdatePreference updatePreference =
     widget->GetIMEUpdatePreference();
   if (updatePreference.WantPositionChanged()) {
-    IMEStateManager::NotifyIME(notification, widget, true);
+    mContentCache.MaybeNotifyIME(widget, aIMENotification);
   }
   return true;
 }
 
 bool
-TabParent::RecvOnEventNeedingAckReceived(const uint32_t& aMessage)
+TabParent::RecvOnEventNeedingAckHandled(const uint32_t& aMessage)
 {
   // This is called when the child process receives WidgetCompositionEvent or
   // WidgetSelectionEvent.
@@ -2099,10 +2108,10 @@ TabParent::RecvOnEventNeedingAckReceived(const uint32_t& aMessage)
     return true;
   }
 
-  // While calling OnEventNeedingAckReceived(), TabParent *might* be destroyed
+  // While calling OnEventNeedingAckHandled(), TabParent *might* be destroyed
   // since it may send notifications to IME.
   nsRefPtr<TabParent> kungFuDeathGrip(this);
-  mContentCache.OnEventNeedingAckReceived(widget, aMessage);
+  mContentCache.OnEventNeedingAckHandled(widget, aMessage);
   return true;
 }
 
@@ -2298,7 +2307,11 @@ TabParent::SendSelectionEvent(WidgetSelectionEvent& event)
     return true;
   }
   mContentCache.OnSelectionEvent(event);
-  return PBrowserParent::SendSelectionEvent(event);
+  if (NS_WARN_IF(!PBrowserParent::SendSelectionEvent(event))) {
+    return false;
+  }
+  event.mSucceeded = true;
+  return true;
 }
 
 /*static*/ TabParent*
@@ -3146,7 +3159,9 @@ public:
   NS_IMETHOD GetContentLength(int64_t*) NO_IMPL
   NS_IMETHOD SetContentLength(int64_t) NO_IMPL
   NS_IMETHOD Open(nsIInputStream**) NO_IMPL
+  NS_IMETHOD Open2(nsIInputStream**) NO_IMPL
   NS_IMETHOD AsyncOpen(nsIStreamListener*, nsISupports*) NO_IMPL
+  NS_IMETHOD AsyncOpen2(nsIStreamListener*) NO_IMPL
   NS_IMETHOD GetContentDisposition(uint32_t*) NO_IMPL
   NS_IMETHOD SetContentDisposition(uint32_t) NO_IMPL
   NS_IMETHOD GetContentDispositionFilename(nsAString&) NO_IMPL

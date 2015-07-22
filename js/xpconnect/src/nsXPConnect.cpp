@@ -218,6 +218,11 @@ static PRLogModuleInfo* gJSDiagnostics;
 void
 xpc::ErrorReport::LogToConsole()
 {
+  LogToConsoleWithStack(nullptr);
+}
+void
+xpc::ErrorReport::LogToConsoleWithStack(JS::HandleObject aStack)
+{
     // Log to stdout.
     if (nsContentUtils::DOMWindowDumpEnabled()) {
         nsAutoCString error;
@@ -253,8 +258,17 @@ xpc::ErrorReport::LogToConsole()
     // mechanisms.
     nsCOMPtr<nsIConsoleService> consoleService =
       do_GetService(NS_CONSOLESERVICE_CONTRACTID);
-    nsCOMPtr<nsIScriptError> errorObject =
-      do_CreateInstance("@mozilla.org/scripterror;1");
+
+    nsCOMPtr<nsIScriptError> errorObject;
+    if (mWindowID && aStack) {
+      // Only set stack on messages related to a document
+      // As we cache messages in the console service,
+      // we have to ensure not leaking them after the related
+      // context is destroyed and we only track document lifecycle for now.
+      errorObject = new nsScriptErrorWithStack(aStack);
+    } else {
+      errorObject = new nsScriptError();
+    }
     NS_ENSURE_TRUE_VOID(consoleService && errorObject);
 
     nsresult rv = errorObject->InitWithWindowID(mErrorMsg, mFileName, mSourceLine,
@@ -737,7 +751,7 @@ nsXPConnect::SetFunctionThisTranslator(const nsIID & aIID,
 
 NS_IMETHODIMP
 nsXPConnect::CreateSandbox(JSContext* cx, nsIPrincipal* principal,
-                           nsIXPConnectJSObjectHolder** _retval)
+                           JSObject** _retval)
 {
     *_retval = nullptr;
 
@@ -748,9 +762,7 @@ nsXPConnect::CreateSandbox(JSContext* cx, nsIPrincipal* principal,
                "Bad return value from xpc_CreateSandboxObject()!");
 
     if (NS_SUCCEEDED(rv) && !rval.isPrimitive()) {
-        JSObject* obj = rval.toObjectOrNull();
-        nsRefPtr<XPCJSObjectHolder> rval = new XPCJSObjectHolder(obj);
-        rval.forget(_retval);
+        *_retval = rval.toObjectOrNull();
     }
 
     return rv;

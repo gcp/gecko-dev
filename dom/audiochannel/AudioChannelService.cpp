@@ -27,9 +27,7 @@
 
 #ifdef MOZ_WIDGET_GONK
 #include "nsJSUtils.h"
-#include "nsIAudioManager.h"
 #include "SpeakerManagerService.h"
-#define NS_AUDIOMANAGER_CONTRACTID "@mozilla.org/telephony/audiomanager;1"
 #endif
 
 #include "mozilla/Preferences.h"
@@ -185,7 +183,7 @@ AudioChannelService::Shutdown()
       if (obs) {
         obs->RemoveObserver(gAudioChannelService, "ipc:content-shutdown");
         obs->RemoveObserver(gAudioChannelService, "xpcom-shutdown");
-        obs->RemoveObserver(gAudioChannelService, "inner-window-destroyed");
+        obs->RemoveObserver(gAudioChannelService, "outer-window-destroyed");
 #ifdef MOZ_WIDGET_GONK
         // To monitor the volume settings based on audio channel.
         obs->RemoveObserver(gAudioChannelService, "mozsettings-changed");
@@ -207,8 +205,7 @@ NS_IMPL_ADDREF(AudioChannelService)
 NS_IMPL_RELEASE(AudioChannelService)
 
 AudioChannelService::AudioChannelService()
-  : mDisabled(false)
-  , mDefChannelChildID(CONTENT_PROCESS_ID_UNKNOWN)
+  : mDefChannelChildID(CONTENT_PROCESS_ID_UNKNOWN)
   , mTelephonyChannel(false)
   , mContentOrNormalChannel(false)
   , mAnyChannel(false)
@@ -218,7 +215,7 @@ AudioChannelService::AudioChannelService()
     if (obs) {
       obs->AddObserver(this, "ipc:content-shutdown", false);
       obs->AddObserver(this, "xpcom-shutdown", false);
-      obs->AddObserver(this, "inner-window-destroyed", false);
+      obs->AddObserver(this, "outer-window-destroyed", false);
 #ifdef MOZ_WIDGET_GONK
       // To monitor the volume settings based on audio channel.
       obs->AddObserver(this, "mozsettings-changed", false);
@@ -238,10 +235,6 @@ void
 AudioChannelService::RegisterAudioChannelAgent(AudioChannelAgent* aAgent,
                                                AudioChannel aChannel)
 {
-  if (mDisabled) {
-    return;
-  }
-
   uint64_t windowID = aAgent->WindowID();
   AudioChannelWindow* winData = GetWindowData(windowID);
   if (!winData) {
@@ -272,10 +265,6 @@ AudioChannelService::RegisterAudioChannelAgent(AudioChannelAgent* aAgent,
 void
 AudioChannelService::UnregisterAudioChannelAgent(AudioChannelAgent* aAgent)
 {
-  if (mDisabled) {
-    return;
-  }
-
   AudioChannelWindow* winData = GetWindowData(aAgent->WindowID());
   if (!winData) {
     return;
@@ -466,54 +455,14 @@ AudioChannelService::Observe(nsISupports* aSubject, const char* aTopic,
                              const char16_t* aData)
 {
   if (!strcmp(aTopic, "xpcom-shutdown")) {
-    mDisabled = true;
     mWindows.Clear();
-  }
-
-#ifdef MOZ_WIDGET_GONK
-  // To process the volume control on each audio channel according to
-  // change of settings
-  else if (!strcmp(aTopic, "mozsettings-changed")) {
-    RootedDictionary<SettingChangeNotification> setting(nsContentUtils::RootingCxForThread());
-    if (!WrappedJSToDictionary(aSubject, setting)) {
-      return NS_OK;
-    }
-    if (!StringBeginsWith(setting.mKey, NS_LITERAL_STRING("audio.volume."))) {
-      return NS_OK;
-    }
-    if (!setting.mValue.isNumber()) {
-      return NS_OK;
-    }
-
-    nsCOMPtr<nsIAudioManager> audioManager = do_GetService(NS_AUDIOMANAGER_CONTRACTID);
-    NS_ENSURE_TRUE(audioManager, NS_OK);
-
-    int32_t index = setting.mValue.toNumber();
-    if (setting.mKey.EqualsLiteral("audio.volume.content")) {
-      audioManager->SetAudioChannelVolume((int32_t)AudioChannel::Content, index);
-    } else if (setting.mKey.EqualsLiteral("audio.volume.notification")) {
-      audioManager->SetAudioChannelVolume((int32_t)AudioChannel::Notification, index);
-    } else if (setting.mKey.EqualsLiteral("audio.volume.alarm")) {
-      audioManager->SetAudioChannelVolume((int32_t)AudioChannel::Alarm, index);
-    } else if (setting.mKey.EqualsLiteral("audio.volume.telephony")) {
-      audioManager->SetAudioChannelVolume((int32_t)AudioChannel::Telephony, index);
-    } else if (!setting.mKey.EqualsLiteral("audio.volume.bt_sco")) {
-      // bt_sco is not a valid audio channel so we manipulate it in
-      // AudioManager.cpp. And the others should not be used.
-      // We didn't use MOZ_CRASH or MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE here
-      // because any web content who has permission of mozSettings can set any
-      // names then it can be easy to crash the B2G.
-      NS_WARNING("unexpected audio channel for volume control");
-    }
-  }
-#endif
-
-  else if (!strcmp(aTopic, "inner-window-destroyed")) {
+    Shutdown();
+  } else if (!strcmp(aTopic, "outer-window-destroyed")) {
     nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
     NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
 
-    uint64_t innerID;
-    nsresult rv = wrapper->GetData(&innerID);
+    uint64_t outerID;
+    nsresult rv = wrapper->GetData(&outerID);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -524,7 +473,7 @@ AudioChannelService::Observe(nsISupports* aSubject, const char* aTopic,
         iter(mWindows);
       while (iter.HasMore()) {
         nsAutoPtr<AudioChannelWindow>& next = iter.GetNext();
-        if (next->mWindowID == innerID) {
+        if (next->mWindowID == outerID) {
           uint32_t pos = mWindows.IndexOf(next);
           winData = next.forget();
           mWindows.RemoveElementAt(pos);
@@ -547,9 +496,7 @@ AudioChannelService::Observe(nsISupports* aSubject, const char* aTopic,
       mSpeakerManager[i]->SetAudioChannelActive(active);
     }
 #endif
-  }
-
-  else if (!strcmp(aTopic, "ipc:content-shutdown")) {
+  } else if (!strcmp(aTopic, "ipc:content-shutdown")) {
     nsCOMPtr<nsIPropertyBag2> props = do_QueryInterface(aSubject);
     if (!props) {
       NS_WARNING("ipc:content-shutdown message without property bag as subject");
@@ -574,22 +521,20 @@ AudioChannelService::Observe(nsISupports* aSubject, const char* aTopic,
   return NS_OK;
 }
 
-struct RefreshAgentsVolumeData
-{
-  explicit RefreshAgentsVolumeData(nsPIDOMWindow* aWindow)
-    : mWindow(aWindow)
-  {}
-
-  nsPIDOMWindow* mWindow;
-  nsTArray<nsRefPtr<AudioChannelAgent>> mAgents;
-};
-
 void
 AudioChannelService::RefreshAgentsVolume(nsPIDOMWindow* aWindow)
 {
   MOZ_ASSERT(aWindow);
+  MOZ_ASSERT(aWindow->IsOuterWindow());
 
-  AudioChannelWindow* winData = GetWindowData(aWindow->WindowID());
+  nsCOMPtr<nsIDOMWindow> topWindow;
+  aWindow->GetScriptableTop(getter_AddRefs(topWindow));
+  nsCOMPtr<nsPIDOMWindow> pTopWindow = do_QueryInterface(topWindow);
+  if (!pTopWindow) {
+    return;
+  }
+
+  AudioChannelWindow* winData = GetWindowData(pTopWindow->WindowID());
   if (!winData) {
     return;
   }
@@ -715,7 +660,10 @@ AudioChannelService::GetAudioChannelVolume(nsIDOMWindow* aWindow,
                                            unsigned short aAudioChannel,
                                            float* aVolume)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   nsCOMPtr<nsPIDOMWindow> window = GetTopWindow(aWindow);
+  MOZ_ASSERT(window->IsOuterWindow());
   *aVolume = GetAudioChannelVolume(window, (AudioChannel)aAudioChannel);
   return NS_OK;
 }
@@ -739,7 +687,10 @@ AudioChannelService::SetAudioChannelVolume(nsIDOMWindow* aWindow,
                                            unsigned short aAudioChannel,
                                            float aVolume)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   nsCOMPtr<nsPIDOMWindow> window = GetTopWindow(aWindow);
+  MOZ_ASSERT(window->IsOuterWindow());
   SetAudioChannelVolume(window, (AudioChannel)aAudioChannel, aVolume);
   return NS_OK;
 }
@@ -761,7 +712,10 @@ AudioChannelService::GetAudioChannelMuted(nsIDOMWindow* aWindow,
                                           unsigned short aAudioChannel,
                                           bool* aMuted)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   nsCOMPtr<nsPIDOMWindow> window = GetTopWindow(aWindow);
+  MOZ_ASSERT(window->IsOuterWindow());
   *aMuted = GetAudioChannelMuted(window, (AudioChannel)aAudioChannel);
   return NS_OK;
 }
@@ -785,7 +739,10 @@ AudioChannelService::SetAudioChannelMuted(nsIDOMWindow* aWindow,
                                           unsigned short aAudioChannel,
                                           bool aMuted)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   nsCOMPtr<nsPIDOMWindow> window = GetTopWindow(aWindow);
+  MOZ_ASSERT(window->IsOuterWindow());
   SetAudioChannelMuted(window, (AudioChannel)aAudioChannel, aMuted);
   return NS_OK;
 }
@@ -807,7 +764,10 @@ AudioChannelService::IsAudioChannelActive(nsIDOMWindow* aWindow,
                                           unsigned short aAudioChannel,
                                           bool* aActive)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   nsCOMPtr<nsPIDOMWindow> window = GetTopWindow(aWindow);
+  MOZ_ASSERT(window->IsOuterWindow());
   *aActive = IsAudioChannelActive(window, (AudioChannel)aAudioChannel);
   return NS_OK;
 }

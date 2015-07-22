@@ -1190,8 +1190,11 @@ MediaStreamGraphImpl::PlayVideo(MediaStream* aStream)
   // the current state computed time.
   GraphTime framePosition = IterationEnd() + MillisecondsToMediaTime(CurrentDriver()->IterationDuration());
   if (framePosition > CurrentDriver()->StateComputedTime()) {
-    NS_WARN_IF_FALSE(std::abs(framePosition - CurrentDriver()->StateComputedTime()) <
-                     MillisecondsToMediaTime(5), "Graph thread slowdown?");
+#ifdef DEBUG
+    if (std::abs(framePosition - CurrentDriver()->StateComputedTime()) >= MillisecondsToMediaTime(5)) {
+      STREAM_LOG(LogLevel::Debug, ("Graph thread slowdown?"));
+    }
+#endif
     framePosition = CurrentDriver()->StateComputedTime();
   }
   MOZ_ASSERT(framePosition >= aStream->mBufferStartTime, "frame position before buffer?");
@@ -2667,7 +2670,7 @@ SourceMediaStream::GetEndOfAppendedData(TrackID aID)
 
 void
 SourceMediaStream::DispatchWhenNotEnoughBuffered(TrackID aID,
-    MediaTaskQueue* aSignalQueue, nsIRunnable* aSignalRunnable)
+    TaskQueue* aSignalQueue, nsIRunnable* aSignalRunnable)
 {
   MutexAutoLock lock(mMutex);
   TrackData* data = FindDataForTrack(aID);
@@ -3420,15 +3423,21 @@ MediaStreamGraphImpl::ApplyAudioContextOperationImpl(AudioNodeStream* aStream,
   // If we have suspended the last AudioContext, and we don't have other
   // streams that have audio, this graph will automatically switch to a
   // SystemCallbackDriver, because it can't find a MediaStream that has an audio
-  // track. When resuming, force switching to an AudioCallbackDriver. It would
-  // have happened at the next iteration anyways, but doing this now save
-  // some time.
+  // track. When resuming, force switching to an AudioCallbackDriver (if we're
+  // not already switching). It would have happened at the next iteration
+  // anyways, but doing this now save some time.
   if (aOperation == AudioContextOperation::Resume) {
     if (!CurrentDriver()->AsAudioCallbackDriver()) {
-      AudioCallbackDriver* driver = new AudioCallbackDriver(this);
+      AudioCallbackDriver* driver;
+      if (CurrentDriver()->Switching()) {
+        MOZ_ASSERT(CurrentDriver()->NextDriver()->AsAudioCallbackDriver());
+        driver = CurrentDriver()->NextDriver()->AsAudioCallbackDriver();
+      } else {
+        driver = new AudioCallbackDriver(this);
+        mMixer.AddCallback(driver);
+        CurrentDriver()->SwitchAtNextIteration(driver);
+      }
       driver->EnqueueStreamAndPromiseForOperation(aStream, aPromise, aOperation);
-      mMixer.AddCallback(driver);
-      CurrentDriver()->SwitchAtNextIteration(driver);
     } else {
       // We are resuming a context, but we are already using an
       // AudioCallbackDriver, we can resolve the promise now.
@@ -3456,9 +3465,14 @@ MediaStreamGraphImpl::ApplyAudioContextOperationImpl(AudioNodeStream* aStream,
       CurrentDriver()->AsAudioCallbackDriver()->
         EnqueueStreamAndPromiseForOperation(aStream, aPromise, aOperation);
 
-      SystemClockDriver* driver = new SystemClockDriver(this);
-      mMixer.RemoveCallback(CurrentDriver()->AsAudioCallbackDriver());
-      CurrentDriver()->SwitchAtNextIteration(driver);
+      SystemClockDriver* driver;
+      if (CurrentDriver()->NextDriver()) {
+        MOZ_ASSERT(!CurrentDriver()->NextDriver()->AsAudioCallbackDriver());
+      } else {
+        driver = new SystemClockDriver(this);
+        mMixer.RemoveCallback(CurrentDriver()->AsAudioCallbackDriver());
+        CurrentDriver()->SwitchAtNextIteration(driver);
+      }
     } else {
       // We are closing or suspending an AudioContext, but something else is
       // using the audio stream, we can resolve the promise now.

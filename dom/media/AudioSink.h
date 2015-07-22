@@ -10,6 +10,7 @@
 #include "MediaDecoderReader.h"
 #include "mozilla/dom/AudioChannelBinding.h"
 #include "mozilla/Atomics.h"
+#include "mozilla/MozPromise.h"
 
 namespace mozilla {
 
@@ -23,9 +24,14 @@ public:
   AudioSink(MediaDecoderStateMachine* aStateMachine,
             int64_t aStartTime, AudioInfo aInfo, dom::AudioChannel aChannel);
 
-  nsresult Init();
+  // Return a promise which will be resolved when AudioSink finishes playing,
+  // or rejected if any error.
+  nsRefPtr<GenericPromise> Init();
 
   int64_t GetPosition();
+
+  // Thread-safe. Can be called on any thread.
+  int64_t GetEndTime() const;
 
   // Check whether we've pushed more frames to the audio hardware than it has
   // played.
@@ -90,8 +96,6 @@ private:
   void StartAudioStreamPlaybackIfNeeded();
   void WriteSilence(uint32_t aFrames);
 
-  int64_t GetEndTime();
-
   MediaQueue<AudioData>& AudioQueue();
 
   ReentrantMonitor& GetReentrantMonitor();
@@ -124,7 +128,7 @@ private:
   // stream error.
   int64_t mLastGoodPosition;
 
-  AudioInfo mInfo;
+  const AudioInfo mInfo;
 
   dom::AudioChannel mChannel;
 
@@ -140,22 +144,7 @@ private:
 
   bool mPlaying;
 
-  class OnAudioEndTimeUpdateTask : public nsRunnable {
-  public:
-    explicit OnAudioEndTimeUpdateTask(MediaDecoderStateMachine* aStateMachine);
-
-    NS_IMETHOD Run() override;
-
-    void Dispatch(int64_t aEndTime);
-    void Cancel();
-
-  private:
-    Mutex mMutex;
-    int64_t mEndTime;
-    nsRefPtr<MediaDecoderStateMachine> mStateMachine;
-  };
-
-  nsRefPtr<OnAudioEndTimeUpdateTask> mOnAudioEndTimeUpdateTask;
+  MozPromiseHolder<GenericPromise> mEndPromise;
 };
 
 } // namespace mozilla

@@ -2742,6 +2742,7 @@ CodeGenerator::visitPostWriteBarrierO(LPostWriteBarrierO* lir)
     Register temp = ToTempRegisterOrInvalid(lir->temp());
 
     if (lir->object()->isConstant()) {
+        // Constant nursery objects cannot appear here, see LIRGenerator::visitPostWriteBarrier.
         MOZ_ASSERT(!IsInsideNursery(&lir->object()->toConstant()->toObject()));
     } else {
         masm.branchPtrInNurseryRange(Assembler::Equal, ToRegister(lir->object()), temp,
@@ -2762,9 +2763,8 @@ CodeGenerator::visitPostWriteBarrierV(LPostWriteBarrierV* lir)
     Register temp = ToTempRegisterOrInvalid(lir->temp());
 
     if (lir->object()->isConstant()) {
-#ifdef DEBUG
+        // Constant nursery objects cannot appear here, see LIRGenerator::visitPostWriteBarrier.
         MOZ_ASSERT(!IsInsideNursery(&lir->object()->toConstant()->toObject()));
-#endif
     } else {
         masm.branchPtrInNurseryRange(Assembler::Equal, ToRegister(lir->object()), temp,
                                      ool->rejoin());
@@ -3613,7 +3613,7 @@ CodeGenerator::generateArgumentsChecks(bool bailout)
                     continue;
 
                 Label skip;
-                Address addr(StackPointer, ArgToStackOffset((i - info.startArgSlot()) * sizeof(Value)));
+                Address addr(masm.getStackPointer(), ArgToStackOffset((i - info.startArgSlot()) * sizeof(Value)));
                 masm.branchTestObject(Assembler::NotEqual, addr, &skip);
                 Register obj = masm.extractObject(addr, temp);
                 masm.guardTypeSetMightBeIncomplete(types, obj, temp, &success);

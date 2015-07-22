@@ -215,12 +215,12 @@ public:
   }
 
   /**
-   * Add a document for which we have nsIFrameRequestCallbacks
+   * Add a document for which we have FrameRequestCallbacks
    */
   void ScheduleFrameRequestCallbacks(nsIDocument* aDocument);
 
   /**
-   * Remove a document for which we have nsIFrameRequestCallbacks
+   * Remove a document for which we have FrameRequestCallbacks
    */
   void RevokeFrameRequestCallbacks(nsIDocument* aDocument);
 
@@ -336,16 +336,12 @@ private:
 
   uint32_t ObserverCount() const;
   uint32_t ImageRequestCount() const;
-  static PLDHashOperator ImageRequestEnumerator(nsISupportsHashKey* aEntry,
-                                                void* aUserArg);
   static PLDHashOperator StartTableRequestCounter(const uint32_t& aKey,
                                                   ImageStartData* aEntry,
                                                   void* aUserArg);
   static PLDHashOperator StartTableRefresh(const uint32_t& aKey,
                                            ImageStartData* aEntry,
                                            void* aUserArg);
-  static PLDHashOperator BeginRefreshingImages(nsISupportsHashKey* aEntry,
-                                               void* aUserArg);
   ObserverArray& ArrayFor(mozFlushType aFlushType);
   // Trigger a refresh immediately, if haven't been disconnected or frozen.
   void DoRefresh();
@@ -438,6 +434,9 @@ private:
     RequestTable* mRequests;
     mozilla::TimeStamp mDesired;
   };
+
+  static void BeginRefreshingImages(RequestTable& aEntries,
+                                    ImageRequestParameters* aParms);
 
   friend class mozilla::RefreshDriverTimer;
 

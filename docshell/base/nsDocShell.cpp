@@ -77,6 +77,7 @@
 #include "IHistory.h"
 #include "nsViewSourceHandler.h"
 #include "nsWhitespaceTokenizer.h"
+#include "nsICookieService.h"
 
 // we want to explore making the document own the load group
 // so we can associate the document URI with the load group.
@@ -207,10 +208,6 @@
 #endif
 
 #include "mozIThirdPartyUtil.h"
-// Values for the network.cookie.cookieBehavior pref are documented in
-// nsCookieService.cpp
-#define COOKIE_BEHAVIOR_ACCEPT 0 // Allow all cookies.
-#define COOKIE_BEHAVIOR_REJECT_FOREIGN 1 // Reject all third-party cookies.
 
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
@@ -1607,12 +1604,20 @@ nsDocShell::LoadURI(nsIURI* aURI,
 
   if (owner && mItemType != typeChrome) {
     nsCOMPtr<nsIPrincipal> ownerPrincipal = do_QueryInterface(owner);
-    if (nsContentUtils::IsSystemOrExpandedPrincipal(ownerPrincipal)) {
+    if (nsContentUtils::IsSystemPrincipal(ownerPrincipal)) {
       if (ownerIsExplicit) {
         return NS_ERROR_DOM_SECURITY_ERR;
       }
       owner = nullptr;
       inheritOwner = true;
+    } else if (nsContentUtils::IsExpandedPrincipal(ownerPrincipal)) {
+      if (ownerIsExplicit) {
+        return NS_ERROR_DOM_SECURITY_ERR;
+      }
+      // Don't inherit from the current page.  Just do the safe thing
+      // and pretend that we were loaded by a nullprincipal.
+      owner = nsNullPrincipal::Create();
+      inheritOwner = false;
     }
   }
   if (!owner && !inheritOwner && !ownerIsExplicit) {
@@ -2921,28 +2926,17 @@ nsDocShell::HistoryTransactionRemoved(int32_t aIndex)
   return NS_OK;
 }
 
-unsigned long nsDocShell::gProfileTimelineRecordingsCount = 0;
-
-mozilla::LinkedList<nsDocShell::ObservedDocShell>* nsDocShell::gObservedDocShells = nullptr;
-
 NS_IMETHODIMP
 nsDocShell::SetRecordProfileTimelineMarkers(bool aValue)
 {
   bool currentValue = nsIDocShell::GetRecordProfileTimelineMarkers();
   if (currentValue != aValue) {
     if (aValue) {
-      ++gProfileTimelineRecordingsCount;
+      TimelineConsumers::AddConsumer(this, mObserved);
       UseEntryScriptProfiling();
-
-      MOZ_ASSERT(!mObserved);
-      mObserved.reset(new ObservedDocShell(this));
-      GetOrCreateObservedDocShells().insertFront(mObserved.get());
     } else {
-      --gProfileTimelineRecordingsCount;
+      TimelineConsumers::RemoveConsumer(this, mObserved);
       UnuseEntryScriptProfiling();
-
-      mObserved.reset(nullptr);
-
       ClearProfileTimelineMarkers();
     }
   }
@@ -3711,12 +3705,10 @@ nsDocShell::CanAccessItem(nsIDocShellTreeItem* aTargetItem,
 static bool
 ItemIsActive(nsIDocShellTreeItem* aItem)
 {
-  nsCOMPtr<nsIDOMWindow> window = aItem->GetWindow();
-
-  if (window) {
-    bool isClosed;
-
-    if (NS_SUCCEEDED(window->GetClosed(&isClosed)) && !isClosed) {
+  if (nsCOMPtr<nsIDOMWindow> window = aItem->GetWindow()) {
+    auto* win = static_cast<nsGlobalWindow*>(window.get());
+    MOZ_ASSERT(win->IsOuterWindow());
+    if (!win->GetClosedOuter()) {
       return true;
     }
   }
@@ -5196,6 +5188,17 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
         break;
       case NS_ERROR_CORRUPTED_CONTENT:
         // Broken Content Detected. e.g. Content-MD5 check failure.
+        error.AssignLiteral("corruptedContentError");
+        break;
+      case NS_ERROR_INTERCEPTION_FAILED:
+      case NS_ERROR_OPAQUE_INTERCEPTION_DISABLED:
+      case NS_ERROR_BAD_OPAQUE_INTERCEPTION_REQUEST_MODE:
+      case NS_ERROR_INTERCEPTED_ERROR_RESPONSE:
+      case NS_ERROR_INTERCEPTED_USED_RESPONSE:
+      case NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION:
+        // ServiceWorker intercepted request, but something went wrong.
+        nsContentUtils::MaybeReportInterceptionErrorToConsole(GetDocument(),
+                                                              aError);
         error.AssignLiteral("corruptedContentError");
         break;
       default:
@@ -7825,6 +7828,12 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
                aStatus == NS_ERROR_UNSAFE_CONTENT_TYPE ||
                aStatus == NS_ERROR_REMOTE_XUL ||
                aStatus == NS_ERROR_OFFLINE ||
+               aStatus == NS_ERROR_INTERCEPTION_FAILED ||
+               aStatus == NS_ERROR_OPAQUE_INTERCEPTION_DISABLED ||
+               aStatus == NS_ERROR_BAD_OPAQUE_INTERCEPTION_REQUEST_MODE ||
+               aStatus == NS_ERROR_INTERCEPTED_ERROR_RESPONSE ||
+               aStatus == NS_ERROR_INTERCEPTED_USED_RESPONSE ||
+               aStatus == NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION ||
                NS_ERROR_GET_MODULE(aStatus) == NS_ERROR_MODULE_SECURITY) {
       // Errors to be shown for any frame
       DisplayLoadError(aStatus, url, nullptr, aChannel);
@@ -9692,7 +9701,8 @@ nsDocShell::InternalLoad(nsIURI* aURI,
   }
   if (IsFrame() && !isNewDocShell && !isTargetTopLevelDocShell) {
     NS_ASSERTION(requestingElement, "A frame but no DOM element!?");
-    contentType = nsIContentPolicy::TYPE_SUBDOCUMENT;
+    contentType = requestingElement->IsHTMLElement(nsGkAtoms::iframe) ?
+      nsIContentPolicy::TYPE_INTERNAL_IFRAME : nsIContentPolicy::TYPE_INTERNAL_FRAME;
   } else {
     contentType = nsIContentPolicy::TYPE_DOCUMENT;
   }
@@ -9813,13 +9823,9 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       if (aURI) {
         aURI->GetSpec(spec);
       }
-      nsAutoString features;
-      if (mInPrivateBrowsing) {
-        features.AssignLiteral("private");
-      }
       rv = win->OpenNoNavigate(NS_ConvertUTF8toUTF16(spec),
                                name,  // window name
-                               features,
+                               EmptyString(), // Features
                                getter_AddRefs(newWin));
 
       // In some cases the Open call doesn't actually result in a new
@@ -13500,6 +13506,16 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent,
   nsCOMPtr<nsIURI> referer = refererDoc->GetDocumentURI();
   uint32_t refererPolicy = refererDoc->GetReferrerPolicy();
 
+  // get referrer attribute from clicked link and parse it
+  // if per element referrer is enabled, the element referrer overrules
+  // the document wide referrer
+  if (IsElementAnchor(aContent)) {
+    net::ReferrerPolicy refPolEnum = aContent->AsElement()->GetReferrerPolicy();
+    if (refPolEnum != net::RP_Unset) {
+      refererPolicy = refPolEnum;
+    }
+  }
+
   // referer could be null here in some odd cases, but that's ok,
   // we'll just load the link w/o sending a referer in those cases.
 
@@ -14059,8 +14075,8 @@ nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNavigate,
       NS_ENSURE_SUCCESS(result, result);
       if (isThirdPartyURI &&
           (Preferences::GetInt("network.cookie.cookieBehavior",
-                               COOKIE_BEHAVIOR_ACCEPT) ==
-                               COOKIE_BEHAVIOR_REJECT_FOREIGN)) {
+                               nsICookieService::BEHAVIOR_ACCEPT) ==
+                               nsICookieService::BEHAVIOR_REJECT_FOREIGN)) {
         return NS_OK;
       }
     }
@@ -14091,7 +14107,7 @@ nsDocShell::ChannelIntercepted(nsIInterceptedChannel* aChannel)
 {
   nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   if (!swm) {
-    aChannel->Cancel();
+    aChannel->Cancel(NS_ERROR_INTERCEPTION_FAILED);
     return NS_OK;
   }
 

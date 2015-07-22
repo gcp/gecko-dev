@@ -1751,11 +1751,11 @@ var BrowserApp = {
               docShell.mixedContentChannel = null;
             }
           } else if (data.contentType === "tracking") {
+            // Convert document URI into the format used by
+            // nsChannelClassifier::ShouldEnableTrackingProtection
+            // (any scheme turned into https is correct)
+            let normalizedUrl = Services.io.newURI("https://" + browser.currentURI.hostPort, null, null);
             if (data.allowContent) {
-              // Convert document URI into the format used by
-              // nsChannelClassifier::ShouldEnableTrackingProtection
-              // (any scheme turned into https is correct)
-              let normalizedUrl = Services.io.newURI("https://" + browser.currentURI.hostPort, null, null);
               // Add the current host in the 'trackingprotection' consumer of
               // the permission manager using a normalized URI. This effectively
               // places this host on the tracking protection white list.
@@ -1765,7 +1765,7 @@ var BrowserApp = {
               // Remove the current host from the 'trackingprotection' consumer
               // of the permission manager. This effectively removes this host
               // from the tracking protection white list (any list actually).
-              Services.perms.remove(browser.currentURI, "trackingprotection");
+              Services.perms.remove(normalizedUrl, "trackingprotection");
               Telemetry.addData("TRACKING_PROTECTION_EVENTS", 2);
             }
           }
@@ -5314,6 +5314,9 @@ var BrowserEventHandler = {
         if (this._inCluster && this._clickInZoomedView != true) {
           this._clusterClicked(x, y);
         } else {
+          if (this._clickInZoomedView != true) {
+            this._closeZoomedView();
+          }
           // The _highlightElement was chosen after fluffing the touch events
           // that led to this SingleTap, so by fluffing the mouse events, they
           // should find the same target since we fluff them again below.
@@ -5342,6 +5345,12 @@ var BrowserEventHandler = {
         dump('BrowserEventHandler.handleUserEvent: unexpected topic "' + aTopic + '"');
         break;
     }
+  },
+
+  _closeZoomedView: function() {
+    Messaging.sendRequest({
+      type: "Gesture:CloseZoomedView"
+    });
   },
 
   _clusterClicked: function(aX, aY) {
@@ -7016,7 +7025,7 @@ var IdentityHandler = {
   // Loaded active mixed content. Yellow triangle icon is shown.
   MIXED_MODE_CONTENT_LOADED: "mixed_content_loaded",
 
-  // The following tracking content modes are only used if "privacy.trackingprotection.enabled"
+  // The following tracking content modes are only used if tracking protection
   // is enabled. Our Java frontend coalesces them into one indicator.
 
   // No tracking content information. No tracking content icon is shown.
@@ -7094,15 +7103,18 @@ var IdentityHandler = {
     return this.MIXED_MODE_UNKNOWN;
   },
 
-  getTrackingMode: function getTrackingMode(aState) {
+  getTrackingMode: function getTrackingMode(aState, aBrowser) {
     if (aState & Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT) {
       Telemetry.addData("TRACKING_PROTECTION_SHIELD", 2);
       return this.TRACKING_MODE_CONTENT_BLOCKED;
     }
 
     // Only show an indicator for loaded tracking content if the pref to block it is enabled
-    if ((aState & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT) &&
-         Services.prefs.getBoolPref("privacy.trackingprotection.enabled")) {
+    let tpEnabled = Services.prefs.getBoolPref("privacy.trackingprotection.enabled") ||
+                    (Services.prefs.getBoolPref("privacy.trackingprotection.pbmode.enabled") &&
+                     PrivateBrowsingUtils.isBrowserPrivate(aBrowser));
+
+    if ((aState & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT) && tpEnabled) {
       Telemetry.addData("TRACKING_PROTECTION_SHIELD", 1);
       return this.TRACKING_MODE_CONTENT_LOADED;
     }
@@ -7139,7 +7151,7 @@ var IdentityHandler = {
 
     let identityMode = this.getIdentityMode(aState);
     let mixedMode = this.getMixedMode(aState);
-    let trackingMode = this.getTrackingMode(aState);
+    let trackingMode = this.getTrackingMode(aState, aBrowser);
     let result = {
       origin: locationObj.origin,
       mode: {

@@ -1067,7 +1067,7 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-ic
   }
 
   :-moz-any(@primaryToolbarButtons@) > .toolbarbutton-icon,
-  :-moz-any(@primaryToolbarButtons@) > .toolbarbutton-badge-container > .toolbarbutton-icon,
+  :-moz-any(@primaryToolbarButtons@) > .toolbarbutton-badge-stack > .toolbarbutton-icon,
   :-moz-any(@primaryToolbarButtons@) > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
     width: 18px;
   }
@@ -1090,25 +1090,25 @@ toolbar .toolbarbutton-1:not(:-moz-any(@primaryToolbarButtons@)) > .toolbarbutto
 
 /* Help SDK icons fit: */
 toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-icon,
-toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-badge-container > .toolbarbutton-icon {
+toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-badge-stack > .toolbarbutton-icon {
   width: 16px;
 }
 
 #main-window:not([customizing]) .toolbarbutton-1[disabled="true"] > .toolbarbutton-icon,
-#main-window:not([customizing]) .toolbarbutton-1[disabled="true"] > .toolbarbutton-badge-container > .toolbarbutton-icon,
+#main-window:not([customizing]) .toolbarbutton-1[disabled="true"] > .toolbarbutton-badge-stack > .toolbarbutton-icon,
 #main-window:not([customizing]) .toolbarbutton-1 > .toolbarbutton-menubutton-button[disabled="true"] > .toolbarbutton-icon {
   opacity: .4;
 }
 
 @media (-moz-mac-lion-theme) {
   #main-window:not([customizing]) .toolbarbutton-1[disabled="true"] > .toolbarbutton-icon,
-  #main-window:not([customizing]) .toolbarbutton-1[disabled="true"] > .toolbarbutton-badge-container > .toolbarbutton-icon,
+  #main-window:not([customizing]) .toolbarbutton-1[disabled="true"] > .toolbarbutton-badge-stack > .toolbarbutton-icon,
   #main-window:not([customizing]) .toolbarbutton-1 > .toolbarbutton-menubutton-button[disabled="true"] > .toolbarbutton-icon,
   #main-window:not([customizing]) .toolbarbutton-1[disabled="true"] > .toolbarbutton-menu-dropmarker,
   #main-window:not([customizing]) .toolbarbutton-1[disabled="true"] > .toolbarbutton-menubutton-dropmarker,
   .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-icon,
   .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-text,
-  .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-badge-container > .toolbarbutton-icon,
+  .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-badge-stack > .toolbarbutton-icon,
   .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-menu-dropmarker,
   .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
   .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
@@ -1116,7 +1116,7 @@ toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-ba
   }
 
   #main-window:not([customizing]) .toolbarbutton-1:-moz-window-inactive[disabled="true"] > .toolbarbutton-icon,
-  #main-window:not([customizing]) .toolbarbutton-1:-moz-window-inactive[disabled="true"] > .toolbarbutton-badge-container > .toolbarbutton-icon,
+  #main-window:not([customizing]) .toolbarbutton-1:-moz-window-inactive[disabled="true"] > .toolbarbutton-badge-stack > .toolbarbutton-icon,
   #main-window:not([customizing]) .toolbarbutton-1:-moz-window-inactive > .toolbarbutton-menubutton-button[disabled="true"] > .toolbarbutton-icon {
     opacity: .25;
   }
@@ -1660,15 +1660,13 @@ toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-ba
 }
 
 @media (-moz-mac-yosemite-theme) {
-  #urlbar:not([focused="true"]) > #identity-box {
+  #urlbar:not([focused="true"]):not(:-moz-window-inactive) > #identity-box {
     margin: -2px 0;
     -moz-margin-end: 3px;
     padding: 3px 4px;
   }
-
-  #urlbar > #identity-box:hover,
-  #urlbar > #identity-box[open=true] {
-    background-color: rgb(240,237,237);
+  #identity-box {
+    --identity-box-selected-background-color: rgb(240,237,237);
   }
 }
 
@@ -1683,7 +1681,7 @@ toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-ba
 }
 
 #notification-popup-box:not([hidden]) + #identity-box {
-  -moz-padding-start: 10px;
+  -moz-padding-start: 10px !important;
   border-radius: 0;
 }
 
@@ -1827,6 +1825,10 @@ toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-ba
   margin-top: 0;
   margin-bottom: 0;
   color: GrayText;
+}
+
+#PopupAutoCompleteRichResult > richlistbox {
+  transition: height 100ms;
 }
 
 #PopupAutoCompleteRichResult {
@@ -2663,7 +2665,9 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   border-width: 0 11px;
 }
 
-.tabbrowser-tab:focus > .tab-stack > .tab-content > .tab-label {
+.tabbrowser-tab:focus > .tab-stack > .tab-content > .tab-label:not([pinned]),
+.tabbrowser-tab:focus > .tab-stack > .tab-content > .tab-icon-image[pinned],
+.tabbrowser-tab:focus > .tab-stack > .tab-content > .tab-throbber[pinned] {
   box-shadow: @focusRingShadow@;
 }
 
@@ -3386,21 +3390,12 @@ notification[value="loop-sharing-notification"] .messageImage {
   box-shadow: 0 0 2px white;
 }
 
-#full-screen-warning-container[obscure-browser] {
-  background-color: rgba(0,0,0,0.3);
-}
-
 .full-screen-description {
   font-size: 150%;
 }
 
 #full-screen-domain-text {
   font-size: 300%;
-}
-
-.full-screen-approval-button,
-#full-screen-remember-decision {
-  font-size: 120%;
 }
 
 %include ../shared/devtools/responsivedesign.inc.css

@@ -28,6 +28,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "BrowserUITelemetry",
   "resource:///modules/BrowserUITelemetry.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Metrics",
   "resource://gre/modules/Metrics.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ReaderMode",
   "resource://gre/modules/ReaderMode.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ReaderParent",
@@ -120,6 +122,20 @@ this.UITour = {
       widgetName: "urlbar-container",
     }],
     ["bookmarks",   {query: "#bookmarks-menu-button"}],
+    ["controlCenter-trackingUnblock", {
+      infoPanelPosition: "rightcenter topleft",
+      query(aDocument) {
+        let popup = aDocument.defaultView.gIdentityHandler._identityPopup;
+        if (popup.state != "open") {
+          return null;
+        }
+        let buttonId =
+            PrivateBrowsingUtils.isWindowPrivate(aDocument.defaultView) ?
+            "tracking-action-unblock-private" : "tracking-action-unblock";
+        let element = aDocument.getElementById(buttonId);
+        return UITour.isElementVisible(element) ? element : null;
+      },
+    }],
     ["customize",   {
       query: (aDocument) => {
         let customizeButton = aDocument.getElementById("PanelUI-customize");
@@ -262,6 +278,9 @@ this.UITour = {
         }
         return element;
       },
+    }],
+    ["trackingProtection", {
+      query: "#tracking-protection-icon",
     }],
     ["urlbar",      {
       query: "#urlbar",
@@ -410,9 +429,6 @@ this.UITour = {
       return false;
     }
 
-    // Do this before bailing if there's no tab, so later we can pick up the pieces:
-    window.gBrowser.tabContainer.addEventListener("TabSelect", this);
-
     switch (action) {
       case "registerPageID": {
         if (typeof data.pageID != "string") {
@@ -503,9 +519,12 @@ this.UITour = {
               if (typeof buttonData == "object" &&
                   typeof buttonData.label == "string" &&
                   typeof buttonData.callbackID == "string") {
+                let callback = buttonData.callbackID;
                 let button = {
                   label: buttonData.label,
-                  callbackID: buttonData.callbackID,
+                  callback: event => {
+                    this.sendPageCallback(messageManager, callback);
+                  },
                 };
 
                 if (typeof buttonData.icon == "string")
@@ -730,16 +749,27 @@ this.UITour = {
       }
     }
 
+    this.initForBrowser(browser);
+
+    return true;
+  },
+
+  initForBrowser(aBrowser) {
+    let window = aBrowser.ownerDocument.defaultView;
+    let gBrowser = window.gBrowser;
+
+    if (gBrowser) {
+        gBrowser.tabContainer.addEventListener("TabSelect", this);
+    }
+
     if (!this.tourBrowsersByWindow.has(window)) {
       this.tourBrowsersByWindow.set(window, new Set());
     }
-    this.tourBrowsersByWindow.get(window).add(browser);
+    this.tourBrowsersByWindow.get(window).add(aBrowser);
 
     Services.obs.addObserver(this, "message-manager-close", false);
 
     window.addEventListener("SSWindowClosing", this);
-
-    return true;
   },
 
   handleEvent: function(aEvent) {
@@ -855,6 +885,7 @@ this.UITour = {
     // Ensure the menu panel is hidden before calling recreatePopup so popup events occur.
     this.hideMenu(aWindow, "appMenu");
     this.hideMenu(aWindow, "loop");
+    this.hideMenu(aWindow, "controlCenter");
 
     // Clean up panel listeners after calling hideMenu above.
     aWindow.PanelUI.panel.removeEventListener("popuphiding", this.hideAppMenuAnnotations);
@@ -863,6 +894,9 @@ this.UITour = {
     let loopPanel = aWindow.document.getElementById("loop-notification-panel");
     loopPanel.removeEventListener("popuphidden", this.onPanelHidden);
     loopPanel.removeEventListener("popuphiding", this.hideLoopPanelAnnotations);
+    let controlCenterPanel = aWindow.gIdentityHandler._identityPopup;
+    controlCenterPanel.removeEventListener("popuphidden", this.onPanelHidden);
+    controlCenterPanel.removeEventListener("popuphiding", this.hideControlCenterAnnotations);
 
     this.endUrlbarCapture(aWindow);
     this.resetTheme();
@@ -1400,22 +1434,28 @@ this.UITour = {
         tooltipButtons.firstChild.remove();
 
       for (let button of aButtons) {
-        let el = document.createElement("button");
-        el.setAttribute("label", button.label);
-        if (button.iconURL)
-          el.setAttribute("image", button.iconURL);
+        let isButton = button.style != "text";
+        let el = document.createElement(isButton ? "button" : "label");
+        el.setAttribute(isButton ? "label" : "value", button.label);
 
-        if (button.style == "link")
-          el.setAttribute("class", "button-link");
+        if (isButton) {
+          if (button.iconURL)
+            el.setAttribute("image", button.iconURL);
 
-        if (button.style == "primary")
-          el.setAttribute("class", "button-primary");
+          if (button.style == "link")
+            el.setAttribute("class", "button-link");
 
-        let callbackID = button.callbackID;
-        el.addEventListener("command", event => {
-          tooltip.hidePopup();
-          this.sendPageCallback(aMessageManager, callbackID);
-        });
+          if (button.style == "primary")
+            el.setAttribute("class", "button-primary");
+
+          // Don't close the popup or call the callback for style=text as they
+          // aren't links/buttons.
+          let callback = button.callback;
+          el.addEventListener("command", event => {
+            tooltip.hidePopup();
+            callback(event);
+          });
+        }
 
         tooltipButtons.appendChild(el);
       }
@@ -1536,6 +1576,31 @@ this.UITour = {
     } else if (aMenuName == "bookmarks") {
       let menuBtn = aWindow.document.getElementById("bookmarks-menu-button");
       openMenuButton(menuBtn);
+    } else if (aMenuName == "controlCenter") {
+      let popup = aWindow.gIdentityHandler._identityPopup;
+
+      // Add the listener even if the panel is already open since it will still
+      // only get registered once even if it was UITour that opened it.
+      popup.addEventListener("popuphiding", this.hideControlCenterAnnotations);
+      popup.addEventListener("popuphidden", this.onPanelHidden);
+
+      popup.setAttribute("noautohide", true);
+      this.availableTargetsCache.clear();
+
+      if (popup.state == "open") {
+        if (aOpenCallback) {
+          aOpenCallback();
+        }
+        return;
+      }
+
+      this.recreatePopup(popup);
+
+      // Open the control center
+      if (aOpenCallback) {
+        popup.addEventListener("popupshown", onPopupShown);
+      }
+      aWindow.document.getElementById("identity-box").click();
     } else if (aMenuName == "loop") {
       let toolbarButton = aWindow.LoopUI.toolbarButton;
       // It's possible to have a node that isn't placed anywhere
@@ -1620,6 +1685,9 @@ this.UITour = {
     } else if (aMenuName == "bookmarks") {
       let menuBtn = aWindow.document.getElementById("bookmarks-menu-button");
       closeMenuButton(menuBtn);
+    } else if (aMenuName == "controlCenter") {
+      let panel = aWindow.gIdentityHandler._identityPopup;
+      panel.hidePopup();
     } else if (aMenuName == "loop") {
       let panel = aWindow.document.getElementById("loop-notification-panel");
       panel.hidePopup();
@@ -1664,9 +1732,16 @@ this.UITour = {
     });
   },
 
+  hideControlCenterAnnotations(aEvent) {
+    UITour.hideAnnotationsForPanel(aEvent, (aTarget) => {
+      return aTarget.targetName.startsWith("controlCenter-");
+    });
+  },
+
   onPanelHidden: function(aEvent) {
     aEvent.target.removeAttribute("noautohide");
     UITour.recreatePopup(aEvent.target);
+    UITour.availableTargetsCache.clear();
   },
 
   recreatePopup: function(aPanel) {

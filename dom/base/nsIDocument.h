@@ -152,8 +152,8 @@ typedef CallbackObjectHolder<NodeFilter, nsIDOMNodeFilter> NodeFilterHolder;
 } // namespace mozilla
 
 #define NS_IDOCUMENT_IID \
-{ 0x21bbd52a, 0xc2d2, 0x4b2f, \
-  { 0xbc, 0x6c, 0xc9, 0x52, 0xbe, 0x23, 0x6b, 0x19 } }
+{ 0xbbce44c8, 0x22fe, 0x404f, \
+  { 0x9e, 0x71, 0x23, 0x1d, 0xf4, 0xcc, 0x8e, 0x34 } }
 
 // Enum for requesting a particular type of document when creating a doc
 enum DocumentFlavor {
@@ -1157,32 +1157,29 @@ public:
   virtual void SetFullscreenRoot(nsIDocument* aRoot) = 0;
 
   /**
-   * Sets whether this document is approved for fullscreen mode.
-   * Documents aren't approved for fullscreen until chrome has sent a
-   * "fullscreen-approved" notification with a subject which is a pointer
-   * to the approved document.
+   * Synchronously cleans up the fullscreen state on the given document.
+   *
+   * Calling this without performing fullscreen transition could lead
+   * to undesired effect (the transition happens after document state
+   * flips), hence it should only be called either by nsGlobalWindow
+   * when we have performed the transition, or when it is necessary to
+   * clean up the state immediately. Otherwise, AsyncExitFullscreen()
+   * should be called instead.
+   *
+   * aDocument must not be null.
    */
-  virtual void SetApprovedForFullscreen(bool aIsApproved) = 0;
+  static void ExitFullscreenInDocTree(nsIDocument* aDocument);
 
   /**
-   * Exits documents out of DOM fullscreen mode.
+   * Ask the document to exit fullscreen state asynchronously.
    *
-   * If aDocument is null, all fullscreen documents in all browser windows
-   * exit fullscreen.
+   * Different from ExitFullscreenInDocTree(), this allows the window
+   * to perform fullscreen transition first if any.
    *
-   * If aDocument is non null, all documents from aDocument's fullscreen root
-   * to the fullscreen leaf exit fullscreen.
-   *
-   * Note that the fullscreen leaf is the bottom-most document which is
-   * fullscreen, it may have non-fullscreen child documents. The fullscreen
-   * root is normally the chrome document.
-   *
-   * If aRunAsync is true, fullscreen is executed asynchronously.
-   *
-   * Note if aDocument is not fullscreen this function has no effect, even if
-   * aDocument has fullscreen ancestors.
+   * If aDocument is null, it will exit fullscreen from all documents
+   * in all windows.
    */
-  static void ExitFullscreen(nsIDocument* aDocument, bool aRunAsync);
+  static void AsyncExitFullscreen(nsIDocument* aDocument);
 
   /**
    * Handles one single fullscreen request, updates `aHandled` if the request
@@ -2117,14 +2114,11 @@ public:
 
   virtual mozilla::dom::DocumentTimeline* Timeline() = 0;
 
-  typedef mozilla::dom::CallbackObjectHolder<
-    mozilla::dom::FrameRequestCallback,
-    nsIFrameRequestCallback> FrameRequestCallbackHolder;
-  nsresult ScheduleFrameRequestCallback(const FrameRequestCallbackHolder& aCallback,
+  nsresult ScheduleFrameRequestCallback(mozilla::dom::FrameRequestCallback& aCallback,
                                         int32_t *aHandle);
   void CancelFrameRequestCallback(int32_t aHandle);
 
-  typedef nsTArray<FrameRequestCallbackHolder> FrameRequestCallbackList;
+  typedef nsTArray<nsRefPtr<mozilla::dom::FrameRequestCallback>> FrameRequestCallbackList;
   /**
    * Put this document's frame request callbacks into the provided
    * list, and forget about them.

@@ -45,9 +45,10 @@ function clickButton(sel) {
 function testBenignPage() {
   info("Non-tracking content must not be blocked");
   ok (!TrackingProtection.container.hidden, "The container is visible");
-  ok (!TrackingProtection.content.hasAttribute("block-disabled"), "blocking not disabled");
-  ok (!TrackingProtection.content.hasAttribute("block-active"), "blocking is not active");
+  ok (!TrackingProtection.content.hasAttribute("state"), "content: no state");
+  ok (!TrackingProtection.icon.hasAttribute("state"), "icon: no state");
 
+  ok (hidden("#tracking-protection-icon"), "icon is hidden");
   ok (hidden("#tracking-action-block"), "blockButton is hidden");
   ok (hidden("#tracking-action-unblock"), "unblockButton is hidden");
 
@@ -57,14 +58,25 @@ function testBenignPage() {
   ok (hidden("#tracking-blocked"), "labelTrackingBlocked is hidden");
 }
 
-function testTrackingPage() {
+function testTrackingPage(window) {
   info("Tracking content must be blocked");
   ok (!TrackingProtection.container.hidden, "The container is visible");
-  ok (!TrackingProtection.content.hasAttribute("block-disabled"), "blocking not disabled");
-  ok (TrackingProtection.content.hasAttribute("block-active"), "blocking is active");
+  is (TrackingProtection.content.getAttribute("state"), "blocked-tracking-content",
+      'content: state="blocked-tracking-content"');
+  is (TrackingProtection.icon.getAttribute("state"), "blocked-tracking-content",
+      'icon: state="blocked-tracking-content"');
 
+  ok (!hidden("#tracking-protection-icon"), "icon is visible");
   ok (hidden("#tracking-action-block"), "blockButton is hidden");
-  ok (!hidden("#tracking-action-unblock"), "unblockButton is visible");
+
+
+  if (PrivateBrowsingUtils.isWindowPrivate(window)) {
+    ok(hidden("#tracking-action-unblock"), "unblockButton is hidden");
+    ok(!hidden("#tracking-action-unblock-private"), "unblockButtonPrivate is visible");
+  } else {
+    ok(!hidden("#tracking-action-unblock"), "unblockButton is visible");
+    ok(hidden("#tracking-action-unblock-private"), "unblockButtonPrivate is hidden");
+  }
 
   // Make sure that the blocked tracking elements message appears
   ok (hidden("#tracking-not-detected"), "labelNoTracking is hidden");
@@ -72,12 +84,15 @@ function testTrackingPage() {
   ok (!hidden("#tracking-blocked"), "labelTrackingBlocked is visible");
 }
 
-function testTrackingPageWhitelisted() {
+function testTrackingPageUnblocked() {
   info("Tracking content must be white-listed and not blocked");
   ok (!TrackingProtection.container.hidden, "The container is visible");
-  ok (TrackingProtection.content.hasAttribute("block-disabled"), "blocking is disabled");
-  ok (!TrackingProtection.content.hasAttribute("block-active"), "blocking is not active");
+  is (TrackingProtection.content.getAttribute("state"), "loaded-tracking-content",
+      'content: state="loaded-tracking-content"');
+  is (TrackingProtection.icon.getAttribute("state"), "loaded-tracking-content",
+      'icon: state="loaded-tracking-content"');
 
+  ok (!hidden("#tracking-protection-icon"), "icon is visible");
   ok (!hidden("#tracking-action-block"), "blockButton is visible");
   ok (hidden("#tracking-action-unblock"), "unblockButton is hidden");
 
@@ -94,21 +109,19 @@ function* testTrackingProtectionForTab(tab) {
 
   info("Load a test page containing tracking elements");
   yield promiseTabLoadEvent(tab, TRACKING_PAGE);
-  testTrackingPage();
+  testTrackingPage(tab.ownerDocument.defaultView);
 
   info("Disable TP for the page (which reloads the page)");
+  let tabReloadPromise = promiseTabLoadEvent(tab);
   clickButton("#tracking-action-unblock");
-
-  info("Wait for tab to reload following TP white-listing");
-  yield promiseTabLoadEvent(tab);
-  testTrackingPageWhitelisted();
+  yield tabReloadPromise;
+  testTrackingPageUnblocked();
 
   info("Re-enable TP for the page (which reloads the page)");
+  tabReloadPromise = promiseTabLoadEvent(tab);
   clickButton("#tracking-action-block");
-
-  info("Wait for tab to reload following TP black-listing");
-  yield promiseTabLoadEvent(tab);
-  testTrackingPage();
+  yield tabReloadPromise;
+  testTrackingPage(tab.ownerDocument.defaultView);
 }
 
 add_task(function* testNormalBrowsing() {

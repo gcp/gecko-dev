@@ -5,8 +5,6 @@
 
 package org.mozilla.gecko;
 
-import com.nineoldandroids.animation.Animator;
-import com.nineoldandroids.animation.ObjectAnimator;
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.DynamicToolbar.PinReason;
 import org.mozilla.gecko.DynamicToolbar.VisibilityTransition;
@@ -71,6 +69,7 @@ import org.mozilla.gecko.toolbar.AutocompleteHandler;
 import org.mozilla.gecko.toolbar.BrowserToolbar;
 import org.mozilla.gecko.toolbar.BrowserToolbar.TabEditingState;
 import org.mozilla.gecko.toolbar.ToolbarProgressView;
+import org.mozilla.gecko.trackingprotection.TrackingProtectionPrompt;
 import org.mozilla.gecko.util.ActivityUtils;
 import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.EventCallback;
@@ -139,6 +138,8 @@ import android.widget.ListView;
 import android.widget.RelativeLayout;
 import android.widget.Toast;
 import android.widget.ViewFlipper;
+import com.nineoldandroids.animation.Animator;
+import com.nineoldandroids.animation.ObjectAnimator;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -1319,7 +1320,7 @@ public class BrowserApp extends GeckoApp
         if (itemId == R.id.copyurl) {
             Tab tab = Tabs.getInstance().getSelectedTab();
             if (tab != null) {
-                String url = tab.getURL();
+                String url = ReaderModeUtils.stripAboutReaderUrl(tab.getURL());
                 if (url != null) {
                     Clipboard.setText(url);
                     Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.CONTEXT_MENU, "copyurl");
@@ -2056,6 +2057,22 @@ public class BrowserApp extends GeckoApp
     @Override
     public void addPrivateTab() {
         Tabs.getInstance().addPrivateTab();
+
+        showTrackingProtectionPromptIfApplicable();
+    }
+
+    private void showTrackingProtectionPromptIfApplicable() {
+        final SharedPreferences prefs = getSharedPreferences();
+
+        final boolean hasTrackingProtectionPromptBeShownBefore = prefs.getBoolean(GeckoPreferences.PREFS_TRACKING_PROTECTION_PROMPT_SHOWN, false);
+
+        if (hasTrackingProtectionPromptBeShownBefore) {
+            return;
+        }
+
+        prefs.edit().putBoolean(GeckoPreferences.PREFS_TRACKING_PROTECTION_PROMPT_SHOWN, true).apply();
+
+        startActivity(new Intent(BrowserApp.this, TrackingProtectionPrompt.class));
     }
 
     @Override
@@ -2646,6 +2663,7 @@ public class BrowserApp extends GeckoApp
         // FormAssistPopup.onMetricsChanged, which queues a runnable that undoes the effect of hide.
         // With hide first, onMetricsChanged will return early instead.
         mFormAssistPopup.hide();
+        mFindInPageBar.hide();
 
         // Refresh toolbar height to possibly restore the toolbar padding
         refreshToolbarHeight();
@@ -2800,9 +2818,6 @@ public class BrowserApp extends GeckoApp
         // We do this here because there are glitches when unlocking a device with
         // BrowserSearch in the foreground if we use BrowserSearch.onStart/Stop.
         getActivity().getWindow().setBackgroundDrawableResource(android.R.color.white);
-
-        // Hide potentially visible "find in page" bar (bug 1175434).
-        mFindInPageBar.hide();
     }
 
     private void hideBrowserSearch() {
@@ -3938,5 +3953,14 @@ public class BrowserApp extends GeckoApp
 
     public static interface Refreshable {
         public void refresh();
+    }
+
+    @Override
+    protected StartupAction getStartupAction(final String passedURL) {
+        final boolean inGuestMode = GeckoProfile.get(this).inGuestMode();
+        if (inGuestMode) {
+            return StartupAction.GUEST;
+        }
+        return (passedURL == null ? StartupAction.NORMAL : StartupAction.URL);
     }
 }

@@ -619,8 +619,7 @@ struct FlowLengthProperty {
 };
 
 int32_t nsTextFrame::GetInFlowContentLength() {
-  if (!(mState & NS_FRAME_IS_BIDI) &&
-      !StyleText()->NewlineIsSignificant(this)) {
+  if (!PresContext()->BidiEnabled()) {
     return mContent->TextLength() - mContentOffset;
   }
 
@@ -632,7 +631,7 @@ int32_t nsTextFrame::GetInFlowContentLength() {
    * mContentOffset but this frame is empty, logically it might be before the
    * start of the cached flow.
    */
-  if (flowLength && !StyleText()->NewlineIsSignificant(this) &&
+  if (flowLength &&
       (flowLength->mStartOffset < mContentOffset ||
        (flowLength->mStartOffset == mContentOffset && GetContentEnd() > mContentOffset)) &&
       flowLength->mEndFlowOffset > mContentOffset) {
@@ -4956,6 +4955,12 @@ nsTextFrame::GetTextDecorations(
     // If we're on an absolutely-positioned element or a floating
     // element, we're done.
     if (f->IsFloating() || f->IsAbsolutelyPositioned()) {
+      break;
+    }
+
+    // If we're an outer <svg> element, which is classified as an atomic
+    // inline-level element, we're done.
+    if (f->GetType() == nsGkAtoms::svgOuterSVGFrame) {
       break;
     }
   }

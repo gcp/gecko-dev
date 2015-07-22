@@ -16,39 +16,6 @@ extern PRLogModuleInfo* gMediaDecoderLog;
 #define SINK_LOG_V(msg, ...) \
   MOZ_LOG(gMediaDecoderLog, LogLevel::Verbose, ("AudioSink=%p " msg, this, ##__VA_ARGS__))
 
-AudioSink::OnAudioEndTimeUpdateTask::OnAudioEndTimeUpdateTask(
-                                     MediaDecoderStateMachine* aStateMachine)
-  : mMutex("OnAudioEndTimeUpdateTask")
-  , mEndTime(0)
-  , mStateMachine(aStateMachine)
-{
-}
-
-NS_IMETHODIMP
-AudioSink::OnAudioEndTimeUpdateTask::Run() {
-  MutexAutoLock lock(mMutex);
-  if (mStateMachine) {
-    mStateMachine->OnAudioEndTimeUpdate(mEndTime);
-  }
-  return NS_OK;
-}
-
-void
-AudioSink::OnAudioEndTimeUpdateTask::Dispatch(int64_t aEndTime) {
-  MutexAutoLock lock(mMutex);
-  if (mStateMachine) {
-    mEndTime = aEndTime;
-    nsRefPtr<AudioSink::OnAudioEndTimeUpdateTask> runnable(this);
-    mStateMachine->TaskQueue()->Dispatch(runnable.forget());
-  }
-}
-
-void
-AudioSink::OnAudioEndTimeUpdateTask::Cancel() {
-  MutexAutoLock lock(mMutex);
-  mStateMachine = nullptr;
-}
-
 // The amount of audio frames that is used to fuzz rounding errors.
 static const int64_t AUDIO_FUZZ_FRAMES = 1;
 
@@ -68,30 +35,30 @@ AudioSink::AudioSink(MediaDecoderStateMachine* aStateMachine,
   , mSetPlaybackRate(false)
   , mSetPreservesPitch(false)
   , mPlaying(true)
-  , mOnAudioEndTimeUpdateTask(new OnAudioEndTimeUpdateTask(aStateMachine))
 {
 }
 
-nsresult
+nsRefPtr<GenericPromise>
 AudioSink::Init()
 {
+  nsRefPtr<GenericPromise> p = mEndPromise.Ensure(__func__);
   nsresult rv = NS_NewNamedThread("Media Audio",
                                   getter_AddRefs(mThread),
                                   nullptr,
                                   MEDIA_THREAD_STACK_SIZE);
   if (NS_FAILED(rv)) {
-    mStateMachine->OnAudioSinkError();
-    return rv;
+    mEndPromise.Reject(rv, __func__);
+    return p;
   }
 
   nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(this, &AudioSink::AudioLoop);
   rv =  mThread->Dispatch(event, NS_DISPATCH_NORMAL);
   if (NS_FAILED(rv)) {
-    mStateMachine->OnAudioSinkError();
-    return rv;
+    mEndPromise.Reject(rv, __func__);
+    return p;
   }
 
-  return NS_OK;
+  return p;
 }
 
 int64_t
@@ -132,10 +99,12 @@ AudioSink::PrepareToShutdown()
 void
 AudioSink::Shutdown()
 {
-  mOnAudioEndTimeUpdateTask->Cancel();
   mThread->Shutdown();
   mThread = nullptr;
-  MOZ_ASSERT(!mAudioStream);
+  if (mAudioStream) {
+    mAudioStream->Shutdown();
+    mAudioStream = nullptr;
+  }
 }
 
 void
@@ -177,9 +146,10 @@ AudioSink::AudioLoop()
   AssertOnAudioThread();
   SINK_LOG("AudioLoop started");
 
-  if (NS_FAILED(InitializeAudioStream())) {
+  nsresult rv = InitializeAudioStream();
+  if (NS_FAILED(rv)) {
     NS_WARNING("Initializing AudioStream failed.");
-    mStateMachine->DispatchOnAudioSinkError();
+    mEndPromise.Reject(rv, __func__);
     return;
   }
 
@@ -217,10 +187,6 @@ AudioSink::AudioLoop()
       mWritten += PlaySilence(static_cast<uint32_t>(missingFrames.value()));
     } else {
       mWritten += PlayFromAudioQueue();
-    }
-    int64_t endTime = GetEndTime();
-    if (endTime != -1) {
-      mOnAudioEndTimeUpdateTask->Dispatch(endTime);
     }
   }
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
@@ -272,16 +238,10 @@ void
 AudioSink::Cleanup()
 {
   AssertCurrentThreadInMonitor();
-  nsRefPtr<AudioStream> audioStream;
-  audioStream.swap(mAudioStream);
-  // Suppress the callback when the stop is requested by MediaDecoderStateMachine.
-  // See Bug 115334.
-  if (!mStopAudioThread) {
-    mStateMachine->DispatchOnAudioSinkComplete();
-  }
-
-  ReentrantMonitorAutoExit exit(GetReentrantMonitor());
-  audioStream->Shutdown();
+  mEndPromise.Resolve(true, __func__);
+  // Since the promise if resolved asynchronously, we don't shutdown
+  // AudioStream here so MDSM::ResyncAudioClock can get the correct
+  // audio position.
 }
 
 bool
@@ -351,7 +311,13 @@ AudioSink::PlayFromAudioQueue()
 
   SINK_LOG_V("playing %u frames of audio at time %lld",
              audio->mFrames, audio->mTime);
-  mAudioStream->Write(audio->mAudioData, audio->mFrames);
+  if (audio->mRate == mInfo.mRate && audio->mChannels == mInfo.mChannels) {
+    mAudioStream->Write(audio->mAudioData, audio->mFrames);
+  } else {
+    SINK_LOG_V("mismatched sample format mInfo=[%uHz/%u channels] audio=[%uHz/%u channels]",
+               mInfo.mRate, mInfo.mChannels, audio->mRate, audio->mChannels);
+    PlaySilence(audio->mFrames);
+  }
 
   StartAudioStreamPlaybackIfNeeded();
 
@@ -421,7 +387,7 @@ AudioSink::WriteSilence(uint32_t aFrames)
 }
 
 int64_t
-AudioSink::GetEndTime()
+AudioSink::GetEndTime() const
 {
   CheckedInt64 playedUsecs = FramesToUsecs(mWritten, mInfo.mRate) + mStartTime;
   if (!playedUsecs.isValid()) {

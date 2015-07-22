@@ -999,6 +999,12 @@ nsIWidget* nsWindow::GetParent(void)
   return GetParentWindow(false);
 }
 
+static int32_t RoundDown(double aDouble)
+{
+  return aDouble > 0 ? static_cast<int32_t>(floor(aDouble)) :
+                       static_cast<int32_t>(ceil(aDouble));
+}
+
 float nsWindow::GetDPI()
 {
   HDC dc = ::GetDC(mWnd);
@@ -2866,16 +2872,15 @@ FullscreenTransitionWindowProc(HWND hWnd, UINT uMsg,
   switch (uMsg) {
     case WM_FULLSCREEN_TRANSITION_BEFORE:
     case WM_FULLSCREEN_TRANSITION_AFTER: {
-      // The message sender should have added ref for us.
-      nsCOMPtr<nsIRunnable> callback =
-        already_AddRefed<nsIRunnable>((nsIRunnable*)wParam);
       DWORD duration = (DWORD)lParam;
       DWORD flags = AW_BLEND;
       if (uMsg == WM_FULLSCREEN_TRANSITION_AFTER) {
         flags |= AW_HIDE;
       }
       ::AnimateWindow(hWnd, duration, flags);
-      NS_DispatchToMainThread(callback);
+      // The message sender should have added ref for us.
+      NS_DispatchToMainThread(
+        already_AddRefed<nsIRunnable>((nsIRunnable*)wParam));
       break;
     }
     case WM_DESTROY:
@@ -3473,36 +3478,6 @@ nsWindow::HasPendingInputEvent()
  *
  **************************************************************/
 
-struct LayerManagerPrefs {
-  LayerManagerPrefs()
-    : mAccelerateByDefault(true)
-    , mDisableAcceleration(false)
-    , mPreferOpenGL(false)
-    , mPreferD3D9(false)
-  {}
-  bool mAccelerateByDefault;
-  bool mDisableAcceleration;
-  bool mForceAcceleration;
-  bool mPreferOpenGL;
-  bool mPreferD3D9;
-};
-
-static void
-GetLayerManagerPrefs(LayerManagerPrefs* aManagerPrefs)
-{
-  aManagerPrefs->mDisableAcceleration = gfxPrefs::LayersAccelerationDisabled();
-  aManagerPrefs->mForceAcceleration = gfxPrefs::LayersAccelerationForceEnabled();
-  aManagerPrefs->mPreferOpenGL = gfxPrefs::LayersPreferOpenGL();
-  aManagerPrefs->mPreferD3D9 = gfxPrefs::LayersPreferD3D9();
-
-  const char *acceleratedEnv = PR_GetEnv("MOZ_ACCELERATED");
-  aManagerPrefs->mAccelerateByDefault =
-    aManagerPrefs->mAccelerateByDefault ||
-    (acceleratedEnv && (*acceleratedEnv != '0'));
-  aManagerPrefs->mDisableAcceleration =
-    aManagerPrefs->mDisableAcceleration || gfxPlatform::InSafeMode();
-}
-
 LayerManager*
 nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
                           LayersBackend aBackendHint,
@@ -3735,14 +3710,26 @@ void
 nsWindow::UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries)
 {
   nsIntRegion clearRegion;
-  for (size_t i = 0; i < aThemeGeometries.Length(); i++) {
-    if (aThemeGeometries[i].mType == nsNativeThemeWin::eThemeGeometryTypeWindowButtons &&
-        nsUXThemeData::CheckForCompositor())
-    {
-      nsIntRect bounds = aThemeGeometries[i].mRect;
-      clearRegion = nsIntRect(bounds.X(), bounds.Y(), bounds.Width(), bounds.Height() - 2.0);
-      clearRegion.Or(clearRegion, nsIntRect(bounds.X() + 1.0, bounds.YMost() - 2.0, bounds.Width() - 1.0, 1.0));
-      clearRegion.Or(clearRegion, nsIntRect(bounds.X() + 2.0, bounds.YMost() - 1.0, bounds.Width() - 3.0, 1.0));
+  if (!HasGlass() || !nsUXThemeData::CheckForCompositor()) {
+    return;
+  }
+  // On Win10, force show the top border:
+  if (IsWin10OrLater() && mCustomNonClient && mSizeMode == nsSizeMode_Normal) {
+    RECT rect;
+    ::GetWindowRect(mWnd, &rect);
+    // We want 1 pixel of border for every whole 100% of scaling
+    double borderSize = RoundDown(GetDefaultScale().scale);
+    clearRegion.Or(clearRegion, nsIntRect(0, 0, rect.right - rect.left, borderSize));
+  }
+  if (!IsWin10OrLater()) {
+    for (size_t i = 0; i < aThemeGeometries.Length(); i++) {
+      if (aThemeGeometries[i].mType == nsNativeThemeWin::eThemeGeometryTypeWindowButtons)
+      {
+        nsIntRect bounds = aThemeGeometries[i].mRect;
+        clearRegion.Or(clearRegion, nsIntRect(bounds.X(), bounds.Y(), bounds.Width(), bounds.Height() - 2.0));
+        clearRegion.Or(clearRegion, nsIntRect(bounds.X() + 1.0, bounds.YMost() - 2.0, bounds.Width() - 1.0, 1.0));
+        clearRegion.Or(clearRegion, nsIntRect(bounds.X() + 2.0, bounds.YMost() - 1.0, bounds.Width() - 3.0, 1.0));
+      }
     }
   }
 
@@ -4699,6 +4686,9 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
   LRESULT dwmHitResult;
   if (mCustomNonClient &&
       nsUXThemeData::CheckForCompositor() &&
+      /* We don't do this for win10 glass with a custom titlebar,
+       * in order to avoid the caption buttons breaking. */
+      !(IsWin10OrLater() && HasGlass()) &&
       WinUtils::dwmDwmDefWindowProcPtr(mWnd, msg, wParam, lParam, &dwmHitResult)) {
     *aRetValue = dwmHitResult;
     return true;
@@ -6475,12 +6465,6 @@ bool nsWindow::OnTouch(WPARAM wParam, LPARAM lParam)
   return true;
 }
 
-static int32_t RoundDown(double aDouble)
-{
-  return aDouble > 0 ? static_cast<int32_t>(floor(aDouble)) :
-                       static_cast<int32_t>(ceil(aDouble));
-}
-
 // Gesture event processing. Handles WM_GESTURE events.
 bool nsWindow::OnGesture(WPARAM wParam, LPARAM lParam)
 {
@@ -6807,36 +6791,6 @@ nsWindow::ShouldUseOffMainThreadCompositing()
 }
 
 void
-nsWindow::GetPreferredCompositorBackends(nsTArray<LayersBackend>& aHints)
-{
-  LayerManagerPrefs prefs;
-  GetLayerManagerPrefs(&prefs);
-
-  // We don't currently support using an accelerated layer manager with
-  // transparent windows so don't even try. I'm also not sure if we even
-  // want to support this case. See bug 593471
-  if (!(prefs.mDisableAcceleration ||
-        mTransparencyMode == eTransparencyTransparent ||
-        (IsPopup() && gfxWindowsPlatform::GetPlatform()->IsWARP()))) {
-    // See bug 1150376, D3D11 composition can cause issues on some devices
-    // on windows 7 where presentation fails randomly for windows with drop
-    // shadows.
-    if (prefs.mPreferOpenGL) {
-      aHints.AppendElement(LayersBackend::LAYERS_OPENGL);
-    }
-
-    if (!prefs.mPreferD3D9) {
-      aHints.AppendElement(LayersBackend::LAYERS_D3D11);
-    }
-    if (prefs.mPreferD3D9 || !mozilla::IsVistaOrLater()) {
-      // We don't want D3D9 except on Windows XP
-      aHints.AppendElement(LayersBackend::LAYERS_D3D9);
-    }
-  }
-  aHints.AppendElement(LayersBackend::LAYERS_BASIC);
-}
-
-void
 nsWindow::WindowUsesOMTC()
 {
   ULONG_PTR style = ::GetClassLongPtr(mWnd, GCL_STYLE);
@@ -6860,14 +6814,15 @@ nsWindow::HasBogusPopupsDropShadowOnMultiMonitor() {
         gfxWindowsPlatform::RENDER_DIRECT2D ? TRI_TRUE : TRI_FALSE;
     if (!sHasBogusPopupsDropShadowOnMultiMonitor) {
       // Otherwise check if Direct3D 9 may be used.
-      LayerManagerPrefs prefs;
-      GetLayerManagerPrefs(&prefs);
-      if (!prefs.mDisableAcceleration && !prefs.mPreferOpenGL) {
-        nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
+      if (gfxPlatform::GetPlatform()->ShouldUseLayersAcceleration() &&
+          !gfxPrefs::LayersPreferOpenGL())
+      {
+        nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
         if (gfxInfo) {
           int32_t status;
           if (NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DIRECT3D_9_LAYERS, &status))) {
-            if (status == nsIGfxInfo::FEATURE_STATUS_OK || prefs.mForceAcceleration)
+            if (status == nsIGfxInfo::FEATURE_STATUS_OK ||
+                gfxPrefs::LayersAccelerationForceEnabled())
             {
               sHasBogusPopupsDropShadowOnMultiMonitor = TRI_TRUE;
             }
@@ -7822,6 +7777,24 @@ bool nsWindow::PreRender(LayerManagerComposite*)
 void nsWindow::PostRender(LayerManagerComposite*)
 {
   LeaveCriticalSection(&mPresentLock);
+}
+
+bool
+nsWindow::ComputeShouldAccelerate()
+{
+  // We don't currently support using an accelerated layer manager with
+  // transparent windows so don't even try. I'm also not sure if we even
+  // want to support this case. See bug 593471.
+  //
+  // Also see bug 1150376, D3D11 composition can cause issues on some devices
+  // on Windows 7 where presentation fails randomly for windows with drop
+  // shadows.
+  if (mTransparencyMode == eTransparencyTransparent ||
+      (IsPopup() && gfxWindowsPlatform::GetPlatform()->IsWARP()))
+  {
+    return false;
+  }
+  return nsBaseWidget::ComputeShouldAccelerate();
 }
 
 /**************************************************************

@@ -3417,6 +3417,36 @@ nsContentUtils::ReportToConsole(uint32_t aErrorFlags,
                                      aLineNumber, aColumnNumber);
 }
 
+/* static */ nsresult
+nsContentUtils::MaybeReportInterceptionErrorToConsole(nsIDocument* aDocument,
+                                                      nsresult aError)
+{
+  const char* messageName = nullptr;
+  if (aError == NS_ERROR_INTERCEPTION_FAILED) {
+    messageName = "InterceptionFailed";
+  } else if (aError == NS_ERROR_OPAQUE_INTERCEPTION_DISABLED) {
+    messageName = "OpaqueInterceptionDisabled";
+  } else if (aError == NS_ERROR_BAD_OPAQUE_INTERCEPTION_REQUEST_MODE) {
+    messageName = "BadOpaqueInterceptionRequestMode";
+  } else if (aError == NS_ERROR_INTERCEPTED_ERROR_RESPONSE) {
+    messageName = "InterceptedErrorResponse";
+  } else if (aError == NS_ERROR_INTERCEPTED_USED_RESPONSE) {
+    messageName = "InterceptedUsedResponse";
+  } else if (aError == NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION) {
+    messageName = "ClientRequestOpaqueInterception";
+  }
+
+  if (messageName) {
+    return ReportToConsole(nsIScriptError::warningFlag,
+                           NS_LITERAL_CSTRING("Service Worker Interception"),
+                           aDocument,
+                           nsContentUtils::eDOM_PROPERTIES,
+                           messageName);
+  }
+
+  return NS_OK;
+}
+
 
 /* static */ nsresult
 nsContentUtils::ReportToConsoleNonLocalized(const nsAString& aErrorText,
@@ -7434,8 +7464,11 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
           if (file) {
             blobImpl = new BlobImplFile(file, false);
             ErrorResult rv;
+            // Ensure that file data is cached no that the content process
+            // has this data available to it when passed over:
             blobImpl->GetSize(rv);
             blobImpl->GetLastModified(rv);
+            blobImpl->LookupAndCacheIsDirectory();
           } else {
             blobImpl = do_QueryInterface(data);
           }

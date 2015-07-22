@@ -1390,6 +1390,8 @@ GCRuntime::setParameter(JSGCParamKey key, uint32_t value)
     switch (key) {
       case JSGC_MAX_MALLOC_BYTES:
         setMaxMallocBytes(value);
+        for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next())
+            zone->setGCMaxMallocBytes(maxMallocBytesAllocated() * 0.9);
         break;
       case JSGC_SLICE_TIME_BUDGET:
         sliceBudget = value ? value : SliceBudget::Unlimited;
@@ -1411,6 +1413,10 @@ GCRuntime::setParameter(JSGCParamKey key, uint32_t value)
         break;
       default:
         tunables.setParameter(key, value);
+        for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
+            zone->threshold.updateAfterGC(zone->usage.gcBytes(), GC_NORMAL, tunables,
+                                         schedulingState);
+        }
     }
 }
 
@@ -2586,15 +2592,7 @@ GCRuntime::updatePointersToRelocatedCells(Zone* zone)
     // Fixup compartment global pointers as these get accessed during marking.
     for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next())
         comp->fixupAfterMovingGC();
-
-    // Fixup cross compartment wrappers as we assert the existence of wrappers in the map.
-    for (CompartmentsIter comp(rt, SkipAtoms); !comp.done(); comp.next()) {
-        // Sweep the wrapper map to update its pointers.
-        comp->sweepCrossCompartmentWrappers();
-
-        // Mark the contents of the map to update each wrapper's cross compartment pointer.
-        comp->markCrossCompartmentWrappers(&trc);
-    }
+    JSCompartment::fixupCrossCompartmentWrappersAfterMovingGC(&trc);
 
     // Iterate through all cells that can contain JSObject pointers to update
     // them. Since updating each cell is independent we try to parallelize this
@@ -5521,7 +5519,6 @@ AutoTraceSession::AutoTraceSession(JSRuntime* rt, JS::HeapState heapState)
     runtime(rt),
     prevState(rt->heapState_)
 {
-    MOZ_ASSERT(rt->gc.isAllocAllowed());
     MOZ_ASSERT(rt->heapState_ == JS::HeapState::Idle);
     MOZ_ASSERT(heapState != JS::HeapState::Idle);
     MOZ_ASSERT_IF(heapState == JS::HeapState::MajorCollecting, rt->gc.nursery.isEmpty());
@@ -6126,10 +6123,12 @@ GCRuntime::collect(bool incremental, SliceBudget budget, JS::gcreason::Reason re
     JS_AbortIfWrongThread(rt);
 
     /* If we attempt to invoke the GC while we are running in the GC, assert. */
-    MOZ_ALWAYS_TRUE(!rt->isHeapBusy());
+    MOZ_RELEASE_ASSERT(!rt->isHeapBusy());
 
     /* The engine never locks across anything that could GC. */
     MOZ_ASSERT(!rt->currentThreadHasExclusiveAccess());
+
+    MOZ_ASSERT(isAllocAllowed());
 
     if (rt->mainThread.suppressGC)
         return;
@@ -6264,7 +6263,7 @@ GCRuntime::abortGC()
 {
     JS_AbortIfWrongThread(rt);
 
-    MOZ_ALWAYS_TRUE(!rt->isHeapBusy());
+    MOZ_RELEASE_ASSERT(!rt->isHeapBusy());
     MOZ_ASSERT(!rt->currentThreadHasExclusiveAccess());
     MOZ_ASSERT(!rt->mainThread.suppressGC);
 
@@ -6419,6 +6418,13 @@ GCRuntime::minorGC(JSContext* cx, JS::gcreason::Reason reason)
         if (pretenureGroups[i]->canPreTenure())
             pretenureGroups[i]->setShouldPreTenure(cx);
     }
+}
+
+void
+GCRuntime::clearPostBarrierCallbacks()
+{
+    if (storeBuffer.hasPostBarrierCallbacks())
+        evictNursery();
 }
 
 void

@@ -13,6 +13,7 @@ import glob
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -23,7 +24,6 @@ from collections import namedtuple
 import mozfile
 import mozinfo
 import mozlog
-from mozlog.structured import structuredlog
 
 
 StackInfo = namedtuple("StackInfo",
@@ -37,9 +37,9 @@ StackInfo = namedtuple("StackInfo",
 
 
 def get_logger():
-    structured_logger = structuredlog.get_default_logger("mozcrash")
+    structured_logger = mozlog.get_default_logger("mozcrash")
     if structured_logger is None:
-        return mozlog.getLogger('mozcrash')
+        return mozlog.unstructured.getLogger('mozcrash')
     return structured_logger
 
 
