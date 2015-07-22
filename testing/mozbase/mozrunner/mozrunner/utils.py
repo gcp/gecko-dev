@@ -166,7 +166,7 @@ def test_environment(xrePath, env=None, crashreporter=True, debugger=False,
     # Set WebRTC logging in case it is not set yet
     env.setdefault(
         'NSPR_LOG_MODULES',
-        'signaling:3,mtransport:4,datachannel:4,jsep:4,MediaPipelineFactory:4'
+        'signaling:3,mtransport:4,datachannel:4,jsep:4,MediaPipelineFactory:4,CamerasParent:4,CamerasChild:4'
     )
     env.setdefault('R_LOG_LEVEL', '6')
     env.setdefault('R_LOG_DESTINATION', 'stderr')

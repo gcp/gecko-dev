@@ -126,7 +126,8 @@ public:
 private:
   CamerasChild();
   ~CamerasChild();
-  bool DispatchToParent(nsCOMPtr<nsIRunnable> aRunnable);
+  bool DispatchToParent(nsCOMPtr<nsIRunnable> aRunnable,
+                        MonitorAutoLock& aMonitor);
 
   nsTArray<CapturerElement> mCallbacks;
   // Protects the callback arrays

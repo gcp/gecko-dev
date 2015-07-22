@@ -552,7 +552,7 @@ CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
 
 bool
 CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
-                                        const int &numdev)
+                                        const int& numdev)
 {
   LOG((__PRETTY_FUNCTION__));
   if (!EnsureInitialized(aCapEngine)) {
