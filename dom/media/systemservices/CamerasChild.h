@@ -135,6 +135,14 @@ private:
 
   bool mIPCIsAlive;
 
+  // Hold to prevent multiple outstanding requests. We don't use
+  // request IDs so we only support one at a time. Don't want try
+  // to use the webrtc.org API from multiple threads simultanously.
+  // The monitor below isn't sufficient for this, as it will drop
+  // the lock when Wait-ing for a response, allowing us to send a new
+  // request. The Notify on receiving the response will then unblock
+  // both waiters and one will be guaranteed to get the wrong result.
+  Mutex mRequestMutex;
   // Hold to wait for an async response to our calls
   Monitor mReplyMonitor;
   // Aynsc reponses data contents

@@ -199,6 +199,11 @@ bool
 CamerasChild::DispatchToParent(nsCOMPtr<nsIRunnable> aRunnable,
                                MonitorAutoLock& aMonitor)
 {
+  // Prevents multiple outstanding requests from happening
+  // while the mReplyMonitor is unlocked in Wait. Once we
+  // go past Wait here we no longer need to hold this one as the
+  // mReplyMonitor will be held and achieve the same thing.
+  MutexAutoLock requestLock(mRequestMutex);
   {
     OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
     CamerasSingleton::Thread()->Dispatch(aRunnable, NS_DISPATCH_NORMAL);
@@ -664,6 +669,7 @@ CamerasChild::ActorDestroy(ActorDestroyReason aWhy)
 CamerasChild::CamerasChild()
   : mCallbackMutex("mozilla::cameras::CamerasChild::mCallbackMutex"),
     mIPCIsAlive(true),
+    mRequestMutex("mozilla::cameras::CamerasChild::mRequestMutex"),
     mReplyMonitor("mozilla::cameras::CamerasChild::mReplyMonitor")
 {
   if (!gCamerasChildLog) {

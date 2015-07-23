@@ -70,7 +70,6 @@ def printstatus(status, name = ""):
     # This is probably a can't-happen condition on Unix, but let's be defensive
     print "TEST-INFO | %s: undecodable exit status %04x\n" % (name, status)
 
-  env.setdefault('NSPR_LOG_MODULES', 'signaling:3,mtransport:4,datachannel:4,jsep:4,MediaPipelineFactory:4,MediaManager:4,CamerasParent:4,CamerasChild:4')
 def dumpScreen(utilityPath):
   """dumps a screenshot of the entire screen to a directory specified by
   the MOZ_UPLOAD_DIR environment variable"""
