@@ -73,6 +73,9 @@ public:
 private:
   Mutex mMutex;
   size_t mPoolFree;
+#ifdef DEBUG
+  size_t mMaxPoolUse;
+#endif
   nsTArray<ShmemBuffer> mShmemPool;
 };
 

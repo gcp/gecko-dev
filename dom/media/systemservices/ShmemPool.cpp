@@ -18,7 +18,10 @@ namespace mozilla {
 
 ShmemPool::ShmemPool(size_t aPoolSize)
   : mMutex("mozilla::ShmemPool"),
-    mPoolFree(aPoolSize)
+    mPoolFree(aPoolSize),
+#ifdef DEBUG
+    mMaxPoolUse(0)
+#endif
 {
   mShmemPool.SetLength(aPoolSize);
 }
@@ -46,6 +49,13 @@ mozilla::ShmemBuffer ShmemPool::GetIfAvailable(size_t aSize)
   }
 
   mPoolFree--;
+#ifdef DEBUG
+  size_t poolUse = mShmemPool.Length() - mPoolFree;
+  if (poolUse > mMaxPoolUse) {
+    mMaxPoolUse = poolUse;
+    LOG(("Maximum ShmemPool use increased: %d buffers", mMaxPoolUse));
+  }
+#endif
   return Move(res);
 }
 
