@@ -399,6 +399,8 @@ public:
   // The stream is initially blocked. The decoder is responsible for unblocking
   // it while it is playing back.
   virtual void AddOutputStream(ProcessedMediaStream* aStream, bool aFinishWhenEnded);
+  // Remove an output stream added with AddOutputStream.
+  virtual void RemoveOutputStream(MediaStream* aStream);
 
   // Return the duration of the video in seconds.
   virtual double GetDuration();
@@ -721,10 +723,6 @@ public:
 #ifdef MOZ_APPLEMEDIA
   static bool IsAppleMP3Enabled();
 #endif
-
-  // Schedules the state machine to run one cycle on the shared state
-  // machine thread. Main thread only.
-  nsresult ScheduleStateMachine();
 
   struct Statistics {
     // Estimate of the current playback rate (bytes/second).

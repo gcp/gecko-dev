@@ -354,6 +354,10 @@ pref("browser.urlbar.suggest.searches",             true);
 pref("browser.urlbar.suggest.searches",             false);
 #endif
 
+// Limit the number of characters sent to the current search engine to fetch
+// suggestions.
+pref("browser.urlbar.maxCharsForSearchSuggestions", 20);
+
 // Restrictions to current suggestions can also be applied (intersection).
 // Typed suggestion works only if history is set to true.
 pref("browser.urlbar.suggest.history.onlyTyped",    false);
@@ -1931,7 +1935,7 @@ pref("browser.tabs.remote.autostart.2", true);
 #endif
 
 #ifdef NIGHTLY_BUILD
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined(XP_WIN)
 pref("layers.async-pan-zoom.enabled", true);
 #endif
 #endif

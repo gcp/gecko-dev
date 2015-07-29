@@ -501,14 +501,16 @@ public class ZoomedView extends FrameLayout implements LayerView.OnMetricsChange
         moveUsingGeckoPosition(leftFromGecko, topFromGecko);
     }
 
-    private void stopZoomDisplay(boolean withAnimation) {
-        shouldSetVisibleOnUpdate = false;
-        hideZoomedView(withAnimation);
-        ThreadUtils.removeCallbacksFromUiThread(requestRenderRunnable);
-        if (layerView != null) {
-            layerView.setOnMetricsChangedZoomedViewportListener(null);
-            layerView.removeZoomedViewListener(this);
-            layerView = null;
+    public void stopZoomDisplay(boolean withAnimation) {
+        if (getVisibility() == View.VISIBLE) {
+            shouldSetVisibleOnUpdate = false;
+            hideZoomedView(withAnimation);
+            ThreadUtils.removeCallbacksFromUiThread(requestRenderRunnable);
+            if (layerView != null) {
+                layerView.setOnMetricsChangedZoomedViewportListener(null);
+                layerView.removeZoomedViewListener(this);
+                layerView = null;
+            }
         }
     }
 

@@ -4009,7 +4009,7 @@ var XULBrowserWindow = {
   init: function () {
     // Initialize the security button's state and tooltip text.
     var securityUI = gBrowser.securityUI;
-    this.onSecurityChange(null, null, securityUI.state);
+    this.onSecurityChange(null, null, securityUI.state, true);
   },
 
   setJSStatus: function () {
@@ -4357,7 +4357,13 @@ var XULBrowserWindow = {
   _state: null,
   _lastLocation: null,
 
-  onSecurityChange: function (aWebProgress, aRequest, aState) {
+  // This is called in multiple ways:
+  //  1. Due to the nsIWebProgressListener.onSecurityChange notification.
+  //  2. Called by tabbrowser.xml when updating the current browser.
+  //  3. Called directly during this object's initializations.
+  // aRequest will be null always in case 2 and 3, and sometimes in case 1 (for
+  // instance, there won't be a request when STATE_BLOCKED_TRACKING_CONTENT is observed).
+  onSecurityChange: function (aWebProgress, aRequest, aState, aIsSimulated) {
     // Don't need to do anything if the data we use to update the UI hasn't
     // changed
     let uri = gBrowser.currentURI;
@@ -4367,6 +4373,10 @@ var XULBrowserWindow = {
       return;
     this._state = aState;
     this._lastLocation = spec;
+
+    if (typeof(aIsSimulated) != "boolean" && typeof(aIsSimulated) != "undefined") {
+      throw "onSecurityChange: aIsSimulated receieved an unexpected type";
+    }
 
     // aState is defined as a bitmask that may be extended in the future.
     // We filter out any unknown bits before testing for known values.
@@ -4403,7 +4413,7 @@ var XULBrowserWindow = {
       uri = Services.uriFixup.createExposableURI(uri);
     } catch (e) {}
     gIdentityHandler.checkIdentity(this._state, uri);
-    TrackingProtection.onSecurityChange(this._state);
+    TrackingProtection.onSecurityChange(this._state, aIsSimulated);
   },
 
   // simulate all change notifications after switching tabs
@@ -6686,6 +6696,10 @@ var gIdentityHandler = {
     delete this._identityIconCountryLabel;
     return this._identityIconCountryLabel = document.getElementById("identity-icon-country-label");
   },
+  get _identityIcons () {
+    delete this._identityIcons;
+    return this._identityIcons = document.getElementById("identity-icons");
+  },
   get _identityIcon () {
     delete this._identityIcon;
     return this._identityIcon = document.getElementById("page-proxy-favicon");
@@ -6705,12 +6719,14 @@ var gIdentityHandler = {
    */
   _cacheElements : function() {
     delete this._identityBox;
+    delete this._identityIcons;
     delete this._identityIconLabel;
     delete this._identityIconCountryLabel;
     delete this._identityIcon;
     delete this._permissionsContainer;
     delete this._permissionList;
     this._identityBox = document.getElementById("identity-box");
+    this._identityIcons = document.getElementById("identity-icons");
     this._identityIconLabel = document.getElementById("identity-icon-label");
     this._identityIconCountryLabel = document.getElementById("identity-icon-country-label");
     this._identityIcon = document.getElementById("page-proxy-favicon");
@@ -7120,7 +7136,7 @@ var gIdentityHandler = {
     this._identityBox.setAttribute("open", "true");
 
     // Now open the popup, anchored off the primary chrome element
-    this._identityPopup.openPopup(this._identityIcon, "bottomcenter topleft");
+    this._identityPopup.openPopup(this._identityIcons, "bottomcenter topleft");
   },
 
   onPopupShown(event) {

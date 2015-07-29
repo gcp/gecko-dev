@@ -953,15 +953,15 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
 
   if (jsEventHandler->EventName() == nsGkAtoms::onerror && win) {
     nsRefPtr<OnErrorEventHandlerNonNull> handlerCallback =
-      new OnErrorEventHandlerNonNull(handler, /* aIncumbentGlobal = */ nullptr);
+      new OnErrorEventHandlerNonNull(nullptr, handler, /* aIncumbentGlobal = */ nullptr);
     jsEventHandler->SetHandler(handlerCallback);
   } else if (jsEventHandler->EventName() == nsGkAtoms::onbeforeunload && win) {
     nsRefPtr<OnBeforeUnloadEventHandlerNonNull> handlerCallback =
-      new OnBeforeUnloadEventHandlerNonNull(handler, /* aIncumbentGlobal = */ nullptr);
+      new OnBeforeUnloadEventHandlerNonNull(nullptr, handler, /* aIncumbentGlobal = */ nullptr);
     jsEventHandler->SetHandler(handlerCallback);
   } else {
     nsRefPtr<EventHandlerNonNull> handlerCallback =
-      new EventHandlerNonNull(handler, /* aIncumbentGlobal = */ nullptr);
+      new EventHandlerNonNull(nullptr, handler, /* aIncumbentGlobal = */ nullptr);
     jsEventHandler->SetHandler(handlerCallback);
   }
 
@@ -1140,7 +1140,7 @@ EventListenerManager::HandleEventInternal(nsPresContext* aPresContext,
               mozilla::UniquePtr<TimelineMarker> marker =
                 MakeUnique<EventTimelineMarker>(ds, TRACING_INTERVAL_START,
                                                 phase, typeStr);
-              ds->AddProfileTimelineMarker(Move(marker));
+              TimelineConsumers::AddMarkerForDocShell(ds, Move(marker));
             }
           }
 
@@ -1151,7 +1151,7 @@ EventListenerManager::HandleEventInternal(nsPresContext* aPresContext,
 
           if (isTimelineRecording) {
             nsDocShell* ds = static_cast<nsDocShell*>(docShell.get());
-            ds->AddProfileTimelineMarker("DOMEvent", TRACING_INTERVAL_END);
+            TimelineConsumers::AddMarkerForDocShell(ds, "DOMEvent", TRACING_INTERVAL_END);
           }
         }
       }

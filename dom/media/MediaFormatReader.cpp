@@ -504,11 +504,15 @@ void
 MediaFormatReader::DisableHardwareAcceleration()
 {
   MOZ_ASSERT(OnTaskQueue());
-  if (HasVideo() && mSharedDecoderManager) {
-    mSharedDecoderManager->DisableHardwareAcceleration();
-
-    if (!mSharedDecoderManager->Recreate(mInfo.mVideo)) {
-      mVideo.mError = true;
+  if (HasVideo()) {
+    mPlatform->DisableHardwareAcceleration();
+    Flush(TrackInfo::kVideoTrack);
+    mVideo.mDecoder->Shutdown();
+    mVideo.mDecoder = nullptr;
+    if (!EnsureDecodersSetup()) {
+      LOG("Unable to re-create decoder, aborting");
+      NotifyError(TrackInfo::kVideoTrack);
+      return;
     }
     ScheduleUpdate(TrackInfo::kVideoTrack);
   }
@@ -715,6 +719,7 @@ MediaFormatReader::NotifyDrainComplete(TrackType aTrack)
 {
   MOZ_ASSERT(OnTaskQueue());
   auto& decoder = GetDecoderData(aTrack);
+  LOG("%s", TrackTypeToStr(aTrack));
   if (!decoder.mOutputRequested) {
     LOG("MediaFormatReader called DrainComplete() before flushing, ignoring.");
     return;
@@ -979,10 +984,15 @@ MediaFormatReader::DrainDecoder(TrackType aTrack)
     return;
   }
   decoder.mNeedDraining = false;
-  if (!decoder.mDecoder) {
+  // mOutputRequest must be set, otherwise NotifyDrainComplete()
+  // may reject the drain if a Flush recently occurred.
+  decoder.mOutputRequested = true;
+  if (!decoder.mDecoder ||
+      decoder.mNumSamplesInput == decoder.mNumSamplesOutput) {
+    // No frames to drain.
+    NotifyDrainComplete(aTrack);
     return;
   }
-  decoder.mOutputRequested = true;
   decoder.mDecoder->Drain();
   decoder.mDraining = true;
   LOG("Requesting %s decoder to drain", TrackTypeToStr(aTrack));
@@ -1449,10 +1459,14 @@ MediaFormatReader::GetBuffered()
     return intervals;
   }
   int64_t startTime;
-  {
-    ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-    NS_ENSURE_TRUE(HaveStartTime(), media::TimeIntervals());
+  if (!ForceZeroStartTime()) {
+    if (!HaveStartTime()) {
+      return intervals;
+    }
     startTime = StartTime();
+  } else {
+    // MSE, start time is assumed to be 0 we can proceeed with what we have.
+    startTime = 0;
   }
   // Ensure we have up to date buffered time range.
   if (HasVideo()) {

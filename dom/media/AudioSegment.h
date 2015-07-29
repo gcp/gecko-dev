@@ -148,7 +148,14 @@ struct AudioChunk {
     return true;
   }
 
-  int ChannelCount() const { return mChannelData.Length(); }
+  size_t ChannelCount() const { return mChannelData.Length(); }
+
+  float* ChannelFloatsForWrite(size_t aChannel)
+  {
+    MOZ_ASSERT(mBufferFormat == AUDIO_FORMAT_FLOAT32);
+    MOZ_ASSERT(!mBuffer->IsShared());
+    return static_cast<float*>(const_cast<void*>(mChannelData[aChannel]));
+  }
 
   bool IsMuted() const { return mVolume == 0.0f; }
 
@@ -299,7 +306,14 @@ public:
     return chunk;
   }
   void ApplyVolume(float aVolume);
-  void WriteTo(uint64_t aID, AudioMixer& aMixer, uint32_t aChannelCount, uint32_t aSampleRate);
+  // Mix the segment into a mixer, interleaved. This is useful to output a
+  // segment to a system audio callback. It up or down mixes to aChannelCount
+  // channels.
+  void WriteTo(uint64_t aID, AudioMixer& aMixer, uint32_t aChannelCount,
+               uint32_t aSampleRate);
+  // Mix the segment into a mixer, keeping it planar, up or down mixing to
+  // aChannelCount channels.
+  void Mix(AudioMixer& aMixer, uint32_t aChannelCount, uint32_t aSampleRate);
 
   int ChannelCount() {
     NS_WARN_IF_FALSE(!mChunks.IsEmpty(),

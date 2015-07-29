@@ -5,7 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* globals overlays, Services, EventEmitter, StyleInspectorMenu,
-   clipboardHelper, _strings, domUtils, AutocompletePopup */
+   clipboardHelper, _strings, domUtils, AutocompletePopup, loader,
+   osString */
 
 "use strict";
 
@@ -209,7 +210,7 @@ ElementStyle.prototype = {
       filter: this.showUserAgentStyles ? "ua" : undefined,
     }).then(entries => {
       if (this.destroyed) {
-        return;
+        return promise.resolve(undefined);
       }
 
       // Make sure the dummy element has been created before continuing...
@@ -236,14 +237,12 @@ ElementStyle.prototype = {
 
         // We're done with the previous list of rules.
         delete this._refreshRules;
-
-        return null;
       });
     }).then(null, e => {
       // populate is often called after a setTimeout,
       // the connection may already be closed.
       if (this.destroyed) {
-        return;
+        return promise.resolve(undefined);
       }
       return promiseWarn(e);
     });
@@ -636,7 +635,7 @@ Rule.prototype = {
       disabled.delete(this.style);
     }
 
-    let promise = aModifications.apply().then(() => {
+    let modificationsPromise = aModifications.apply().then(() => {
       let cssProps = {};
       for (let cssProp of parseDeclarations(this.style.cssText)) {
         cssProps[cssProp.name] = cssProp;
@@ -668,8 +667,8 @@ Rule.prototype = {
       this.elementStyle._changed();
     }).then(null, promiseWarn);
 
-    this._applyingModifications = promise;
-    return promise;
+    this._applyingModifications = modificationsPromise;
+    return modificationsPromise;
   },
 
   /**
@@ -1111,7 +1110,8 @@ TextProperty.prototype = {
    */
   stringifyProperty: function() {
     // Get the displayed property value
-    let declaration = this.name + ": " + this.editor.committed.value + ";";
+    let declaration = this.name + ": " + this.editor.valueSpan.textContent +
+      ";";
 
     // Comment out property declarations that are not enabled
     if (!this.enabled) {
@@ -1741,7 +1741,7 @@ CssRuleView.prototype = {
   refreshPanel: function() {
     // Ignore refreshes during editing or when no element is selected.
     if (this.isEditing || !this._elementStyle) {
-      return;
+      return promise.resolve(undefined);
     }
 
     // Repopulate the element style once the current modifications are done.
@@ -1893,9 +1893,10 @@ CssRuleView.prototype = {
 
   /**
    * Creates an expandable container in the rule view
-   * @param  {String}  aLabel The label for the container header
-   * @param  {Boolean} isPseudo Whether or not the container will hold
-   *                            pseudo element rules
+   * @param  {String} aLabel
+   *         The label for the container header
+   * @param  {Boolean} isPseudo
+   *         Whether or not the container will hold pseudo element rules
    * @return {DOMNode} The container element
    */
   createExpandableContainer: function(aLabel, isPseudo = false) {
@@ -1915,42 +1916,57 @@ CssRuleView.prototype = {
     container.classList.add("ruleview-expandable-container");
     this.element.appendChild(container);
 
-    let toggleContainerVisibility = (isPseudo, showPseudo) => {
-      let isOpen = twisty.getAttribute("open");
-
-      if (isPseudo) {
-        this._showPseudoElements = !!showPseudo;
-
-        Services.prefs.setBoolPref("devtools.inspector.show_pseudo_elements",
-          this.showPseudoElements);
-
-        header.classList.toggle("show-expandable-container",
-          this.showPseudoElements);
-
-        isOpen = !this.showPseudoElements;
-      } else {
-        header.classList.toggle("show-expandable-container");
-      }
-
-      if (isOpen) {
-        twisty.removeAttribute("open");
-      } else {
-        twisty.setAttribute("open", "true");
-      }
-    };
-
     header.addEventListener("dblclick", () => {
-      toggleContainerVisibility(isPseudo, !this.showPseudoElements);
+      this._toggleContainerVisibility(twisty, header, isPseudo,
+        !this.showPseudoElements);
     }, false);
+
     twisty.addEventListener("click", () => {
-      toggleContainerVisibility(isPseudo, !this.showPseudoElements);
+      this._toggleContainerVisibility(twisty, header, isPseudo,
+        !this.showPseudoElements);
     }, false);
 
     if (isPseudo) {
-      toggleContainerVisibility(isPseudo, this.showPseudoElements);
+      this._toggleContainerVisibility(twisty, header, isPseudo,
+        this.showPseudoElements);
     }
 
     return container;
+  },
+
+  /**
+   * Toggle the visibility of an expandable container
+   * @param  {DOMNode}  twisty
+   *         clickable toggle DOM Node
+   * @param  {DOMNode}  header
+   *         expandable container header DOM Node
+   * @param  {Boolean}  isPseudo
+   *         whether or not the container will hold pseudo element rules
+   * @param  {Boolean}  showPseudo
+   *         whether or not pseudo element rules should be displayed
+   */
+  _toggleContainerVisibility: function(twisty, header, isPseudo, showPseudo) {
+    let isOpen = twisty.getAttribute("open");
+
+    if (isPseudo) {
+      this._showPseudoElements = !!showPseudo;
+
+      Services.prefs.setBoolPref("devtools.inspector.show_pseudo_elements",
+        this.showPseudoElements);
+
+      header.classList.toggle("show-expandable-container",
+        this.showPseudoElements);
+
+      isOpen = !this.showPseudoElements;
+    } else {
+      header.classList.toggle("show-expandable-container");
+    }
+
+    if (isOpen) {
+      twisty.removeAttribute("open");
+    } else {
+      twisty.setAttribute("open", "true");
+    }
   },
 
   _getRuleViewHeaderClassName: function(isPseudo) {
@@ -2744,6 +2760,9 @@ RuleEditor.prototype = {
 
       let {ruleProps, isMatching} = response;
       if (!ruleProps) {
+        // Notify for changes, even when nothing changes,
+        // just to allow tests being able to track end of this request.
+        ruleView.emit("ruleview-invalid-selector");
         return;
       }
 
@@ -2833,6 +2852,13 @@ TextPropertyEditor.prototype = {
   get editing() {
     return !!(this.nameSpan.inplaceEditor || this.valueSpan.inplaceEditor ||
       this.ruleView.tooltips.isEditing) || this.popup.isOpen;
+  },
+
+  /**
+   * Get the rule to the current text property
+   */
+  get rule() {
+    return this.prop.rule;
   },
 
   /**
@@ -2985,7 +3011,7 @@ TextPropertyEditor.prototype = {
    * @return {string} the stylesheet's href.
    */
   get sheetHref() {
-    let domRule = this.prop.rule.domRule;
+    let domRule = this.rule.domRule;
     if (domRule) {
       return domRule.href || domRule.nodeHref;
     }
@@ -3049,14 +3075,14 @@ TextPropertyEditor.prototype = {
 
     // Combine the property's value and priority into one string for
     // the value.
-    let store = this.prop.rule.elementStyle.store;
-    let val = store.userProperties.getProperty(this.prop.rule.style, name,
+    let store = this.rule.elementStyle.store;
+    let val = store.userProperties.getProperty(this.rule.style, name,
                                                this.prop.value);
     if (this.prop.priority) {
       val += " !" + this.prop.priority;
     }
 
-    let propDirty = store.userProperties.contains(this.prop.rule.style, name);
+    let propDirty = store.userProperties.contains(this.rule.style, name);
 
     if (propDirty) {
       this.element.setAttribute("dirty", "");
@@ -3137,7 +3163,6 @@ TextPropertyEditor.prototype = {
   },
 
   _onStartEditing: function() {
-    this.element.classList.remove("ruleview-overridden");
     this._previewValue(this.prop.value);
   },
 
@@ -3275,23 +3300,38 @@ TextPropertyEditor.prototype = {
    *        True if the change should be applied.
    */
   _onNameDone: function(aValue, aCommit) {
-    if (aCommit && !this.ruleEditor.isEditing) {
-      // Unlike the value editor, if a name is empty the entire property
-      // should always be removed.
-      if (aValue.trim() === "") {
-        this.remove();
-      } else {
-        // Adding multiple rules inside of name field overwrites the current
-        // property with the first, then adds any more onto the property list.
-        let properties = parseDeclarations(aValue);
+    if ((!aCommit && this.ruleEditor.isEditing) ||
+        this.committed.name == aValue) {
+      // Disable the property if the property was originally disabled.
+      if (!this.prop.enabled) {
+        this.rule.setPropertyEnabled(this.prop, this.prop.enabled);
+      }
 
-        if (properties.length) {
-          this.prop.setName(properties[0].name);
-          if (properties.length > 1) {
-            this.prop.setValue(properties[0].value, properties[0].priority);
-            this.ruleEditor.addProperties(properties.slice(1), this.prop);
-          }
-        }
+      return;
+    }
+
+    // Unlike the value editor, if a name is empty the entire property
+    // should always be removed.
+    if (aValue.trim() === "") {
+      this.remove();
+      return;
+    }
+
+    // Adding multiple rules inside of name field overwrites the current
+    // property with the first, then adds any more onto the property list.
+    let properties = parseDeclarations(aValue);
+
+    if (properties.length) {
+      this.prop.setName(properties[0].name);
+      this.committed.name = this.prop.name;
+
+      if (!this.prop.enabled) {
+        this.prop.setEnabled(true);
+      }
+
+      if (properties.length > 1) {
+        this.prop.setValue(properties[0].value, properties[0].priority);
+        this.ruleEditor.addProperties(properties.slice(1), this.prop);
       }
     }
   },
@@ -3323,35 +3363,38 @@ TextPropertyEditor.prototype = {
    * @param {bool} aCommit
    *        True if the change should be applied.
    */
-  _onValueDone: function(aValue, aCommit) {
-    if (!aCommit && !this.ruleEditor.isEditing) {
+  _onValueDone: function(aValue="", aCommit) {
+    let parsedProperties = this._getValueAndExtraProperties(aValue);
+    let val = parseSingleValue(parsedProperties.firstValue);
+    let isValueUnchanged =
+      !parsedProperties.propertiesToAdd.length &&
+      this.committed.value == val.value &&
+      this.committed.priority == val.priority;
+
+    if ((!aCommit && !this.ruleEditor.isEditing) || isValueUnchanged) {
       // A new property should be removed when escape is pressed.
       if (this.removeOnRevert) {
         this.remove();
       } else {
-        // update the editor back to committed value
-        this.update();
-
-        // undo the preview in content style
-        this.ruleEditor.rule.previewPropertyValue(this.prop,
-          this.prop.value, this.prop.priority);
+        // Disable the property if the property was originally disabled.
+        this.rule.setPropertyEnabled(this.prop, this.prop.enabled);
       }
       return;
     }
 
-    let {propertiesToAdd, firstValue} =
-        this._getValueAndExtraProperties(aValue);
-
     // First, set this property value (common case, only modified a property)
-    let val = parseSingleValue(firstValue);
-
     this.prop.setValue(val.value, val.priority);
+
+    if (!this.prop.enabled) {
+      this.prop.setEnabled(true);
+    }
+
     this.removeOnRevert = false;
     this.committed.value = this.prop.value;
     this.committed.priority = this.prop.priority;
 
     // If needed, add any new properties after this.prop.
-    this.ruleEditor.addProperties(propertiesToAdd, this.prop);
+    this.ruleEditor.addProperties(parsedProperties.propertiesToAdd, this.prop);
 
     // If the name or value is not actively being edited, and the value is
     // empty, then remove the whole property.
@@ -3424,6 +3467,9 @@ TextPropertyEditor.prototype = {
     if (!this.editing || this.ruleEditor.isEditing) {
       return;
     }
+
+    this.element.classList.remove("ruleview-overridden");
+    this.enable.style.visibility = "hidden";
 
     let val = parseSingleValue(aValue);
     this.ruleEditor.rule.previewPropertyValue(this.prop, val.value,

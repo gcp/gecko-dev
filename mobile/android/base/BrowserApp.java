@@ -473,13 +473,14 @@ public class BrowserApp extends GeckoApp
             case LOCATION_CHANGE:
                 // fall through
             case SELECTED:
+                if (mZoomedView != null) {
+                    mZoomedView.stopZoomDisplay(false);
+                }
                 if (Tabs.getInstance().isSelectedTab(tab)) {
                     updateHomePagerForTab(tab);
                 }
 
                 mHideDynamicToolbarOnActionModeEnd = false;
-
-                mProgressView.setPrivateMode(tab.isPrivate());
                 break;
             case START:
                 if (Tabs.getInstance().isSelectedTab(tab)) {

@@ -557,6 +557,7 @@ gfxWindowsPlatform::UpdateRenderMode()
 
       imgLoader::Singleton()->ClearCache(true);
       imgLoader::Singleton()->ClearCache(false);
+      gfxAlphaBoxBlur::ShutdownBlurCache();
       Factory::SetDirect3D11Device(nullptr);
 
       didReset = true;
@@ -1588,6 +1589,15 @@ gfxWindowsPlatform::GetD3D11ImageBridgeDevice()
   return mD3D11ImageBridgeDevice;
 }
 
+ID3D11Device*
+gfxWindowsPlatform::GetD3D11DeviceForCurrentThread()
+{
+  if (NS_IsMainThread()) {
+    return GetD3D11ContentDevice();
+  } else {
+    return GetD3D11ImageBridgeDevice();
+  }
+}
 
 ReadbackManagerD3D11*
 gfxWindowsPlatform::GetReadbackManager()
@@ -1735,6 +1745,12 @@ CheckForAdapterMismatch(ID3D11Device *device)
 
 void CheckIfRenderTargetViewNeedsRecreating(ID3D11Device *device)
 {
+    // CreateTexture2D is known to crash on lower feature levels, see bugs
+    // 1170211 and 1089413.
+    if (device->GetFeatureLevel() < D3D_FEATURE_LEVEL_10_0) {
+        return;
+    }
+
     nsRefPtr<ID3D11DeviceContext> deviceContext;
     device->GetImmediateContext(getter_AddRefs(deviceContext));
     int backbufferWidth = 32; int backbufferHeight = 32;
@@ -1894,15 +1910,7 @@ bool DoesD3D11TextureSharingWorkInternal(ID3D11Device *device, DXGI_FORMAT forma
 
 bool DoesD3D11TextureSharingWork(ID3D11Device *device)
 {
-  static bool checked;
-  static bool result;
-
-  if (checked)
-    return result;
-  checked = true;
-
-  result = DoesD3D11TextureSharingWorkInternal(device, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
-  return result;
+  return DoesD3D11TextureSharingWorkInternal(device, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
 }
 
 bool DoesD3D11AlphaTextureSharingWork(ID3D11Device *device)
@@ -2114,6 +2122,12 @@ gfxWindowsPlatform::InitD3D11Devices()
   {
     AttemptWARPDeviceCreation(featureLevels);
     mD3D11Status = FeatureStatus::Failed;
+  }
+
+  // Only test for texture sharing on Windows 8 since it puts the device into
+  // an unusable state if used on Windows 7
+  if (mD3D11Device && IsWin8OrLater()) {
+    mDoesD3D11TextureSharingWork = ::DoesD3D11TextureSharingWork(mD3D11Device);
   }
 
   if (!mD3D11Device) {

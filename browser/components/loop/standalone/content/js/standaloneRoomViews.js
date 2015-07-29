@@ -257,10 +257,12 @@ loop.standaloneRoomViews = (function(mozL10n) {
       Backbone.Events,
       sharedMixins.MediaSetupMixin,
       sharedMixins.RoomsAudioMixin,
-      loop.store.StoreMixin("activeRoomStore")
+      sharedMixins.DocumentTitleMixin
     ],
 
     propTypes: {
+      // We pass conversationStore here rather than use the mixin, to allow
+      // easy configurability for the ui-showcase.
       activeRoomStore: React.PropTypes.oneOfType([
         React.PropTypes.instanceOf(loop.store.ActiveRoomStore),
         React.PropTypes.instanceOf(loop.store.FxOSActiveRoomStore)
@@ -282,6 +284,16 @@ loop.standaloneRoomViews = (function(mozL10n) {
       });
     },
 
+    componentWillMount: function() {
+      this.props.activeRoomStore.on("change", function() {
+        this.setState(this.props.activeRoomStore.getStoreState());
+      }, this);
+    },
+
+    componentWillUnmount: function() {
+      this.props.activeRoomStore.off("change", null, this);
+    },
+
     componentDidMount: function() {
       // Adding a class to the document body element from here to ease styling it.
       document.body.classList.add("is-standalone-room");
@@ -295,6 +307,14 @@ loop.standaloneRoomViews = (function(mozL10n) {
      * @param  {Object} nextState Next state object.
      */
     componentWillUpdate: function(nextProps, nextState) {
+      if (this.state.roomState !== ROOM_STATES.READY &&
+          nextState.roomState === ROOM_STATES.READY) {
+        this.setTitle(mozL10n.get("standalone_title_with_room_name", {
+          roomName: nextState.roomName || this.state.roomName,
+          clientShortname: mozL10n.get("clientShortname2")
+        }));
+      }
+
       if (this.state.roomState !== ROOM_STATES.MEDIA_WAIT &&
           nextState.roomState === ROOM_STATES.MEDIA_WAIT) {
         this.props.dispatcher.dispatch(new sharedActions.SetupStreamElements({
@@ -372,6 +392,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
           return true;
 
         case ROOM_STATES.READY:
+        case ROOM_STATES.GATHER:
         case ROOM_STATES.INIT:
         case ROOM_STATES.JOINING:
         case ROOM_STATES.SESSION_CONNECTED:
@@ -428,7 +449,8 @@ loop.standaloneRoomViews = (function(mozL10n) {
      */
     _isScreenShareLoading: function() {
       return this.state.receivingScreenShare &&
-             !this.state.screenShareVideoObject;
+             !this.state.screenShareVideoObject &&
+             !this.props.screenSharePosterUrl;
     },
 
     render: function() {
@@ -455,6 +477,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
             localPosterUrl: this.props.localPosterUrl, 
             localSrcVideoObject: this.state.localSrcVideoObject, 
             localVideoMuted: this.state.videoMuted, 
+            matchMedia: this.state.matchMedia || window.matchMedia.bind(window), 
             remotePosterUrl: this.props.remotePosterUrl, 
             remoteSrcVideoObject: this.state.remoteSrcVideoObject, 
             renderRemoteVideo: this.shouldRenderRemoteVideo(), 

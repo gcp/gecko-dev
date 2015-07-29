@@ -87,6 +87,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "TelemetrySession",
                                   "resource://gre/modules/TelemetrySession.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetrySend",
                                   "resource://gre/modules/TelemetrySend.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "TelemetryReportingPolicy",
+                                  "resource://gre/modules/TelemetryReportingPolicy.jsm");
 
 /**
  * Setup Telemetry logging. This function also gets called when loggin related
@@ -591,9 +593,20 @@ let Impl = {
    *                   false otherwise.
    */
   enableTelemetryRecording: function enableTelemetryRecording() {
-    const enabled = Preferences.get(PREF_ENABLED, false);
+    // The thumbnail service also runs in a content process, even with e10s off.
+    // We need to check if e10s is on so we don't submit child payloads for it.
+    // We still need xpcshell child tests to work, so we skip this if test mode is enabled.
+    if (Utils.isContentProcess && !this._testMode && !Services.appinfo.browserTabsRemoteAutostart) {
+      this._log.config("enableTelemetryRecording - not enabling Telemetry for non-e10s child process");
+      Telemetry.canRecordBase = false;
+      Telemetry.canRecordExtended = false;
+      return false;
+    }
 
-    // Enable base Telemetry recording, if needed.
+    // Configure base Telemetry recording.
+    // Unified Telemetry makes it opt-out unless the unifedOptin pref is set.
+    // If extended Telemetry is enabled, base recording is always on as well.
+    const enabled = Preferences.get(PREF_ENABLED, false);
     Telemetry.canRecordBase = enabled || (IS_UNIFIED_TELEMETRY && !IS_UNIFIED_OPTIN);
 
 #ifdef MOZILLA_OFFICIAL
@@ -650,6 +663,9 @@ let Impl = {
       this._sessionRecorder = new SessionRecorder(PREF_SESSIONS_BRANCH);
       this._sessionRecorder.onStartup();
     }
+
+    // This will trigger displaying the datachoices infobar.
+    TelemetryReportingPolicy.setup();
 
     if (!this.enableTelemetryRecording()) {
       this._log.config("setupChromeProcess - Telemetry recording is disabled, skipping Chrome process setup.");
@@ -726,6 +742,9 @@ let Impl = {
 
     // Now do an orderly shutdown.
     try {
+      // Stop the datachoices infobar display.
+      TelemetryReportingPolicy.shutdown();
+
       // Stop any ping sending.
       yield TelemetrySend.shutdown();
 

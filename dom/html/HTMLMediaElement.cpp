@@ -105,6 +105,12 @@ static PRLogModuleInfo* gMediaElementEventsLog;
 
 #include "mozilla/EventStateManager.h"
 
+#if defined(MOZ_B2G) && !defined(MOZ_GRAPHENE)
+// This controls the b2g specific of pausing the media element when the
+// AudioChannel tells us to mute it.
+#define PAUSE_MEDIA_ELEMENT_FROM_AUDIOCHANNEL
+#endif
+
 using namespace mozilla::layers;
 using mozilla::net::nsMediaFragmentURIParser;
 
@@ -1211,6 +1217,7 @@ nsresult HTMLMediaElement::LoadResource()
       // TODO: Handle failure: run "If the media data cannot be fetched at
       // all, due to network errors, causing the user agent to give up
       // trying to fetch the resource" section of resource fetch algorithm.
+      decoder->Shutdown();
       return NS_ERROR_FAILURE;
     }
     nsRefPtr<MediaResource> resource =
@@ -1418,6 +1425,12 @@ HTMLMediaElement::Seek(double aTime,
 {
   // aTime should be non-NaN.
   MOZ_ASSERT(!mozilla::IsNaN(aTime));
+
+  // Detect if user has interacted with element by seeking so that
+  // play will not be blocked when initiated by a script.
+  if (EventStateManager::IsHandlingUserInput() || nsContentUtils::IsCallerChrome()) {
+    mHasUserInteraction = true;
+  }
 
   StopSuspendingAfterFirstFrame();
 
@@ -1705,36 +1718,6 @@ NS_IMETHODIMP HTMLMediaElement::SetVolume(double aVolume)
   return rv.StealNSResult();
 }
 
-// Helper struct with arguments for our hash iterator.
-typedef struct MOZ_STACK_CLASS {
-  JSContext* cx;
-  JS::Handle<JSObject*> tags;
-  bool error;
-} MetadataIterCx;
-
-PLDHashOperator
-HTMLMediaElement::BuildObjectFromTags(nsCStringHashKey::KeyType aKey,
-                                      nsCString aValue,
-                                      void* aUserArg)
-{
-  MetadataIterCx* args = static_cast<MetadataIterCx*>(aUserArg);
-
-  nsString wideValue = NS_ConvertUTF8toUTF16(aValue);
-  JS::Rooted<JSString*> string(args->cx, JS_NewUCStringCopyZ(args->cx, wideValue.Data()));
-  if (!string) {
-    NS_WARNING("Failed to perform string copy");
-    args->error = true;
-    return PL_DHASH_STOP;
-  }
-  if (!JS_DefineProperty(args->cx, args->tags, aKey.Data(), string, JSPROP_ENUMERATE)) {
-    NS_WARNING("Failed to set metadata property");
-    args->error = true;
-    return PL_DHASH_STOP;
-  }
-
-  return PL_DHASH_NEXT;
-}
-
 void
 HTMLMediaElement::MozGetMetadata(JSContext* cx,
                                  JS::MutableHandle<JSObject*> aRetval,
@@ -1751,12 +1734,16 @@ HTMLMediaElement::MozGetMetadata(JSContext* cx,
     return;
   }
   if (mTags) {
-    MetadataIterCx iter = {cx, tags, false};
-    mTags->EnumerateRead(BuildObjectFromTags, static_cast<void*>(&iter));
-    if (iter.error) {
-      NS_WARNING("couldn't create metadata object!");
-      aRv.Throw(NS_ERROR_FAILURE);
-      return;
+    for (auto iter = mTags->ConstIter(); !iter.Done(); iter.Next()) {
+      nsString wideValue = NS_ConvertUTF8toUTF16(iter.UserData());
+      JS::Rooted<JSString*> string(cx,
+                                   JS_NewUCStringCopyZ(cx, wideValue.Data()));
+      if (!string || !JS_DefineProperty(cx, tags, iter.Key().Data(), string,
+                                        JSPROP_ENUMERATE)) {
+        NS_WARNING("couldn't create metadata object!");
+        aRv.Throw(NS_ERROR_FAILURE);
+        return;
+      }
     }
   }
 
@@ -2029,6 +2016,7 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mAllowCasting(false),
     mIsCasting(false),
     mAudioCaptured(false),
+    mAudioCapturedByWindow(false),
     mPlayingBeforeSeek(false),
     mPlayingThroughTheAudioChannelBeforeSeek(false),
     mPausedForInactiveDocumentOrChannel(false),
@@ -2054,7 +2042,8 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mPlayingThroughTheAudioChannel(false),
     mDisableVideo(false),
     mPlayBlockedBecauseHidden(false),
-    mElementInTreeState(ELEMENT_NOT_INTREE)
+    mElementInTreeState(ELEMENT_NOT_INTREE),
+    mHasUserInteraction(false)
 {
   if (!gMediaElementLog) {
     gMediaElementLog = PR_NewLogModule("nsMediaElement");
@@ -2094,6 +2083,11 @@ HTMLMediaElement::~HTMLMediaElement()
   }
   if (mSrcStream) {
     EndSrcMediaStreamPlayback();
+  }
+
+  if (mCaptureStreamPort) {
+    mCaptureStreamPort->Destroy();
+    mCaptureStreamPort = nullptr;
   }
 
   NS_ASSERTION(MediaElementTableCount(this, mLoadingSrc) == 0,
@@ -2165,14 +2159,16 @@ HTMLMediaElement::Play(ErrorResult& aRv)
 {
   // Prevent media element from being auto-started by a script when
   // media.autoplay.enabled=false
-  nsRefPtr<TimeRanges> played(Played());
-  if (played->Length() == 0
+  if (!mHasUserInteraction
       && !IsAutoplayEnabled()
       && !EventStateManager::IsHandlingUserInput()
       && !nsContentUtils::IsCallerChrome()) {
     LOG(LogLevel::Debug, ("%p Blocked attempt to autoplay media.", this));
     return;
   }
+
+  // Play was not blocked so assume user interacted with the element.
+  mHasUserInteraction = true;
 
   StopSuspendingAfterFirstFrame();
   SetPlayedOrSeeked(true);
@@ -4014,7 +4010,7 @@ HTMLMediaElement::NotifyOwnerDocumentActivityChangedInternal()
   }
 
   bool pauseElement = !IsActive();
-#ifdef MOZ_B2G
+#ifdef PAUSE_MEDIA_ELEMENT_FROM_AUDIOCHANNEL
   pauseElement |= ComputedMuted();
 #endif
 
@@ -4458,7 +4454,7 @@ nsresult HTMLMediaElement::UpdateChannelMuteState(float aVolume, bool aMuted)
     }
   }
 
-#ifdef MOZ_B2G
+#ifdef PAUSE_MEDIA_ELEMENT_FROM_AUDIOCHANNEL
   SuspendOrResumeElement(ComputedMuted(), false);
 #endif
   return NS_OK;
@@ -4474,8 +4470,7 @@ void HTMLMediaElement::UpdateAudioChannelPlayingState()
      (!mPaused &&
       (HasAttr(kNameSpaceID_None, nsGkAtoms::loop) ||
        (mReadyState >= nsIDOMHTMLMediaElement::HAVE_CURRENT_DATA &&
-        !IsPlaybackEnded() &&
-        (!mSrcStream || HasAudio())) ||
+        !IsPlaybackEnded()) ||
        mPlayingThroughTheAudioChannelBeforeSeek));
   if (playingThroughTheAudioChannel != mPlayingThroughTheAudioChannel) {
     mPlayingThroughTheAudioChannel = playingThroughTheAudioChannel;
@@ -4491,7 +4486,7 @@ void HTMLMediaElement::UpdateAudioChannelPlayingState()
       if (!mAudioChannelAgent) {
         return;
       }
-      mAudioChannelAgent->InitWithWeakCallback(OwnerDoc()->GetWindow(),
+      mAudioChannelAgent->InitWithWeakCallback(OwnerDoc()->GetInnerWindow(),
                                                static_cast<int32_t>(mAudioChannel),
                                                this);
     }
@@ -4503,6 +4498,10 @@ void HTMLMediaElement::UpdateAudioChannelPlayingState()
 void
 HTMLMediaElement::NotifyAudioChannelAgent(bool aPlaying)
 {
+  // Immediately check if this should go to the MSG instead of the normal
+  // media playback route.
+  WindowAudioCaptureChanged();
+
   // This is needed to pass nsContentUtils::IsCallerChrome().
   // AudioChannel API should not called from content but it can happen that
   // this method has some content JS in its stack.
@@ -4525,7 +4524,7 @@ NS_IMETHODIMP HTMLMediaElement::WindowVolumeChanged(float aVolume, bool aMuted)
 
   UpdateChannelMuteState(aVolume, aMuted);
 
-#ifdef MOZ_B2G
+#ifdef PAUSE_MEDIA_ELEMENT_FROM_AUDIOCHANNEL
   mPaused.SetCanPlay(!aMuted);
 #endif
 
@@ -4560,7 +4559,8 @@ HTMLMediaElement::SetMediaKeys(mozilla::dom::MediaKeys* aMediaKeys,
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return nullptr;
   }
-  nsRefPtr<DetailedPromise> promise = DetailedPromise::Create(global, aRv);
+  nsRefPtr<DetailedPromise> promise = DetailedPromise::Create(global, aRv,
+    NS_LITERAL_CSTRING("HTMLMediaElement.setMediaKeys"));
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -4672,6 +4672,53 @@ HTMLMediaElement::GetTopLevelPrincipal()
   return principal.forget();
 }
 #endif // MOZ_EME
+
+NS_IMETHODIMP HTMLMediaElement::WindowAudioCaptureChanged()
+{
+   MOZ_ASSERT(mAudioChannelAgent);
+
+  if (!OwnerDoc()->GetInnerWindow()) {
+    return NS_OK;
+  }
+  bool captured = OwnerDoc()->GetInnerWindow()->GetAudioCaptured();
+
+  if (captured != mAudioCapturedByWindow) {
+    if (captured) {
+      mAudioCapturedByWindow = true;
+      nsCOMPtr<nsPIDOMWindow> window =
+        do_QueryInterface(OwnerDoc()->GetParentObject());
+      uint64_t id = window->WindowID();
+      MediaStreamGraph* msg = MediaStreamGraph::GetInstance();
+
+      if (!mPlaybackStream) {
+        nsRefPtr<DOMMediaStream> stream = CaptureStreamInternal(false, msg);
+        mCaptureStreamPort = msg->ConnectToCaptureStream(id, stream->GetStream());
+      } else {
+        mCaptureStreamPort = msg->ConnectToCaptureStream(id, mPlaybackStream->GetStream());
+      }
+    } else {
+      mAudioCapturedByWindow = false;
+      if (mDecoder) {
+        ProcessedMediaStream* ps =
+          mCaptureStreamPort->GetSource()->AsProcessedStream();
+        MOZ_ASSERT(ps);
+
+        for (uint32_t i = 0; i < mOutputStreams.Length(); i++) {
+          if (mOutputStreams[i].mStream->GetStream() == ps) {
+            mOutputStreams.RemoveElementAt(i);
+            break;
+          }
+        }
+
+        mDecoder->RemoveOutputStream(ps);
+      }
+      mCaptureStreamPort->Destroy();
+      mCaptureStreamPort = nullptr;
+    }
+  }
+
+   return NS_OK;
+}
 
 AudioTrackList*
 HTMLMediaElement::AudioTracks()

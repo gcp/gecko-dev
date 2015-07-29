@@ -40,6 +40,7 @@
 #include "mozilla/dom/IccManager.h"
 #include "mozilla/dom/InputPortManager.h"
 #include "mozilla/dom/MobileMessageManager.h"
+#include "mozilla/dom/Permissions.h"
 #include "mozilla/dom/ServiceWorkerContainer.h"
 #include "mozilla/dom/Telephony.h"
 #include "mozilla/dom/Voicemail.h"
@@ -181,8 +182,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Navigator)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPlugins)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMimeTypes)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPlugins)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPermissions)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGeolocation)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNotification)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBatteryManager)
@@ -228,12 +230,14 @@ Navigator::Invalidate()
   // Don't clear mWindow here so we know we've got a non-null mWindow
   // until we're unlinked.
 
+  mMimeTypes = nullptr;
+
   if (mPlugins) {
     mPlugins->Invalidate();
     mPlugins = nullptr;
   }
 
-  mMimeTypes = nullptr;
+  mPermissions = nullptr;
 
   // If there is a page transition, make sure delete the geolocation object.
   if (mGeolocation) {
@@ -575,6 +579,21 @@ Navigator::GetPlugins(ErrorResult& aRv)
   }
 
   return mPlugins;
+}
+
+Permissions*
+Navigator::GetPermissions(ErrorResult& aRv)
+{
+  if (!mWindow) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  if (!mPermissions) {
+    mPermissions = new Permissions(mWindow);
+  }
+
+  return mPermissions;
 }
 
 // Values for the network.cookie.cookieBehavior pref are documented in
@@ -2728,8 +2747,52 @@ Navigator::RequestMediaKeySystemAccess(const nsAString& aKeySystem,
                                        const Optional<Sequence<MediaKeySystemOptions>>& aOptions,
                                        ErrorResult& aRv)
 {
+  nsAutoCString logMsg;
+  logMsg.AppendPrintf("Navigator::RequestMediaKeySystemAccess(keySystem='%s' options=[",
+                      NS_ConvertUTF16toUTF8(aKeySystem).get());
+  if (aOptions.WasPassed()) {
+    const Sequence<MediaKeySystemOptions>& options = aOptions.Value();
+    for (size_t i = 0; i < options.Length(); i++) {
+      const MediaKeySystemOptions& op = options[i];
+      if (i > 0) {
+        logMsg.AppendLiteral(",");
+      }
+      logMsg.AppendLiteral("{");
+      logMsg.AppendPrintf("stateful='%s'",
+        MediaKeysRequirementValues::strings[(size_t)op.mStateful].value);
+
+      logMsg.AppendPrintf(", uniqueIdentifier='%s'",
+        MediaKeysRequirementValues::strings[(size_t)op.mUniqueidentifier].value);
+
+      if (!op.mAudioCapability.IsEmpty()) {
+        logMsg.AppendPrintf(", audioCapability='%s'",
+                            NS_ConvertUTF16toUTF8(op.mAudioCapability).get());
+      }
+      if (!op.mAudioType.IsEmpty()) {
+        logMsg.AppendPrintf(", audioType='%s'",
+          NS_ConvertUTF16toUTF8(op.mAudioType).get());
+      }
+      if (!op.mInitDataType.IsEmpty()) {
+        logMsg.AppendPrintf(", initDataType='%s'",
+          NS_ConvertUTF16toUTF8(op.mInitDataType).get());
+      }
+      if (!op.mVideoCapability.IsEmpty()) {
+        logMsg.AppendPrintf(", videoCapability='%s'",
+          NS_ConvertUTF16toUTF8(op.mVideoCapability).get());
+      }
+      if (!op.mVideoType.IsEmpty()) {
+        logMsg.AppendPrintf(", videoType='%s'",
+          NS_ConvertUTF16toUTF8(op.mVideoType).get());
+      }
+      logMsg.AppendLiteral("}");
+    }
+  }
+  logMsg.AppendPrintf("])");
+  EME_LOG(logMsg.get());
+
   nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(mWindow);
-  nsRefPtr<DetailedPromise> promise = DetailedPromise::Create(go, aRv);
+  nsRefPtr<DetailedPromise> promise = DetailedPromise::Create(go, aRv,
+    NS_LITERAL_CSTRING("navigator.requestMediaKeySystemAccess"));
   if (aRv.Failed()) {
     return nullptr;
   }

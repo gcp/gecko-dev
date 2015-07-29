@@ -653,10 +653,6 @@ just addresses the organization to follow, e.g. "This site is run by " -->
 
 <!-- Voice search in the awesome bar -->
 <!ENTITY voicesearch_prompt "Speak now">
-<!ENTITY voicesearch_failed_title "&brandShortName; Voice Search">
-<!ENTITY voicesearch_failed_message "There is a problem with voice search right now. Please try later.">
-<!ENTITY voicesearch_failed_message_recoverable "Sorry! We could not recognize your words. Please try again.">
-<!ENTITY voicesearch_failed_retry "Try again">
 
 <!-- Localization note (remote_tabs_last_synced): the variable is replaced by a
      "relative time span string" produced by Android.  This string describes the
@@ -682,3 +678,18 @@ just addresses the organization to follow, e.g. "This site is run by " -->
      desktop Firefox via WebIDE), so you just need to aim this device at the QR
      code. -->
 <!ENTITY devtools_auth_scan_header "Scanning for the QR code displayed on your other device">
+
+<!-- Restrictions -->
+<!-- Localization note: These are restrictions the device owner (e.g. parent) can enable for
+     a restricted profile (e.g. child). Used inside the Android settings UI. -->
+<!ENTITY restriction_disallow_tools_menu_title "Disallow Tools menu">
+<!ENTITY restriction_disallow_tools_menu_description "Hide Tools menu from UI.">
+<!ENTITY restriction_disallow_report_site_issue_title "Disallow \'Report site issue\'">
+<!ENTITY restriction_disallow_report_site_issue_description "Hide \'Report site issue\' menu item.">
+<!ENTITY restriction_disallow_import_settings_title "Disallow importing settings">
+<!ENTITY restriction_disallow_import_settings_description "Do not allow to import settings from other system browsers.">
+<!ENTITY restriction_disallow_addons_title "Disallow add-ons">
+<!ENTITY restriction_disallow_addons_description "Disallow installation of add-ons.">
+<!ENTITY restriction_disallow_apps_title "Disallow apps">
+<!ENTITY restriction_disallow_apps_description "Disallow installing apps from Firefox Marketplace.">
+

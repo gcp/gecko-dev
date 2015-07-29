@@ -112,7 +112,7 @@
 #endif
 #ifdef MOZ_GTK3
 @BINPATH@/@DLL_PREFIX@mozgtk@DLL_SUFFIX@
-@BINPATH@/@DLL_PREFIX@mozgtk2@DLL_SUFFIX@
+@BINPATH@/gtk2/@DLL_PREFIX@mozgtk@DLL_SUFFIX@
 #endif
 
 [browser]
@@ -498,8 +498,8 @@
 @RESPATH@/components/CellBroadcastService.manifest
 @RESPATH@/components/DataCallManager.js
 @RESPATH@/components/DataCallManager.manifest
-@BINPATH@/components/IccService.js
-@BINPATH@/components/IccService.manifest
+@RESPATH@/components/IccService.js
+@RESPATH@/components/IccService.manifest
 @RESPATH@/components/MmsService.js
 @RESPATH@/components/MmsService.manifest
 @RESPATH@/components/MobileMessageDatabaseService.js
@@ -516,8 +516,6 @@
 #endif
 @RESPATH@/components/StkCmdFactory.js
 @RESPATH@/components/StkCmdFactory.manifest
-@RESPATH@/components/RILContentHelper.js
-@RESPATH@/components/RILContentHelper.manifest
 @RESPATH@/components/RILSystemMessengerHelper.js
 @RESPATH@/components/RILSystemMessengerHelper.manifest
 @RESPATH@/components/TelephonyAudioService.js
@@ -644,6 +642,7 @@
 @RESPATH@/components/AppsService.manifest
 @RESPATH@/components/Push.js
 @RESPATH@/components/Push.manifest
+@RESPATH@/components/PushClient.js
 @RESPATH@/components/PushNotificationService.js
 @RESPATH@/components/PushServiceLauncher.js
 
@@ -710,6 +709,7 @@
 @RESPATH@/components/nsUrlClassifierHashCompleter.js
 @RESPATH@/components/nsUrlClassifierListManager.js
 @RESPATH@/components/nsUrlClassifierLib.js
+@RESPATH@/components/PrivateBrowsingTrackingProtectionWhitelist.js
 @RESPATH@/components/url-classifier.xpt
 
 ; GNOME hooks

@@ -943,7 +943,8 @@ CallFunctionWithAsyncStack(JSContext* cx, unsigned argc, Value* vp)
     RootedObject stack(cx, &args[1].toObject());
     RootedString asyncCause(cx, args[2].toString());
 
-    JS::AutoSetAsyncStackForNewCalls sas(cx, stack, asyncCause);
+    JS::AutoSetAsyncStackForNewCalls sas(cx, stack, asyncCause,
+                                         JS::AutoSetAsyncStackForNewCalls::AsyncCallKind::EXPLICIT);
     return Call(cx, UndefinedHandleValue, function,
                 JS::HandleValueArray::empty(), args.rval());
 }
@@ -1455,7 +1456,7 @@ js::testingFunc_inIon(JSContext* cx, unsigned argc, Value* vp)
     ScriptFrameIter iter(cx);
     if (iter.isIon()) {
         // Reset the counter of the IonScript's script.
-        JitFrameIterator jitIter(cx);
+        jit::JitFrameIterator jitIter(cx);
         ++jitIter;
         jitIter.script()->resetWarmUpResetCounter();
     } else {

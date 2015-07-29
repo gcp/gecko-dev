@@ -564,7 +564,7 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWindow *aOuterWindow)
   mMayHavePointerEnterLeaveEventListener(false),
   mIsModalContentWindow(false),
   mIsActive(false), mIsBackground(false),
-  mAudioMuted(false), mAudioVolume(1.0),
+  mAudioMuted(false), mAudioVolume(1.0), mAudioCaptured(false),
   mDesktopModeViewport(false), mInnerWindow(nullptr),
   mOuterWindow(aOuterWindow),
   // Make sure no actual window ends up with mWindowID == 0
@@ -759,6 +759,9 @@ nsOuterWindowProxy::getOwnPropertyDescriptor(JSContext* cx,
   }
   // else fall through to js::Wrapper
 
+  // When we change this to always claim the property is configurable (bug
+  // 1178639), update the comments in nsOuterWindowProxy::defineProperty
+  // accordingly.
   return js::Wrapper::getOwnPropertyDescriptor(cx, proxy, id, desc);
 }
 
@@ -777,13 +780,28 @@ nsOuterWindowProxy::defineProperty(JSContext* cx,
     return result.failCantDefineWindowElement();
   }
 
+#ifndef RELEASE_BUILD // To be turned on in bug 1178638.
   // For now, allow chrome code to define non-configurable properties
   // on windows, until we sort out what exactly the addon SDK is
   // doing.  In the meantime, this still allows us to test web compat
   // behavior.
-  if (false && !desc.configurable() && !nsContentUtils::IsCallerChrome()) {
+  if (desc.hasConfigurable() && !desc.configurable() &&
+      !nsContentUtils::IsCallerChrome()) {
     return ThrowErrorMessage(cx, MSG_DEFINE_NON_CONFIGURABLE_PROP_ON_WINDOW);
   }
+
+  // Note that if hasConfigurable() is false we do NOT want to
+  // setConfigurable(true).  That would make this code:
+  //
+  //   var x;
+  //   window.x = 5;
+  //
+  // fail, because the JS engine ends up converting the assignment into a define
+  // with !hasConfigurable(), but the var actually declared a non-configurable
+  // property on our underlying Window object, so the set would fail if we
+  // forced setConfigurable(true) here.  What we want to do instead is change
+  // getOwnPropertyDescriptor to always claim configurable.  See bug 1178639.
+#endif
 
   return js::Wrapper::defineProperty(cx, proxy, id, desc, result);
 }
@@ -1232,21 +1250,11 @@ nsGlobalWindow::Init()
   sWindowsById = new WindowByIdTable();
 }
 
-static PLDHashOperator
-DisconnectEventTargetObjects(nsPtrHashKey<DOMEventTargetHelper>* aKey,
-                             void* aClosure)
-{
-  nsRefPtr<DOMEventTargetHelper> target = aKey->GetKey();
-  target->DisconnectFromOwner();
-  return PL_DHASH_NEXT;
-}
-
 nsGlobalWindow::~nsGlobalWindow()
 {
   AssertIsOnMainThread();
 
-  mEventTargetObjects.EnumerateEntries(DisconnectEventTargetObjects, nullptr);
-  mEventTargetObjects.Clear();
+  DisconnectEventTargetObjects();
 
   // We have to check if sWindowsById isn't null because ::Shutdown might have
   // been called.
@@ -1357,6 +1365,17 @@ nsGlobalWindow::RemoveEventTargetObject(DOMEventTargetHelper* aObject)
   mEventTargetObjects.RemoveEntry(aObject);
 }
 
+void
+nsGlobalWindow::DisconnectEventTargetObjects()
+{
+  for (auto iter = mEventTargetObjects.ConstIter(); !iter.Done();
+       iter.Next()) {
+    nsRefPtr<DOMEventTargetHelper> target = iter.Get()->GetKey();
+    target->DisconnectFromOwner();
+  }
+  mEventTargetObjects.Clear();
+}
+
 // static
 void
 nsGlobalWindow::ShutDown()
@@ -1416,8 +1435,7 @@ nsGlobalWindow::CleanUp()
 
   StartDying();
 
-  mEventTargetObjects.EnumerateEntries(DisconnectEventTargetObjects, nullptr);
-  mEventTargetObjects.Clear();
+  DisconnectEventTargetObjects();
 
   if (mObserver) {
     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
@@ -3727,6 +3745,26 @@ nsPIDOMWindow::RefreshMediaElements()
   service->RefreshAgentsVolume(GetOuterWindow());
 }
 
+bool
+nsPIDOMWindow::GetAudioCaptured() const
+{
+  MOZ_ASSERT(IsInnerWindow());
+  return mAudioCaptured;
+}
+
+nsresult
+nsPIDOMWindow::SetAudioCapture(bool aCapture)
+{
+  MOZ_ASSERT(IsInnerWindow());
+
+  mAudioCaptured = aCapture;
+
+  nsRefPtr<AudioChannelService> service = AudioChannelService::GetOrCreate();
+  service->RefreshAgentsCapture(GetOuterWindow(), mWindowID);
+
+  return NS_OK;
+}
+
 // nsISpeechSynthesisGetter
 
 #ifdef MOZ_WEBSPEECH
@@ -5515,7 +5553,7 @@ nsGlobalWindow::RequestAnimationFrame(JS::Handle<JS::Value> aCallback,
 
   JS::Rooted<JSObject*> callbackObj(cx, &aCallback.toObject());
   nsRefPtr<FrameRequestCallback> callback =
-    new FrameRequestCallback(callbackObj, GetIncumbentGlobal());
+    new FrameRequestCallback(cx, callbackObj, GetIncumbentGlobal());
 
   ErrorResult rv;
   *aHandle = RequestAnimationFrame(*callback, rv);
@@ -8561,13 +8599,10 @@ nsGlobalWindow::PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> aMessa
                          providedPrincipal,
                          nsContentUtils::IsCallerChrome());
 
-  nsIPrincipal* principal = GetPrincipal();
   JS::Rooted<JS::Value> message(aCx, aMessage);
   JS::Rooted<JS::Value> transfer(aCx, aTransfer);
-  bool subsumes;
 
-  if (NS_FAILED(callerPrin->Subsumes(principal, &subsumes)) ||
-      !event->Write(aCx, message, transfer, subsumes, this)) {
+  if (!event->Write(aCx, message, transfer)) {
     aError.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
     return;
   }
@@ -13542,27 +13577,6 @@ nsGlobalWindow::DisableTimeChangeNotifications()
   mozilla::time::RemoveWindowListener(this);
 }
 
-static PLDHashOperator
-CollectSizeAndListenerCount(
-  nsPtrHashKey<DOMEventTargetHelper>* aEntry,
-  void *arg)
-{
-  nsWindowSizes* windowSizes = static_cast<nsWindowSizes*>(arg);
-
-  DOMEventTargetHelper* et = aEntry->GetKey();
-
-  if (nsCOMPtr<nsISizeOfEventTarget> iSizeOf = do_QueryObject(et)) {
-    windowSizes->mDOMEventTargetsSize +=
-      iSizeOf->SizeOfEventTargetIncludingThis(windowSizes->mMallocSizeOf);
-  }
-
-  if (EventListenerManager* elm = et->GetExistingListenerManager()) {
-    windowSizes->mDOMEventListenersCount += elm->ListenerCount();
-  }
-
-  return PL_DHASH_NEXT;
-}
-
 void
 nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
 {
@@ -13596,10 +13610,19 @@ nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
   aWindowSizes->mDOMEventTargetsSize +=
     mEventTargetObjects.SizeOfExcludingThis(nullptr,
                                             aWindowSizes->mMallocSizeOf);
-  aWindowSizes->mDOMEventTargetsCount +=
-    const_cast<nsTHashtable<nsPtrHashKey<DOMEventTargetHelper> >*>
-      (&mEventTargetObjects)->EnumerateEntries(CollectSizeAndListenerCount,
-                                               aWindowSizes);
+
+
+  for (auto iter = mEventTargetObjects.ConstIter(); !iter.Done(); iter.Next()) {
+    DOMEventTargetHelper* et = iter.Get()->GetKey();
+    if (nsCOMPtr<nsISizeOfEventTarget> iSizeOf = do_QueryObject(et)) {
+      aWindowSizes->mDOMEventTargetsSize +=
+        iSizeOf->SizeOfEventTargetIncludingThis(aWindowSizes->mMallocSizeOf);
+    }
+    if (EventListenerManager* elm = et->GetExistingListenerManager()) {
+      aWindowSizes->mDOMEventListenersCount += elm->ListenerCount();
+    }
+    ++aWindowSizes->mDOMEventTargetsCount;
+  }
 }
 
 

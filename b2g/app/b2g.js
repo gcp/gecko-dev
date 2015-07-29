@@ -677,9 +677,6 @@ pref("dom.forms.number", true);
 // implemented for b2g (bug 875751)
 pref("dom.forms.color", false);
 
-// Turns on gralloc-based direct texturing for Gonk
-pref("gfx.gralloc.enabled", false);
-
 // This preference instructs the JS engine to discard the
 // source of any privileged JS after compilation. This saves
 // memory, but makes things like Function.prototype.toSource()
@@ -1040,7 +1037,10 @@ pref("security.exthelperapp.disable_background_handling", true);
 pref("osfile.reset_worker_delay", 5000);
 
 // APZC preferences.
-//
+#ifdef MOZ_WIDGET_GONK
+pref("apz.allow_zooming", true);
+#endif
+
 // Gaia relies heavily on scroll events for now, so lets fire them
 // more often than the default value (100).
 pref("apz.asyncscroll.throttle", 40);
@@ -1097,11 +1097,14 @@ pref("dom.wakelock.enabled", true);
 // Enable webapps add-ons
 pref("dom.apps.customization.enabled", true);
 
-// Enable touch caret by default
-pref("touchcaret.enabled", true);
+// Original caret implementation on collapsed selection.
+pref("touchcaret.enabled", false);
 
-// Enable selection caret by default
-pref("selectioncaret.enabled", true);
+// Original caret implementation on non-collapsed selection.
+pref("selectioncaret.enabled", false);
+
+// New implementation to unify touch-caret and selection-carets.
+pref("layout.accessiblecaret.enabled", true);
 
 // Enable sync and mozId with Firefox Accounts.
 pref("services.sync.fxaccounts.enabled", true);
@@ -1114,9 +1117,6 @@ pref("services.mobileid.server.uri", "https://msisdn.services.mozilla.com");
 #ifndef XP_WIN
 pref("dom.mapped_arraybuffer.enabled", true);
 #endif
-
-// BroadcastChannel API
-pref("dom.broadcastChannel.enabled", true);
 
 // SystemUpdate API
 pref("dom.system_update.enabled", true);

@@ -123,6 +123,7 @@ EXPORTS.js += [
     '../public/SliceBudget.h',
     '../public/StructuredClone.h',
     '../public/TraceableHashTable.h',
+    '../public/TraceableVector.h',
     '../public/TraceKind.h',
     '../public/TracingAPI.h',
     '../public/TrackedOptimizationInfo.h',
@@ -603,6 +604,9 @@ if CONFIG['OS_ARCH'] == 'SunOS':
         'nsl',
         'socket',
     ]
+
+CFLAGS += CONFIG['MOZ_ICU_CFLAGS']
+CXXFLAGS += CONFIG['MOZ_ICU_CFLAGS']
 
 if CONFIG['GNU_CXX']:
     FAIL_ON_WARNINGS = True

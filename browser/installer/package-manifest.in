@@ -38,7 +38,7 @@
 @APPNAME@/Contents/PkgInfo
 @RESPATH@/firefox.icns
 @RESPATH@/document.icns
-@RESPATH@/@AB@.lproj/*
+@RESPATH@/@LPROJ_ROOT@.lproj/*
 #endif
 
 [@AB_CD@]
@@ -130,7 +130,7 @@
 #endif
 #ifdef MOZ_GTK3
 @BINPATH@/@DLL_PREFIX@mozgtk@DLL_SUFFIX@
-@BINPATH@/@DLL_PREFIX@mozgtk2@DLL_SUFFIX@
+@BINPATH@/gtk2/@DLL_PREFIX@mozgtk@DLL_SUFFIX@
 #endif
 
 [browser]
@@ -558,6 +558,7 @@
 @RESPATH@/components/AlarmsManager.manifest
 @RESPATH@/components/Push.js
 @RESPATH@/components/Push.manifest
+@RESPATH@/components/PushClient.js
 @RESPATH@/components/PushNotificationService.js
 
 @RESPATH@/components/SlowScriptDebug.manifest
@@ -637,6 +638,7 @@
 @RESPATH@/components/nsUrlClassifierHashCompleter.js
 @RESPATH@/components/nsUrlClassifierListManager.js
 @RESPATH@/components/nsUrlClassifierLib.js
+@RESPATH@/components/PrivateBrowsingTrackingProtectionWhitelist.js
 @RESPATH@/components/url-classifier.xpt
 #endif
 

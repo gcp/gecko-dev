@@ -1490,7 +1490,7 @@ nsRefreshDriver::DispatchPendingEvents()
 }
 
 void
-nsRefreshDriver::RunFrameRequestCallbacks(int64_t aNowEpoch, TimeStamp aNowTime)
+nsRefreshDriver::RunFrameRequestCallbacks(TimeStamp aNowTime)
 {
   // Grab all of our frame request callbacks up front.
   nsTArray<DocumentFrameCallbacks>
@@ -1665,7 +1665,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
       // This is the Flush_Style case.
 
       DispatchPendingEvents();
-      RunFrameRequestCallbacks(aNowEpoch, aNowTime);
+      RunFrameRequestCallbacks(aNowTime);
 
       if (mPresContext && mPresContext->GetPresShell()) {
         bool tracingStyleFlush = false;
@@ -1812,7 +1812,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
     for (nsDocShell* docShell : profilingDocShells) {
       // For the sake of the profile timeline's simplicity, this is flagged as
       // paint even if it includes creating display lists
-      docShell->AddProfileTimelineMarker("Paint", TRACING_INTERVAL_START);
+      TimelineConsumers::AddMarkerForDocShell(docShell, "Paint", TRACING_INTERVAL_START);
     }
 #ifdef MOZ_DUMP_PAINTING
     if (nsLayoutUtils::InvalidationDebuggingIsEnabled()) {
@@ -1829,7 +1829,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
     }
 #endif
     for (nsDocShell* docShell : profilingDocShells) {
-      docShell->AddProfileTimelineMarker("Paint", TRACING_INTERVAL_END);
+      TimelineConsumers::AddMarkerForDocShell(docShell, "Paint", TRACING_INTERVAL_END);
     }
 
     if (nsContentUtils::XPConnect()) {

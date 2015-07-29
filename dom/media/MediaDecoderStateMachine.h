@@ -119,7 +119,6 @@ extern PRLogModuleInfo* gMediaSampleLog;
 */
 class MediaDecoderStateMachine
 {
-  friend class AudioSink;
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaDecoderStateMachine)
 public:
   typedef MediaDecoderReader::AudioDataPromise AudioDataPromise;
@@ -139,7 +138,6 @@ public:
     DECODER_STATE_DECODING_METADATA,
     DECODER_STATE_WAIT_FOR_RESOURCES,
     DECODER_STATE_WAIT_FOR_CDM,
-    DECODER_STATE_DECODING_FIRSTFRAME,
     DECODER_STATE_DORMANT,
     DECODER_STATE_DECODING,
     DECODER_STATE_SEEKING,
@@ -150,6 +148,8 @@ public:
   };
 
   void AddOutputStream(ProcessedMediaStream* aStream, bool aFinishWhenEnded);
+  // Remove an output stream added with AddOutputStream.
+  void RemoveOutputStream(MediaStream* aStream);
 
   // Set/Unset dormant state.
   void SetDormant(bool aDormant);
@@ -161,6 +161,7 @@ private:
   void InitializationTask();
 
   void DispatchAudioCaptured();
+  void DispatchAudioUncaptured();
 
   void Shutdown();
 public:
@@ -398,17 +399,15 @@ protected:
   void PushFront(AudioData* aSample);
   void PushFront(VideoData* aSample);
 
-  void OnAudioPopped();
-  void OnVideoPopped();
+  void OnAudioPopped(const AudioData* aSample);
+  void OnVideoPopped(const VideoData* aSample);
 
   void VolumeChanged();
   void LogicalPlaybackRateChanged();
   void PreservesPitchChanged();
 
-  MediaQueue<AudioData>& AudioQueue() { return mAudioQueue; }
-  MediaQueue<VideoData>& VideoQueue() { return mVideoQueue; }
-
-  nsresult FinishDecodeFirstFrame();
+  MediaQueue<MediaData>& AudioQueue() { return mAudioQueue; }
+  MediaQueue<MediaData>& VideoQueue() { return mVideoQueue; }
 
   // True if our buffers of decoded audio are not full, and we should
   // decode more.
@@ -556,11 +555,6 @@ protected:
 
   void EnqueueFirstFrameLoadedEvent();
 
-  // Dispatches a task to the state machine thread to begin decoding content.
-  // This is threadsafe and can be called on any thread.
-  // The decoder monitor must be held.
-  nsresult EnqueueDecodeFirstFrameTask();
-
   // Clears any previous seeking state and initiates a new see on the decoder.
   // The decoder monitor must be held.
   void InitiateSeek();
@@ -618,16 +612,14 @@ protected:
   void OnMetadataRead(MetadataHolder* aMetadata);
   void OnMetadataNotRead(ReadMetadataFailureReason aReason);
 
-  // Initiate first content decoding. Called on the state machine thread.
-  // The decoder monitor must be held with exactly one lock count.
-  nsresult DecodeFirstFrame();
-
-  // Wraps the call to DecodeFirstFrame(), signals a DecodeError() on failure.
-  void CallDecodeFirstFrame();
-
-  // Checks whether we're finished decoding first audio and/or video packets,
-  // and switches to DECODING state if so.
-  void MaybeFinishDecodeFirstFrame();
+  // Checks whether we're finished decoding first audio and/or video packets.
+  // If so will trigger firing loadeddata event.
+  // If there are any queued seek, will change state to DECODER_STATE_SEEKING
+  // and return true.
+  bool MaybeFinishDecodeFirstFrame();
+  // Return true if we are currently decoding the first frames.
+  bool IsDecodingFirstFrame();
+  void FinishDecodeFirstFrame();
 
   // Seeks to mSeekTarget. Called on the decode thread. The decoder monitor
   // must be held with exactly one lock count.
@@ -666,17 +658,6 @@ protected:
   // Set the time that playback started from the system clock.
   // Can only be called on the state machine thread.
   void SetPlayStartTime(const TimeStamp& aTimeStamp);
-
-private:
-  // Update mDecoder's playback offset.
-  void OnPlaybackOffsetUpdate(int64_t aPlaybackOffset);
-public:
-  void DispatchOnPlaybackOffsetUpdate(int64_t aPlaybackOffset)
-  {
-    RefPtr<nsRunnable> r =
-      NS_NewRunnableMethodWithArg<int64_t>(this, &MediaDecoderStateMachine::OnPlaybackOffsetUpdate, aPlaybackOffset);
-    OwnerThread()->Dispatch(r.forget());
-  }
 
 private:
   // Resolved by the AudioSink to signal that all outstanding work is complete
@@ -898,11 +879,10 @@ private:
 
   // Queue of audio frames. This queue is threadsafe, and is accessed from
   // the audio, decoder, state machine, and main threads.
-  MediaQueue<AudioData> mAudioQueue;
-
+  MediaQueue<MediaData> mAudioQueue;
   // Queue of video frames. This queue is threadsafe, and is accessed from
   // the decoder, state machine, and main threads.
-  MediaQueue<VideoData> mVideoQueue;
+  MediaQueue<MediaData> mVideoQueue;
 
   // The decoder monitor must be obtained before modifying this state.
   // NotifyAll on the monitor must be called when the state is changed so
@@ -1273,6 +1253,10 @@ private:
   mozilla::MediaMetadataManager mMetadataManager;
 
   mozilla::RollingMean<uint32_t, uint32_t> mCorruptFrames;
+
+  // True if we need to call FinishDecodeFirstFrame() upon frame decoding
+  // successeeding.
+  bool mDecodingFirstFrame;
 
   bool mDisabledHardwareAcceleration;
 

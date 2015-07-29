@@ -27,6 +27,7 @@
 #include "jit/SharedICHelpers.h"
 #include "jit/VMFunctions.h"
 #include "js/Conversions.h"
+#include "js/TraceableVector.h"
 #include "vm/Opcodes.h"
 #include "vm/TypedArrayCommon.h"
 
@@ -1904,6 +1905,10 @@ DoBinaryArithFallback(JSContext* cx, BaselineFrame* frame, ICBinaryArith_Fallbac
         if (!ModValues(cx, &lhsCopy, &rhsCopy, ret))
             return false;
         break;
+      case JSOP_POW:
+        if (!math_pow_handle(cx, lhsCopy, rhsCopy, ret))
+            return false;
+        break;
       case JSOP_BITOR: {
         int32_t result;
         if (!BitOr(cx, lhs, rhs, &result))
@@ -2037,7 +2042,7 @@ DoBinaryArithFallback(JSContext* cx, BaselineFrame* frame, ICBinaryArith_Fallbac
         }
     }
 
-    if (lhs.isInt32() && rhs.isInt32()) {
+    if (lhs.isInt32() && rhs.isInt32() && op != JSOP_POW) {
         bool allowDouble = ret.isDouble();
         if (allowDouble)
             stub->unlinkStubsWithKind(cx, ICStub::BinaryArith_Int32);
@@ -5047,11 +5052,11 @@ ICSetElem_DenseOrUnboxedArray::Compiler::generateStubCode(MacroAssembler& masm)
 }
 
 static bool
-GetProtoShapes(JSObject* obj, size_t protoChainDepth, AutoShapeVector* shapes)
+GetProtoShapes(JSObject* obj, size_t protoChainDepth, MutableHandle<ShapeVector> shapes)
 {
     JSObject* curProto = obj->getProto();
     for (size_t i = 0; i < protoChainDepth; i++) {
-        if (!shapes->append(curProto->as<NativeObject>().lastProperty()))
+        if (!shapes.append(curProto->as<NativeObject>().lastProperty()))
             return false;
         curProto = curProto->getProto();
     }
@@ -5066,7 +5071,7 @@ GetProtoShapes(JSObject* obj, size_t protoChainDepth, AutoShapeVector* shapes)
 ICUpdatedStub*
 ICSetElemDenseOrUnboxedArrayAddCompiler::getStub(ICStubSpace* space)
 {
-    AutoShapeVector shapes(cx);
+    Rooted<ShapeVector> shapes(cx, ShapeVector(cx));
     if (!shapes.append(obj_->maybeShape()))
         return nullptr;
 
@@ -5077,11 +5082,11 @@ ICSetElemDenseOrUnboxedArrayAddCompiler::getStub(ICStubSpace* space)
 
     ICUpdatedStub* stub = nullptr;
     switch (protoChainDepth_) {
-      case 0: stub = getStubSpecific<0>(space, &shapes); break;
-      case 1: stub = getStubSpecific<1>(space, &shapes); break;
-      case 2: stub = getStubSpecific<2>(space, &shapes); break;
-      case 3: stub = getStubSpecific<3>(space, &shapes); break;
-      case 4: stub = getStubSpecific<4>(space, &shapes); break;
+      case 0: stub = getStubSpecific<0>(space, shapes); break;
+      case 1: stub = getStubSpecific<1>(space, shapes); break;
+      case 2: stub = getStubSpecific<2>(space, shapes); break;
+      case 3: stub = getStubSpecific<3>(space, shapes); break;
+      case 4: stub = getStubSpecific<4>(space, shapes); break;
       default: MOZ_CRASH("ProtoChainDepth too high.");
     }
     if (!stub || !stub->initUpdatingChain(cx, space))
@@ -5660,7 +5665,7 @@ ICInNativeCompiler::generateStubCode(MacroAssembler& masm)
 ICStub*
 ICInNativeDoesNotExistCompiler::getStub(ICStubSpace* space)
 {
-    AutoShapeVector shapes(cx);
+    Rooted<ShapeVector> shapes(cx, ShapeVector(cx));
     if (!shapes.append(obj_->as<NativeObject>().lastProperty()))
         return nullptr;
 
@@ -5671,15 +5676,15 @@ ICInNativeDoesNotExistCompiler::getStub(ICStubSpace* space)
 
     ICStub* stub = nullptr;
     switch (protoChainDepth_) {
-      case 0: stub = getStubSpecific<0>(space, &shapes); break;
-      case 1: stub = getStubSpecific<1>(space, &shapes); break;
-      case 2: stub = getStubSpecific<2>(space, &shapes); break;
-      case 3: stub = getStubSpecific<3>(space, &shapes); break;
-      case 4: stub = getStubSpecific<4>(space, &shapes); break;
-      case 5: stub = getStubSpecific<5>(space, &shapes); break;
-      case 6: stub = getStubSpecific<6>(space, &shapes); break;
-      case 7: stub = getStubSpecific<7>(space, &shapes); break;
-      case 8: stub = getStubSpecific<8>(space, &shapes); break;
+      case 0: stub = getStubSpecific<0>(space, shapes); break;
+      case 1: stub = getStubSpecific<1>(space, shapes); break;
+      case 2: stub = getStubSpecific<2>(space, shapes); break;
+      case 3: stub = getStubSpecific<3>(space, shapes); break;
+      case 4: stub = getStubSpecific<4>(space, shapes); break;
+      case 5: stub = getStubSpecific<5>(space, shapes); break;
+      case 6: stub = getStubSpecific<6>(space, shapes); break;
+      case 7: stub = getStubSpecific<7>(space, shapes); break;
+      case 8: stub = getStubSpecific<8>(space, shapes); break;
       default: MOZ_CRASH("ProtoChainDepth too high.");
     }
     if (!stub)
@@ -6018,7 +6023,7 @@ TryAttachScopeNameStub(JSContext* cx, HandleScript script, ICGetName_Fallback* s
 {
     MOZ_ASSERT(!*attached);
 
-    AutoShapeVector shapes(cx);
+    Rooted<ShapeVector> shapes(cx, ShapeVector(cx));
     RootedId id(cx, NameToId(name));
     RootedObject scopeChain(cx, initialScopeChain);
 
@@ -6063,37 +6068,44 @@ TryAttachScopeNameStub(JSContext* cx, HandleScript script, ICGetName_Fallback* s
 
     switch (shapes.length()) {
       case 1: {
-        ICGetName_Scope<0>::Compiler compiler(cx, monitorStub, &shapes, isFixedSlot, offset);
+        ICGetName_Scope<0>::Compiler compiler(cx, monitorStub, Move(shapes.get()), isFixedSlot,
+                                              offset);
         newStub = compiler.getStub(compiler.getStubSpace(script));
         break;
       }
       case 2: {
-        ICGetName_Scope<1>::Compiler compiler(cx, monitorStub, &shapes, isFixedSlot, offset);
+        ICGetName_Scope<1>::Compiler compiler(cx, monitorStub, Move(shapes.get()), isFixedSlot,
+                                              offset);
         newStub = compiler.getStub(compiler.getStubSpace(script));
         break;
       }
       case 3: {
-        ICGetName_Scope<2>::Compiler compiler(cx, monitorStub, &shapes, isFixedSlot, offset);
+        ICGetName_Scope<2>::Compiler compiler(cx, monitorStub, Move(shapes.get()), isFixedSlot,
+                                              offset);
         newStub = compiler.getStub(compiler.getStubSpace(script));
         break;
       }
       case 4: {
-        ICGetName_Scope<3>::Compiler compiler(cx, monitorStub, &shapes, isFixedSlot, offset);
+        ICGetName_Scope<3>::Compiler compiler(cx, monitorStub, Move(shapes.get()), isFixedSlot,
+                                              offset);
         newStub = compiler.getStub(compiler.getStubSpace(script));
         break;
       }
       case 5: {
-        ICGetName_Scope<4>::Compiler compiler(cx, monitorStub, &shapes, isFixedSlot, offset);
+        ICGetName_Scope<4>::Compiler compiler(cx, monitorStub, Move(shapes.get()), isFixedSlot,
+                                              offset);
         newStub = compiler.getStub(compiler.getStubSpace(script));
         break;
       }
       case 6: {
-        ICGetName_Scope<5>::Compiler compiler(cx, monitorStub, &shapes, isFixedSlot, offset);
+        ICGetName_Scope<5>::Compiler compiler(cx, monitorStub, Move(shapes.get()), isFixedSlot,
+                                              offset);
         newStub = compiler.getStub(compiler.getStubSpace(script));
         break;
       }
       case 7: {
-        ICGetName_Scope<6>::Compiler compiler(cx, monitorStub, &shapes, isFixedSlot, offset);
+        ICGetName_Scope<6>::Compiler compiler(cx, monitorStub, Move(shapes.get()), isFixedSlot,
+                                              offset);
         newStub = compiler.getStub(compiler.getStubSpace(script));
         break;
       }
@@ -7490,7 +7502,7 @@ ICGetPropNativeCompiler::generateStubCode(MacroAssembler& masm)
 ICStub*
 ICGetPropNativeDoesNotExistCompiler::getStub(ICStubSpace* space)
 {
-    AutoShapeVector shapes(cx);
+    Rooted<ShapeVector> shapes(cx, ShapeVector(cx));
 
     if (!GetProtoShapes(obj_, protoChainDepth_, &shapes))
         return nullptr;
@@ -7499,15 +7511,15 @@ ICGetPropNativeDoesNotExistCompiler::getStub(ICStubSpace* space)
 
     ICStub* stub = nullptr;
     switch(protoChainDepth_) {
-      case 0: stub = getStubSpecific<0>(space, &shapes); break;
-      case 1: stub = getStubSpecific<1>(space, &shapes); break;
-      case 2: stub = getStubSpecific<2>(space, &shapes); break;
-      case 3: stub = getStubSpecific<3>(space, &shapes); break;
-      case 4: stub = getStubSpecific<4>(space, &shapes); break;
-      case 5: stub = getStubSpecific<5>(space, &shapes); break;
-      case 6: stub = getStubSpecific<6>(space, &shapes); break;
-      case 7: stub = getStubSpecific<7>(space, &shapes); break;
-      case 8: stub = getStubSpecific<8>(space, &shapes); break;
+      case 0: stub = getStubSpecific<0>(space, shapes); break;
+      case 1: stub = getStubSpecific<1>(space, shapes); break;
+      case 2: stub = getStubSpecific<2>(space, shapes); break;
+      case 3: stub = getStubSpecific<3>(space, shapes); break;
+      case 4: stub = getStubSpecific<4>(space, shapes); break;
+      case 5: stub = getStubSpecific<5>(space, shapes); break;
+      case 6: stub = getStubSpecific<6>(space, shapes); break;
+      case 7: stub = getStubSpecific<7>(space, shapes); break;
+      case 8: stub = getStubSpecific<8>(space, shapes); break;
       default: MOZ_CRASH("ProtoChainDepth too high.");
     }
     if (!stub)
@@ -8743,7 +8755,7 @@ ICSetProp_Native::Compiler::generateStubCode(MacroAssembler& masm)
 ICUpdatedStub*
 ICSetPropNativeAddCompiler::getStub(ICStubSpace* space)
 {
-    AutoShapeVector shapes(cx);
+    Rooted<ShapeVector> shapes(cx, ShapeVector(cx));
     if (!shapes.append(oldShape_))
         return nullptr;
 
@@ -8754,11 +8766,11 @@ ICSetPropNativeAddCompiler::getStub(ICStubSpace* space)
 
     ICUpdatedStub* stub = nullptr;
     switch(protoChainDepth_) {
-      case 0: stub = getStubSpecific<0>(space, &shapes); break;
-      case 1: stub = getStubSpecific<1>(space, &shapes); break;
-      case 2: stub = getStubSpecific<2>(space, &shapes); break;
-      case 3: stub = getStubSpecific<3>(space, &shapes); break;
-      case 4: stub = getStubSpecific<4>(space, &shapes); break;
+      case 0: stub = getStubSpecific<0>(space, shapes); break;
+      case 1: stub = getStubSpecific<1>(space, shapes); break;
+      case 2: stub = getStubSpecific<2>(space, shapes); break;
+      case 3: stub = getStubSpecific<3>(space, shapes); break;
+      case 4: stub = getStubSpecific<4>(space, shapes); break;
       default: MOZ_CRASH("ProtoChainDepth too high.");
     }
     if (!stub || !stub->initUpdatingChain(cx, space))
@@ -10016,7 +10028,7 @@ ICCallStubCompiler::pushSpreadCallArguments(MacroAssembler& masm,
     masm.unboxObject(Address(masm.getStackPointer(),
                              (isConstructing * sizeof(Value)) + STUB_FRAME_SIZE), startReg);
     masm.loadPtr(Address(startReg, NativeObject::offsetOfElements()), startReg);
-    
+
     // Align the stack such that the JitFrameLayout is aligned on the
     // JitStackAlignment.
     if (isJitCall) {
@@ -10266,18 +10278,18 @@ ICCall_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
         // Use BaselineFrameReg instead of BaselineStackReg, because
         // BaselineFrameReg and BaselineStackReg hold the same value just after
         // calling enterStubFrame.
-        
+
         // newTarget
         if (isConstructing_)
             masm.pushValue(Address(BaselineFrameReg, STUB_FRAME_SIZE));
-        
+
         // array
         uint32_t valueOffset = isConstructing_;
         masm.pushValue(Address(BaselineFrameReg, valueOffset++ * sizeof(Value) + STUB_FRAME_SIZE));
-        
+
         // this
         masm.pushValue(Address(BaselineFrameReg, valueOffset++ * sizeof(Value) + STUB_FRAME_SIZE));
-        
+
         // callee
         masm.pushValue(Address(BaselineFrameReg, valueOffset++ * sizeof(Value) + STUB_FRAME_SIZE));
 
@@ -12127,7 +12139,8 @@ ICSetElem_DenseOrUnboxedArrayAdd::ICSetElem_DenseOrUnboxedArrayAdd(JitCode* stub
 
 template <size_t ProtoChainDepth>
 ICUpdatedStub*
-ICSetElemDenseOrUnboxedArrayAddCompiler::getStubSpecific(ICStubSpace* space, const AutoShapeVector* shapes)
+ICSetElemDenseOrUnboxedArrayAddCompiler::getStubSpecific(ICStubSpace* space,
+                                                         Handle<ShapeVector> shapes)
 {
     RootedObjectGroup group(cx, obj_->getGroup(cx));
     if (!group)
@@ -12181,12 +12194,12 @@ ICIn_NativeDoesNotExist::offsetOfShape(size_t idx)
 
 template <size_t ProtoChainDepth>
 ICIn_NativeDoesNotExistImpl<ProtoChainDepth>::ICIn_NativeDoesNotExistImpl(
-        JitCode* stubCode, const AutoShapeVector* shapes, HandlePropertyName name)
+        JitCode* stubCode, Handle<ShapeVector> shapes, HandlePropertyName name)
   : ICIn_NativeDoesNotExist(stubCode, ProtoChainDepth, name)
 {
-    MOZ_ASSERT(shapes->length() == NumShapes);
+    MOZ_ASSERT(shapes.length() == NumShapes);
     for (size_t i = 0; i < NumShapes; i++)
-        shapes_[i].init((*shapes)[i]);
+        shapes_[i].init(shapes[i]);
 }
 
 ICInNativeDoesNotExistCompiler::ICInNativeDoesNotExistCompiler(
@@ -12213,14 +12226,14 @@ ICGetName_Global::ICGetName_Global(JitCode* stubCode, ICStub* firstMonitorStub, 
 
 template <size_t NumHops>
 ICGetName_Scope<NumHops>::ICGetName_Scope(JitCode* stubCode, ICStub* firstMonitorStub,
-                                          AutoShapeVector* shapes, uint32_t offset)
+                                          Handle<ShapeVector> shapes, uint32_t offset)
   : ICMonitoredStub(GetStubKind(), stubCode, firstMonitorStub),
     offset_(offset)
 {
     JS_STATIC_ASSERT(NumHops <= MAX_HOPS);
-    MOZ_ASSERT(shapes->length() == NumHops + 1);
+    MOZ_ASSERT(shapes.length() == NumHops + 1);
     for (size_t i = 0; i < NumHops + 1; i++)
-        shapes_[i].init((*shapes)[i]);
+        shapes_[i].init(shapes[i]);
 }
 
 ICGetIntrinsic_Constant::ICGetIntrinsic_Constant(JitCode* stubCode, const Value& value)
@@ -12297,14 +12310,14 @@ ICGetProp_NativeDoesNotExist::offsetOfShape(size_t idx)
 template <size_t ProtoChainDepth>
 ICGetProp_NativeDoesNotExistImpl<ProtoChainDepth>::ICGetProp_NativeDoesNotExistImpl(
         JitCode* stubCode, ICStub* firstMonitorStub, ReceiverGuard guard,
-        const AutoShapeVector* shapes)
+        Handle<ShapeVector> shapes)
   : ICGetProp_NativeDoesNotExist(stubCode, firstMonitorStub, guard, ProtoChainDepth)
 {
-    MOZ_ASSERT(shapes->length() == NumShapes);
+    MOZ_ASSERT(shapes.length() == NumShapes);
 
     // Note: using int32_t here to avoid gcc warning.
     for (int32_t i = 0; i < int32_t(NumShapes); i++)
-        shapes_[i].init((*shapes)[i]);
+        shapes_[i].init(shapes[i]);
 }
 
 ICGetPropNativeDoesNotExistCompiler::ICGetPropNativeDoesNotExistCompiler(
@@ -12401,15 +12414,15 @@ ICSetProp_NativeAdd::ICSetProp_NativeAdd(JitCode* stubCode, ObjectGroup* group,
 template <size_t ProtoChainDepth>
 ICSetProp_NativeAddImpl<ProtoChainDepth>::ICSetProp_NativeAddImpl(JitCode* stubCode,
                                                                   ObjectGroup* group,
-                                                                  const AutoShapeVector* shapes,
+                                                                  Handle<ShapeVector> shapes,
                                                                   Shape* newShape,
                                                                   ObjectGroup* newGroup,
                                                                   uint32_t offset)
   : ICSetProp_NativeAdd(stubCode, group, ProtoChainDepth, newShape, newGroup, offset)
 {
-    MOZ_ASSERT(shapes->length() == NumShapes);
+    MOZ_ASSERT(shapes.length() == NumShapes);
     for (size_t i = 0; i < NumShapes; i++)
-        shapes_[i].init((*shapes)[i]);
+        shapes_[i].init(shapes[i]);
 }
 
 ICSetPropNativeAddCompiler::ICSetPropNativeAddCompiler(JSContext* cx, HandleObject obj,

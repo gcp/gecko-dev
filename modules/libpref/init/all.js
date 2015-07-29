@@ -124,6 +124,13 @@ pref("dom.indexedDB.logging.details", true);
 // Enable profiler marks for indexedDB events.
 pref("dom.indexedDB.logging.profiler-marks", false);
 
+// Whether or not the Permissions API is enabled.
+#ifdef NIGHTLY_BUILD
+pref("dom.permissions.enabled", true);
+#else
+pref("dom.permissions.enabled", false);
+#endif
+
 // Whether or not Web Workers are enabled.
 pref("dom.workers.enabled", true);
 // The number of workers per domain allowed to run concurrently.
@@ -445,6 +452,8 @@ pref("media.getusermedia.screensharing.allowed_domains", "mozilla.github.io,webe
 // OS/X 10.6 and XP have screen/window sharing off by default due to various issues - Caveat emptor
 pref("media.getusermedia.screensharing.allow_on_old_platforms", false);
 
+pref("media.getusermedia.audiocapture.enabled", false);
+
 // TextTrack support
 pref("media.webvtt.enabled", true);
 pref("media.webvtt.regions.enabled", false);
@@ -471,8 +480,12 @@ pref("media.mediasource.whitelist", false);
 pref("media.mediasource.mp4.enabled", true);
 pref("media.mediasource.webm.enabled", false);
 
+#if defined(MOZ_WIDGET_GONK)
+pref("media.mediasource.format-reader", false);
+#else
 // Enable new MediaSource architecture.
 pref("media.mediasource.format-reader", true);
+#endif
 
 // Enable new MediaFormatReader architecture for webm in MSE
 pref("media.mediasource.format-reader.webm", false);
@@ -516,6 +529,7 @@ pref("layout.event-regions.enabled", false);
 // APZ preferences. For documentation/details on what these prefs do, check
 // gfx/layers/apz/src/AsyncPanZoomController.cpp.
 pref("apz.allow_checkerboarding", true);
+pref("apz.allow_zooming", false);
 pref("apz.asyncscroll.throttle", 100);
 pref("apz.asyncscroll.timeout", 300);
 
@@ -547,6 +561,7 @@ pref("apz.fling_stopped_threshold", "0.01");
 pref("apz.max_velocity_inches_per_ms", "-1.0");
 pref("apz.max_velocity_queue_size", 5);
 pref("apz.min_skate_speed", "1.0");
+pref("apz.minimap.enabled", false);
 pref("apz.num_paint_duration_samples", 3);
 pref("apz.overscroll.enabled", false);
 pref("apz.overscroll.min_pan_distance_ratio", "1.0");
@@ -595,8 +610,8 @@ pref("apz.test.logging_enabled", false);
 pref("gfx.hidpi.enabled", 2);
 #endif
 
-#if !defined(MOZ_WIDGET_ANDROID)
-// Containerless scrolling for root frames does not yet pass tests on Android.
+#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+// Use containerless scrolling for now on desktop.
 pref("layout.scroll.root-frame-containers", false);
 #endif
 
@@ -1050,6 +1065,10 @@ pref("dom.forms.autocomplete.experimental", false);
 
 // Enables requestAutocomplete DOM API on forms.
 pref("dom.forms.requestAutocomplete", false);
+
+#ifdef NIGHTLY_BUILD
+pref("dom.input.dirpicker", true);
+#endif
 
 // Enables system messages and activities
 pref("dom.sysmsg.enabled", false);
@@ -1692,6 +1711,7 @@ pref("network.predictor.preconnect-min-confidence", 90);
 pref("network.predictor.preresolve-min-confidence", 60);
 pref("network.predictor.redirect-likely-confidence", 75);
 pref("network.predictor.max-resources-per-entry", 100);
+pref("network.predictor.max-uri-length", 500);
 pref("network.predictor.cleaned-up", false);
 
 // The following prefs pertain to the negotiate-auth extension (see bug 17578),
@@ -2252,6 +2272,7 @@ pref("layout.css.prefixes.transitions", true);
 pref("layout.css.prefixes.animations", true);
 pref("layout.css.prefixes.box-sizing", true);
 pref("layout.css.prefixes.font-features", true);
+pref("layout.css.prefixes.gradients", true);
 
 // Is the CSS Unprefixing Service enabled? (This service emulates support
 // for certain vendor-prefixed properties & values, for sites on a "fixlist".)
@@ -2447,7 +2468,7 @@ pref("plugin.sessionPermissionNow.intervalInMinutes", 60);
 // to allow it persistently.
 pref("plugin.persistentPermissionAlways.intervalInDays", 90);
 
-#ifndef DEBUG
+#if !defined(DEBUG) && !defined(MOZ_ASAN)
 // How long a plugin is allowed to process a synchronous IPC message
 // before we consider it "hung".
 pref("dom.ipc.plugins.timeoutSecs", 45);
@@ -2473,7 +2494,7 @@ pref("dom.ipc.plugins.hangUIMinDisplaySecs", 10);
 // we fear the worst and kill it.
 pref("dom.ipc.tabs.shutdownTimeoutSecs", 5);
 #else
-// No timeout in DEBUG builds
+// No timeout in DEBUG or ASan builds
 pref("dom.ipc.plugins.timeoutSecs", 0);
 pref("dom.ipc.plugins.contentTimeoutSecs", 0);
 pref("dom.ipc.plugins.processLaunchTimeoutSecs", 0);
@@ -4133,6 +4154,7 @@ pref("webgl.vendor-string-override", "");
 #ifdef XP_WIN
 pref("webgl.angle.try-d3d11", true);
 pref("webgl.angle.force-d3d11", false);
+pref("webgl.angle.force-warp", false);
 #endif
 
 #ifdef MOZ_WIDGET_GONK
@@ -4239,8 +4261,12 @@ pref("layers.async-pan-zoom.enabled", true);
 #ifdef XP_MACOSX
 pref("layers.enable-tiles", true);
 pref("layers.tiled-drawtarget.enabled", true);
+pref("layers.tiles.edge-padding", false);
 #endif
 
+#ifdef MOZ_WIDGET_GONK
+pref("layers.tiled-drawtarget.enabled", true);
+#endif
 
 // same effect as layers.offmainthreadcomposition.enabled, but specifically for
 // use with tests.
@@ -4704,9 +4730,6 @@ pref("dom.voicemail.enabled", false);
 // parameter omitted.
 pref("dom.voicemail.defaultServiceId", 0);
 
-// DOM BroadcastChannel API.
-pref("dom.broadcastChannel.enabled", true);
-
 // DOM Inter-App Communication API.
 pref("dom.inter-app-communication-api.enabled", false);
 
@@ -4718,18 +4741,18 @@ pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,tes
 pref("urlclassifier.phishTable", "goog-phish-shavar,test-phish-simple");
 pref("urlclassifier.downloadBlockTable", "");
 pref("urlclassifier.downloadAllowTable", "");
-pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simple,test-unwanted-simple,goog-downloadwhite-digest256,mozpub-track-digest256");
+pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,goog-downloadwhite-digest256,mozpub-track-digest256");
 
 // The table and update/gethash URLs for Safebrowsing phishing and malware
 // checks.
-pref("urlclassifier.trackingTable", "mozpub-track-digest256");
+pref("urlclassifier.trackingTable", "test-track-simple,mozpub-track-digest256");
 pref("browser.trackingprotection.updateURL", "https://tracking.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
 pref("browser.trackingprotection.gethashURL", "https://tracking.services.mozilla.com/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
 
 // Turn off Spatial navigation by default.
 pref("snav.enabled", false);
 
-// Turn off touch caret by default.
+// Original caret implementation on collapsed selection.
 pref("touchcaret.enabled", false);
 
 // This will inflate the size of the touch caret frame when checking if user
@@ -4741,7 +4764,7 @@ pref("touchcaret.inflatesize.threshold", 40);
 // In milliseconds. (0 means disable this feature)
 pref("touchcaret.expiration.time", 3000);
 
-// Turn off selection caret by default
+// Original caret implementation on non-collapsed selection.
 pref("selectioncaret.enabled", false);
 
 // This will inflate size of selection caret frame when we checking if

@@ -986,7 +986,7 @@ PresShell::Init(nsIDocument* aDocument,
     mZoomConstraintsClient->Init(this, mDocument);
 #ifndef MOZ_WIDGET_ANDROID
     // Fennec will need some work to use this code; see bug 1180267.
-    if (gfxPrefs::MetaViewportEnabled()) {
+    if (gfxPrefs::MetaViewportEnabled() || gfxPrefs::APZAllowZooming()) {
       mMobileViewportManager = new MobileViewportManager(this, mDocument);
     }
 #endif
@@ -1734,6 +1734,12 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
                                                    this, delay,
                                                    nsITimer::TYPE_ONE_SHOT);
     }
+  }
+
+  // If we get here and painting is not suppressed, then we can paint anytime
+  // and we should fire the before-first-paint notification
+  if (!mPaintingSuppressed) {
+    ScheduleBeforeFirstPaint();
   }
 
   if (root && root->IsXULElement()) {
@@ -3774,6 +3780,17 @@ PresShell::CaptureHistoryState(nsILayoutHistoryState** aState)
 }
 
 void
+PresShell::ScheduleBeforeFirstPaint()
+{
+  if (!mDocument->IsResourceDoc()) {
+    // Notify observers that a new page is about to be drawn. Execute this
+    // as soon as it is safe to run JS, which is guaranteed to be before we
+    // go back to the event loop and actually draw the page.
+    nsContentUtils::AddScriptRunner(new nsBeforeFirstPaintDispatcher(mDocument));
+  }
+}
+
+void
 PresShell::UnsuppressAndInvalidate()
 {
   // Note: We ignore the EnsureVisible check for resource documents, because
@@ -3784,12 +3801,7 @@ PresShell::UnsuppressAndInvalidate()
     return;
   }
 
-  if (!mDocument->IsResourceDoc()) {
-    // Notify observers that a new page is about to be drawn. Execute this
-    // as soon as it is safe to run JS, which is guaranteed to be before we
-    // go back to the event loop and actually draw the page.
-    nsContentUtils::AddScriptRunner(new nsBeforeFirstPaintDispatcher(mDocument));
-  }
+  ScheduleBeforeFirstPaint();
 
   mPaintingSuppressed = false;
   nsIFrame* rootFrame = mFrameConstructor->GetRootFrame();
@@ -7623,10 +7635,12 @@ PresShell::HandleEvent(nsIFrame* aFrame,
         // retarget the event back at the keydown target. This prevents a
         // content area from grabbing the focus from chrome in-between key
         // events.
-        if (eventTarget &&
-            nsContentUtils::IsChromeDoc(gKeyDownTarget->GetComposedDoc()) !=
-            nsContentUtils::IsChromeDoc(eventTarget->GetComposedDoc())) {
-          eventTarget = gKeyDownTarget;
+        if (eventTarget) {
+          bool keyDownIsChrome = nsContentUtils::IsChromeDoc(gKeyDownTarget->GetComposedDoc());
+          if (keyDownIsChrome != nsContentUtils::IsChromeDoc(eventTarget->GetComposedDoc()) ||
+              (keyDownIsChrome && TabParent::GetFrom(eventTarget))) {
+            eventTarget = gKeyDownTarget;
+          }
         }
 
         if (aEvent->message == NS_KEY_UP) {
@@ -8955,7 +8969,7 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
 
   nsDocShell* docShell = static_cast<nsDocShell*>(GetPresContext()->GetDocShell());
   if (docShell) {
-    docShell->AddProfileTimelineMarker("Reflow", TRACING_INTERVAL_START);
+    TimelineConsumers::AddMarkerForDocShell(docShell, "Reflow", TRACING_INTERVAL_START);
   }
 
   if (mReflowContinueTimer) {
@@ -9132,7 +9146,7 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
   }
 
   if (docShell) {
-    docShell->AddProfileTimelineMarker("Reflow", TRACING_INTERVAL_END);
+    TimelineConsumers::AddMarkerForDocShell(docShell, "Reflow", TRACING_INTERVAL_END);
   }
   return !interrupted;
 }
