@@ -124,7 +124,7 @@ private:
   // PBackground parent thread
   nsCOMPtr<nsIThread> mPBackgroundThread;
 
-  // webrtc processing thread
+  // video processing thread - where webrtc.org capturer code runs
   base::Thread* mVideoCaptureThread;
 
   // Shutdown handling

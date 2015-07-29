@@ -207,7 +207,7 @@ CallbackHelper::DeliverFrame(unsigned char* buffer,
                              Move(shMemBuffer), buffer, size, time_stamp,
                              ntp_time, render_time);
   MOZ_ASSERT(mParent);
-  nsIThread * thread = mParent->GetBackgroundThread();
+  nsIThread* thread = mParent->GetBackgroundThread();
   MOZ_ASSERT(thread != nullptr);
   thread->Dispatch(runnable, NS_DISPATCH_NORMAL);
   return 0;
