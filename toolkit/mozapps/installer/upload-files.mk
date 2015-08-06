@@ -392,6 +392,7 @@ INNER_MAKE_GECKOLIBS_AAR= \
     --revision $(geckoaar-revision) \
     --topsrcdir '$(topsrcdir)' \
     --distdir '$(_ABS_DIST)' \
+    --appname '$(MOZ_APP_NAME)' \
     '$(_ABS_DIST)'
 else
 INNER_MAKE_GECKOLIBS_AAR=echo 'Android geckolibs.aar packaging requires packaging geckoview'
@@ -614,7 +615,6 @@ NO_PKG_FILES += \
 	certutil* \
 	pk12util* \
 	BadCertServer* \
-	ClientAuthServer* \
 	OCSPStaplingServer* \
 	GenerateOCSPResponse* \
 	chrome/chrome.rdf \
@@ -756,6 +756,13 @@ endif
 ifdef MOZ_CODE_COVERAGE
 UPLOAD_FILES += \
   $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(CODE_COVERAGE_ARCHIVE_BASENAME).zip)
+endif
+
+ifdef UNIFY_DIST
+UNIFY_ARCH := $(notdir $(patsubst %/,%,$(dir $(UNIFY_DIST))))
+UPLOAD_FILES += \
+  $(wildcard $(UNIFY_DIST)/$(SDK_PATH)$(PKG_BASENAME)-$(UNIFY_ARCH).sdk$(SDK_SUFFIX)) \
+  $(wildcard $(UNIFY_DIST)/$(SDK_PATH)$(PKG_BASENAME)-$(UNIFY_ARCH).sdk$(SDK_SUFFIX).asc)
 endif
 
 SIGN_CHECKSUM_CMD=

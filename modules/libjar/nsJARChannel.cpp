@@ -202,12 +202,14 @@ nsJARChannel::nsJARChannel()
     , mIsPending(false)
     , mIsUnsafe(true)
     , mOpeningRemote(false)
-    , mEnsureChildFd(false)
     , mSynthesizedStreamLength(0)
     , mForceNoIntercept(false)
+    , mBlockRemoteFiles(false)
 {
     if (!gJarProtocolLog)
         gJarProtocolLog = PR_NewLogModule("nsJarProtocol");
+
+    mBlockRemoteFiles = Preferences::GetBool("network.jar.block-remote-files", false);
 
     // hold an owning reference to the jar handler
     NS_ADDREF(gJarHandler);
@@ -386,9 +388,6 @@ nsJARChannel::LookupFile(bool aAllowAsync)
                     // file descriptor here.
                     return NS_OK;
                     #else
-                    if (!mEnsureChildFd) {
-                        return NS_OK;
-                    }
                     PRFileDesc *fd = nullptr;
                     jarCache->GetFd(mJarFile, &fd);
                     if (fd) {
@@ -404,13 +403,6 @@ nsJARChannel::LookupFile(bool aAllowAsync)
             }
 
             mOpeningRemote = true;
-
-            #if defined(XP_WIN) || defined(MOZ_WIDGET_COCOA)
-            #else
-            if (mEnsureChildFd && jarCache) {
-                jarCache->SetMustCacheFd(remoteFile, true);
-            }
-            #endif
 
             if (gJarHandler->RemoteOpenFileInProgress(remoteFile, this)) {
                 // JarHandler will trigger OnRemoteFileOpen() after the first
@@ -1017,6 +1009,13 @@ nsJARChannel::ContinueAsyncOpen()
 
     if (!mJarFile) {
         // Not a local file...
+
+        // Check preferences to see if all remote jar support should be disabled
+        if (mBlockRemoteFiles) {
+            mIsUnsafe = true;
+            return NS_ERROR_UNSAFE_CONTENT_TYPE;
+        }
+
         // kick off an async download of the base URI...
         nsCOMPtr<nsIStreamListener> downloader = new MemoryDownloader(this);
         uint32_t loadFlags =
@@ -1117,13 +1116,6 @@ nsJARChannel::GetZipEntry(nsIZipEntry **aZipEntry)
 }
 
 NS_IMETHODIMP
-nsJARChannel::EnsureChildFd()
-{
-    mEnsureChildFd = true;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
 nsJARChannel::ForceNoIntercept()
 {
     mForceNoIntercept = true;
@@ -1203,6 +1195,10 @@ nsJARChannel::OnDownloadComplete(MemoryDownloader* aDownloader,
         mContentDisposition = NS_GetContentDispositionFromHeader(mContentDispositionHeader, this);
     }
 
+    // This is a defense-in-depth check for the preferences to see if all remote jar
+    // support should be disabled. This check may not be needed.
+    MOZ_RELEASE_ASSERT(!mBlockRemoteFiles);
+
     if (NS_SUCCEEDED(status) && mIsUnsafe &&
         !Preferences::GetBool("network.jar.open-unsafe-types", false)) {
         status = NS_ERROR_UNSAFE_CONTENT_TYPE;
@@ -1250,23 +1246,21 @@ nsJARChannel::OnRemoteFileOpenComplete(nsresult aOpenStatus)
         // Windows/OSX desktop builds skip remoting, we don't need file
         // descriptor here.
         #else
-        if (mEnsureChildFd) {
-            // Set file descriptor from Jar cache into remote Jar file, if it
-            // has not been set previously.
-            mozilla::AutoFDClose fd;
-            mJarFile->OpenNSPRFileDesc(PR_RDONLY, 0, &fd.rwget());
-            if (!fd) {
-                nsIZipReaderCache *jarCache = gJarHandler->JarCache();
-                if (!jarCache) {
-                    rv = NS_ERROR_FAILURE;
-                }
-                PRFileDesc *jar_fd = nullptr;
-                jarCache->GetFd(mJarFile, &jar_fd);
-                // If we failed to get fd here, an error rv would be returned
-                // by SetRemoteNSPRFileDesc(), which would then stop the
-                // channel by NotifyError().
-                rv = SetRemoteNSPRFileDesc(jar_fd);
+        // Set file descriptor from Jar cache into remote Jar file, if it
+        // has not been set previously.
+        mozilla::AutoFDClose fd;
+        mJarFile->OpenNSPRFileDesc(PR_RDONLY, 0, &fd.rwget());
+        if (!fd) {
+            nsIZipReaderCache *jarCache = gJarHandler->JarCache();
+            if (!jarCache) {
+                rv = NS_ERROR_FAILURE;
             }
+            PRFileDesc *jar_fd = nullptr;
+            jarCache->GetFd(mJarFile, &jar_fd);
+            // If we failed to get fd here, an error rv would be returned
+            // by SetRemoteNSPRFileDesc(), which would then stop the
+            // channel by NotifyError().
+            rv = SetRemoteNSPRFileDesc(jar_fd);
         }
         #endif
         if (NS_SUCCEEDED(rv) || rv == NS_ERROR_ALREADY_OPENED) {
@@ -1324,14 +1318,8 @@ nsJARChannel::OnStopRequest(nsIRequest *req, nsISupports *ctx, nsresult status)
 
     #if defined(XP_WIN) || defined(MOZ_WIDGET_COCOA)
     #else
-    if (mEnsureChildFd) {
-      nsIZipReaderCache *jarCache = gJarHandler->JarCache();
-      if (jarCache) {
-          jarCache->SetMustCacheFd(mJarFile, false);
-      }
-      // To deallocate file descriptor by RemoteOpenFileChild destructor.
-      mJarFile = nullptr;
-    }
+    // To deallocate file descriptor by RemoteOpenFileChild destructor.
+    mJarFile = nullptr;
     #endif
 
     return NS_OK;

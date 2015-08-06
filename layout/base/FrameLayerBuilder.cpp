@@ -2044,7 +2044,11 @@ ContainerState::GetLayerCreationHint(const nsIFrame* aAnimatedGeometryRoot)
   }
   nsIFrame* animatedGeometryRootParent = aAnimatedGeometryRoot->GetParent();
   nsIScrollableFrame* scrollable = do_QueryFrame(animatedGeometryRootParent);
-  if (scrollable && scrollable->WantAsyncScroll()) {
+  if (scrollable
+#ifdef MOZ_B2G
+      && scrollable->WantAsyncScroll()
+#endif
+     ) {
     // WantAsyncScroll() returns false when the frame has overflow:hidden,
     // so we won't create tiled layers for overflow:hidden frames even if
     // they have a display port. The main purpose of the WantAsyncScroll check
@@ -2071,7 +2075,7 @@ ContainerState::AttemptToRecyclePaintedLayer(const nsIFrame* aAnimatedGeometryRo
 
   // Check if the layer hint has changed and whether or not the layer should
   // be recreated because of it.
-  if (!mManager->IsOptimizedFor(layer, GetLayerCreationHint(aAnimatedGeometryRoot))) {
+  if (!layer->IsOptimizedFor(GetLayerCreationHint(aAnimatedGeometryRoot))) {
     return nullptr;
   }
 
@@ -5543,7 +5547,7 @@ private:
 FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
                                    gfxContext* aContext,
                                    const nsIntRegion& aRegionToDraw,
-                                   const nsIntRegion& aDirtyRegion,
+                                   const nsIntRegion* aDirtyRegion,
                                    DrawRegionClip aClip,
                                    const nsIntRegion& aRegionToInvalidate,
                                    void* aCallbackData)
@@ -5601,11 +5605,16 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
     // Recompute visibility of items in our PaintedLayer. Note that this
     // recomputes visibility for all descendants of our display items too,
     // so there's no need to do this for the items in inactive PaintedLayers.
+    // If aDirtyRegion is non-null then recompute the visibility of the entire
+    // aDirtyRegion at once, rather of aRegionToDraw separately on each call.
     int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
-    RecomputeVisibilityForItems(entry->mItems, builder, aDirtyRegion,
+    RecomputeVisibilityForItems(entry->mItems, builder,
+                                aDirtyRegion ? *aDirtyRegion : aRegionToDraw,
                                 offset, appUnitsPerDevPixel,
                                 userData->mXScale, userData->mYScale);
-    userData->mNeedsRecomputeVisibility = false;
+    if (aDirtyRegion) {
+      userData->mNeedsRecomputeVisibility = false;
+    }
   }
 
   nsRenderingContext rc(aContext);

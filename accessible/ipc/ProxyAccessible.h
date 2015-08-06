@@ -80,6 +80,11 @@ public:
   uint64_t State() const;
 
   /*
+   * Return the native states for the proxied accessible.
+   */
+  uint64_t NativeState() const;
+
+  /*
    * Set aName to the name of the proxied accessible.
    */
   void Name(nsString& aName) const;
@@ -88,6 +93,11 @@ public:
    * Set aValue to the value of the proxied accessible.
    */
   void Value(nsString& aValue) const;
+
+  /*
+   * Set aHelp to the help string of the proxied accessible.
+   */
+  void Help(nsString& aHelp) const;
 
   /**
    * Set aDesc to the description of the proxied accessible.
@@ -109,6 +119,12 @@ public:
    */
   void Relations(nsTArray<RelationType>* aTypes,
                  nsTArray<nsTArray<ProxyAccessible*>>* aTargetSets) const;
+
+  bool IsSearchbox() const;
+
+  nsIAtom* LandmarkRole() const;
+
+  nsIAtom* ARIARoleAtom() const;
 
   int32_t CaretOffset();
   bool SetCaretOffset(int32_t aOffset);
@@ -309,7 +325,7 @@ public:
 protected:
   explicit ProxyAccessible(DocAccessibleParent* aThisAsDoc) :
     mParent(nullptr), mDoc(aThisAsDoc), mWrapper(0), mID(0),
-    mRole(roles::DOCUMENT)
+    mRole(roles::DOCUMENT), mOuterDoc(false)
   { MOZ_COUNT_CTOR(ProxyAccessible); }
 
 protected:

@@ -8,7 +8,6 @@
 #ifdef MOZ_ANDROID_SHARED_ID
       android:sharedUserId="@MOZ_ANDROID_SHARED_ID@"
 #endif
-      android:theme="@style/FilteredTouches"
       >
     <uses-sdk android:minSdkVersion="@MOZ_ANDROID_MIN_SDK_VERSION@"
 #ifdef MOZ_ANDROID_MAX_SDK_VERSION
@@ -309,7 +308,7 @@
           </intent-filter>
         </receiver>
 
-        <receiver android:name="org.mozilla.gecko.RestrictionProvider">
+        <receiver android:name="org.mozilla.gecko.restrictions.RestrictionProvider">
           <intent-filter>
             <action android:name="android.intent.action.GET_RESTRICTION_ENTRIES" />
           </intent-filter>

@@ -28,6 +28,7 @@
 #include "jsscriptinlines.h"
 
 #include "jit/CompileInfo-inl.h"
+#include "jit/shared/Lowering-shared-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/ObjectGroup-inl.h"
 #include "vm/ScopeObject-inl.h"
@@ -9390,7 +9391,8 @@ IonBuilder::jsop_setelem_typed(Scalar::Type arrayType,
         ins = MStoreTypedArrayElementHole::New(alloc(), elements, length, id, toWrite, arrayType);
     } else {
         MStoreUnboxedScalar* store =
-            MStoreUnboxedScalar::New(alloc(), elements, id, toWrite, arrayType);
+            MStoreUnboxedScalar::New(alloc(), elements, id, toWrite, arrayType,
+                                     MStoreUnboxedScalar::TruncateInput);
         ins = store;
     }
 
@@ -10116,6 +10118,27 @@ IonBuilder::maybeUnboxForPropertyAccess(MDefinition* def)
 
     MUnbox* unbox = MUnbox::New(alloc(), def, type, MUnbox::Fallible);
     current->add(unbox);
+
+    // Fixup type information for a common case where a property call
+    // is converted to the following bytecodes
+    //
+    //      a.foo()
+    // ================= Compiles to ================
+    //      LOAD "a"
+    //      DUP
+    //      CALLPROP "foo"
+    //      SWAP
+    //      CALL 0
+    //
+    // If we have better type information to unbox the first copy going into
+    // the CALLPROP operation, we can replace the duplicated copy on the
+    // stack as well.
+    if (*pc == JSOP_CALLPROP || *pc == JSOP_CALLELEM) {
+        uint32_t idx = current->stackDepth() - 1;
+        MOZ_ASSERT(current->getSlot(idx) == def);
+        current->setSlot(idx, unbox);
+    }
+
     return unbox;
 }
 
@@ -11638,16 +11661,19 @@ IonBuilder::storeUnboxedValue(MDefinition* obj, MDefinition* elements, int32_t e
     switch (unboxedType) {
       case JSVAL_TYPE_BOOLEAN:
         store = MStoreUnboxedScalar::New(alloc(), elements, scaledOffset, value, Scalar::Uint8,
+                                         MStoreUnboxedScalar::DontTruncateInput,
                                          DoesNotRequireMemoryBarrier, elementsOffset);
         break;
 
       case JSVAL_TYPE_INT32:
         store = MStoreUnboxedScalar::New(alloc(), elements, scaledOffset, value, Scalar::Int32,
+                                         MStoreUnboxedScalar::DontTruncateInput,
                                          DoesNotRequireMemoryBarrier, elementsOffset);
         break;
 
       case JSVAL_TYPE_DOUBLE:
         store = MStoreUnboxedScalar::New(alloc(), elements, scaledOffset, value, Scalar::Float64,
+                                         MStoreUnboxedScalar::DontTruncateInput,
                                          DoesNotRequireMemoryBarrier, elementsOffset);
         break;
 
@@ -13011,7 +13037,8 @@ IonBuilder::storeScalarTypedObjectValue(MDefinition* typedObj,
 
     MStoreUnboxedScalar* store =
         MStoreUnboxedScalar::New(alloc(), elements, scaledOffset, toWrite,
-                                 type, DoesNotRequireMemoryBarrier, adjustment);
+                                 type, MStoreUnboxedScalar::TruncateInput,
+                                 DoesNotRequireMemoryBarrier, adjustment);
     current->add(store);
 
     return true;

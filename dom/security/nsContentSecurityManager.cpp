@@ -118,7 +118,12 @@ DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
   nsCOMPtr<nsINode> requestingContext = nullptr;
 
   switch(contentPolicyType) {
-    case nsIContentPolicy::TYPE_OTHER:
+    case nsIContentPolicy::TYPE_OTHER: {
+      mimeTypeGuess = EmptyCString();
+      requestingContext = aLoadInfo->LoadingNode();
+      break;
+    }
+
     case nsIContentPolicy::TYPE_SCRIPT:
     case nsIContentPolicy::TYPE_IMAGE:
     case nsIContentPolicy::TYPE_STYLESHEET:
@@ -127,10 +132,28 @@ DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
     case nsIContentPolicy::TYPE_SUBDOCUMENT:
     case nsIContentPolicy::TYPE_REFRESH:
     case nsIContentPolicy::TYPE_XBL:
-    case nsIContentPolicy::TYPE_PING:
-    case nsIContentPolicy::TYPE_XMLHTTPREQUEST:
-    // alias nsIContentPolicy::TYPE_DATAREQUEST:
-    case nsIContentPolicy::TYPE_OBJECT_SUBREQUEST:
+    case nsIContentPolicy::TYPE_PING: {
+      MOZ_ASSERT(false, "contentPolicyType not supported yet");
+      break;
+    }
+
+    case nsIContentPolicy::TYPE_XMLHTTPREQUEST: {
+      // alias nsIContentPolicy::TYPE_DATAREQUEST:
+      mimeTypeGuess = NS_LITERAL_CSTRING(TEXT_EVENT_STREAM);
+      requestingContext = aLoadInfo->LoadingNode();
+      break;
+    }
+
+
+    case nsIContentPolicy::TYPE_OBJECT_SUBREQUEST: {
+      mimeTypeGuess = EmptyCString();
+      requestingContext = aLoadInfo->LoadingNode();
+      MOZ_ASSERT(!requestingContext ||
+                 requestingContext->NodeType() == nsIDOMNode::ELEMENT_NODE,
+                 "type_subrequest requires requestingContext of type Element");
+      break;
+    }
+
     case nsIContentPolicy::TYPE_DTD:
     case nsIContentPolicy::TYPE_FONT: {
       MOZ_ASSERT(false, "contentPolicyType not supported yet");
@@ -156,8 +179,20 @@ DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
 
     case nsIContentPolicy::TYPE_WEBSOCKET:
     case nsIContentPolicy::TYPE_CSP_REPORT:
-    case nsIContentPolicy::TYPE_XSLT:
-    case nsIContentPolicy::TYPE_BEACON:
+    case nsIContentPolicy::TYPE_XSLT: {
+      MOZ_ASSERT(false, "contentPolicyType not supported yet");
+      break;
+    }
+
+    case nsIContentPolicy::TYPE_BEACON: {
+      mimeTypeGuess = EmptyCString();
+      requestingContext = aLoadInfo->LoadingNode();
+      MOZ_ASSERT(!requestingContext ||
+                 requestingContext->NodeType() == nsIDOMNode::DOCUMENT_NODE,
+                 "type_beacon requires requestingContext of type Document");
+      break;
+    }
+
     case nsIContentPolicy::TYPE_FETCH:
     case nsIContentPolicy::TYPE_IMAGESET: {
       MOZ_ASSERT(false, "contentPolicyType not supported yet");

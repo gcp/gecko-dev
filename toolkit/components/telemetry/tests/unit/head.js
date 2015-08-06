@@ -14,6 +14,8 @@ const gIsMac = ("@mozilla.org/xpcom/mac-utils;1" in Cc);
 const gIsAndroid =  ("@mozilla.org/android/bridge;1" in Cc);
 const gIsGonk = ("@mozilla.org/cellbroadcast/gonkservice;1" in Cc);
 
+const Telemetry = Cc["@mozilla.org/base/telemetry;1"].getService(Ci.nsITelemetry);
+
 const MILLISECONDS_PER_MINUTE = 60 * 1000;
 const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE;
 const MILLISECONDS_PER_DAY = 24 * MILLISECONDS_PER_HOUR;
@@ -248,6 +250,12 @@ function fakeNow(...args) {
   return new Date(date);
 }
 
+function fakeMonotonicNow(ms) {
+  const m = Cu.import("resource://gre/modules/TelemetrySession.jsm");
+  m.Policy.monotonicNow = () => ms;
+  return ms;
+}
+
 // Fake the timeout functions for TelemetryController sending.
 function fakePingSendTimer(set, clear) {
   let module = Cu.import("resource://gre/modules/TelemetrySend.jsm");
@@ -279,6 +287,27 @@ function truncateToDays(aMsec) {
 // false otherwise.
 function promiseRejects(promise) {
   return promise.then(() => false, () => true);
+}
+
+// Generates a random string of at least a specific length.
+function generateRandomString(length) {
+  let string = "";
+
+  while (string.length < length) {
+    string += Math.random().toString(36);
+  }
+
+  return string.substring(0, length);
+}
+
+// Short-hand for retrieving the histogram with that id.
+function getHistogram(histogramId) {
+  return Telemetry.getHistogramById(histogramId);
+}
+
+// Short-hand for retrieving the snapshot of the Histogram with that id.
+function getSnapshot(histogramId) {
+  return Telemetry.getHistogramById(histogramId).snapshot();
 }
 
 if (runningInParent) {

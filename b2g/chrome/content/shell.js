@@ -201,9 +201,9 @@ var shell = {
     debugCrashReport('Not online, postponing.');
 
     Services.obs.addObserver(function observer(subject, topic, state) {
-      let network = subject.QueryInterface(Ci.nsINetworkInterface);
-      if (network.state == Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED
-          && network.type == Ci.nsINetworkInterface.NETWORK_TYPE_WIFI) {
+      let network = subject.QueryInterface(Ci.nsINetworkInfo);
+      if (network.state == Ci.nsINetworkInfo.NETWORK_STATE_CONNECTED
+          && network.type == Ci.nsINetworkInfo.NETWORK_TYPE_WIFI) {
         shell.submitQueuedCrashes();
 
         Services.obs.removeObserver(observer, topic);
@@ -585,7 +585,7 @@ var shell = {
         // TODO: We should get the `isActive` state from evt.isActive.
         // Then we don't need to do `channel.isActive()` here.
         channel.isActive().onsuccess = function(evt) {
-          this.sendChromeEvent({
+          SystemAppProxy._sendCustomEvent('mozSystemWindowChromeEvent', {
             type: 'system-audiochannel-state-changed',
             name: channel.name,
             isActive: evt.target.result

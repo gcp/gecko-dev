@@ -19,11 +19,10 @@ const {LongStringActor} = require("devtools/server/actors/string");
 const {DebuggerServer} = require("devtools/server/main");
 const Services = require("Services");
 const promise = require("promise");
+const LayoutHelpers = require("devtools/toolkit/layout-helpers");
 
 loader.lazyImporter(this, "OS", "resource://gre/modules/osfile.jsm");
 loader.lazyImporter(this, "Sqlite", "resource://gre/modules/Sqlite.jsm");
-loader.lazyImporter(this, "LayoutHelpers",
-                    "resource://gre/modules/devtools/LayoutHelpers.jsm");
 
 let gTrackedMessageManager = new Map();
 
@@ -650,9 +649,9 @@ StorageActors.createActor({
     }
 
     const { sendSyncMessage, addMessageListener } =
-      DebuggerServer.parentMessageManager;
+      this.conn.parentMessageManager;
 
-    DebuggerServer.setupInParent({
+    this.conn.setupInParent({
       module: "devtools/server/actors/storage",
       setupParent: "setupParentProcessForCookies"
     });
@@ -750,7 +749,6 @@ let cookieHelpers = {
         break;
       case "removeCookieObservers":
         return cookieHelpers.removeCookieObservers();
-        return null;
       default:
         console.error("ERR_DIRECTOR_PARENT_UNKNOWN_METHOD", msg.json.method);
         throw new Error("ERR_DIRECTOR_PARENT_UNKNOWN_METHOD");
@@ -762,7 +760,7 @@ let cookieHelpers = {
  * E10S parent/child setup helpers
  */
 
-exports.setupParentProcessForCookies = function({mm, childID}) {
+exports.setupParentProcessForCookies = function({mm, prefix}) {
   cookieHelpers.onCookieChanged =
     callChildProcess.bind(null, "onCookieChanged");
 
@@ -770,7 +768,7 @@ exports.setupParentProcessForCookies = function({mm, childID}) {
   mm.addMessageListener("storage:storage-cookie-request-parent",
                         cookieHelpers.handleChildRequest);
 
-  DebuggerServer.once("disconnected-from-child:" + childID,
+  DebuggerServer.once("disconnected-from-child:" + prefix,
                       handleMessageManagerDisconnected);
 
   gTrackedMessageManager.set("cookies", mm);
@@ -1039,6 +1037,9 @@ StorageActors.createActor({
 }, {
   initialize: function(storageActor) {
     protocol.Actor.prototype.initialize.call(this, null);
+
+    this.storageActor = storageActor;
+
     this.maybeSetupChildProcess();
 
     this.objectsSize = {};
@@ -1237,9 +1238,9 @@ StorageActors.createActor({
     }
 
     const { sendSyncMessage, addMessageListener } =
-      DebuggerServer.parentMessageManager;
+      this.conn.parentMessageManager;
 
-    DebuggerServer.setupInParent({
+    this.conn.setupInParent({
       module: "devtools/server/actors/storage",
       setupParent: "setupParentProcessForIndexedDB"
     });
@@ -1603,12 +1604,12 @@ let indexedDBHelpers = {
  * E10S parent/child setup helpers
  */
 
-exports.setupParentProcessForIndexedDB = function({mm, childID}) {
+exports.setupParentProcessForIndexedDB = function({mm, prefix}) {
   // listen for director-script requests from the child process
   mm.addMessageListener("storage:storage-indexedDB-request-parent",
                         indexedDBHelpers.handleChildRequest);
 
-  DebuggerServer.once("disconnected-from-child:" + childID,
+  DebuggerServer.once("disconnected-from-child:" + prefix,
                       handleMessageManagerDisconnected);
 
   gTrackedMessageManager.set("indexedDB", mm);

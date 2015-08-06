@@ -96,7 +96,7 @@ public:
   virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override
   {
     size_t amount = ThreadSharedObject::SizeOfExcludingThis(aMallocSizeOf);
-    amount += mContents.SizeOfExcludingThis(aMallocSizeOf);
+    amount += mContents.ShallowSizeOfExcludingThis(aMallocSizeOf);
     for (size_t i = 0; i < mContents.Length(); i++) {
       amount += mContents[i].SizeOfExcludingThis(aMallocSizeOf);
     }
@@ -380,7 +380,7 @@ public:
                            AudioNodeSizes& aUsage) const
   {
     aUsage.mEngine = SizeOfIncludingThis(aMallocSizeOf);
-    if (HasNode()) {
+    if (mNode) {
       aUsage.mDomNode = mNode->SizeOfIncludingThis(aMallocSizeOf);
       aUsage.mNodeType = mNode->NodeType();
     }

@@ -18,9 +18,9 @@ namespace mozilla {
 
 ShmemPool::ShmemPool(size_t aPoolSize)
   : mMutex("mozilla::ShmemPool"),
-    mPoolFree(aPoolSize),
+    mPoolFree(aPoolSize)
 #ifdef DEBUG
-    mMaxPoolUse(0)
+    ,mMaxPoolUse(0)
 #endif
 {
   mShmemPool.SetLength(aPoolSize);

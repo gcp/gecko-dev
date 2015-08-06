@@ -452,6 +452,7 @@ var BrowserApp = {
     Services.obs.addObserver(this, "Tab:Load", false);
     Services.obs.addObserver(this, "Tab:Selected", false);
     Services.obs.addObserver(this, "Tab:Closed", false);
+    Services.obs.addObserver(this, "Tab:ToggleMuteAudio", false);
     Services.obs.addObserver(this, "Session:Back", false);
     Services.obs.addObserver(this, "Session:Forward", false);
     Services.obs.addObserver(this, "Session:Navigate", false);
@@ -690,27 +691,35 @@ var BrowserApp = {
         });
       });
 
-    NativeWindow.contextmenus.add(stringGetter("contextmenu.openInPrivateTab"),
-      NativeWindow.contextmenus.linkOpenableContext,
-      function(aTarget) {
-        UITelemetry.addEvent("action.1", "contextmenu", null, "web_open_private_tab");
-        UITelemetry.addEvent("loadurl.1", "contextmenu", null);
+    let showOpenInPrivateTab = true;
+    if ("@mozilla.org/parental-controls-service;1" in Cc) {
+      let pc = Cc["@mozilla.org/parental-controls-service;1"].createInstance(Ci.nsIParentalControlsService);
+      showOpenInPrivateTab = pc.isAllowed(Ci.nsIParentalControlsService.PRIVATE_BROWSING);
+    }
 
-        let url = NativeWindow.contextmenus._getLinkURL(aTarget);
-        ContentAreaUtils.urlSecurityCheck(url, aTarget.ownerDocument.nodePrincipal);
-        let tab = BrowserApp.addTab(url, { selected: false, parentId: BrowserApp.selectedTab.id, isPrivate: true });
+    if (showOpenInPrivateTab) {
+      NativeWindow.contextmenus.add(stringGetter("contextmenu.openInPrivateTab"),
+        NativeWindow.contextmenus.linkOpenableContext,
+        function (aTarget) {
+          UITelemetry.addEvent("action.1", "contextmenu", null, "web_open_private_tab");
+          UITelemetry.addEvent("loadurl.1", "contextmenu", null);
 
-        let newtabStrings = Strings.browser.GetStringFromName("newprivatetabpopup.opened");
-        let label = PluralForm.get(1, newtabStrings).replace("#1", 1);
-        let buttonLabel = Strings.browser.GetStringFromName("newtabpopup.switch");
-        NativeWindow.toast.show(label, "long", {
-          button: {
-            icon: "drawable://switch_button_icon",
-            label: buttonLabel,
-            callback: () => { BrowserApp.selectTab(tab); },
-          }
+          let url = NativeWindow.contextmenus._getLinkURL(aTarget);
+          ContentAreaUtils.urlSecurityCheck(url, aTarget.ownerDocument.nodePrincipal);
+          let tab = BrowserApp.addTab(url, {selected: false, parentId: BrowserApp.selectedTab.id, isPrivate: true});
+
+          let newtabStrings = Strings.browser.GetStringFromName("newprivatetabpopup.opened");
+          let label = PluralForm.get(1, newtabStrings).replace("#1", 1);
+          let buttonLabel = Strings.browser.GetStringFromName("newtabpopup.switch");
+          NativeWindow.toast.show(label, "long", {
+            button: {
+              icon: "drawable://switch_button_icon",
+              label: buttonLabel,
+              callback: () => { BrowserApp.selectTab(tab); },
+            }
+          });
         });
-      });
+    }
 
     NativeWindow.contextmenus.add(stringGetter("contextmenu.addToReadingList"),
       NativeWindow.contextmenus.linkOpenableContext,
@@ -1853,6 +1862,13 @@ var BrowserApp = {
       case "Tab:Closed": {
         let data = JSON.parse(aData);
         this._handleTabClosed(this.getTabForId(data.tabId), data.showUndoToast);
+        break;
+      }
+
+      case "Tab:ToggleMuteAudio": {
+        let data = JSON.parse(aData);
+        let tab = this.getTabForId(data.tabId);
+        tab.toggleMuteAudio();
         break;
       }
 
@@ -3050,11 +3066,6 @@ var NativeWindow = {
       clipboard.copyString(aString);
     },
 
-    _shareStringWithDefault: function(aSharedString, aTitle) {
-      let sharing = Cc["@mozilla.org/uriloader/external-sharing-app-service;1"].getService(Ci.nsIExternalSharingAppService);
-      sharing.shareWithDefault(aSharedString, "text/plain", aTitle);
-    },
-
     _stripScheme: function(aString) {
       let index = aString.indexOf(":");
       return aString.slice(index + 1);
@@ -3575,6 +3586,8 @@ Tab.prototype = {
     this.browser.addEventListener("DOMLinkChanged", this, true);
     this.browser.addEventListener("DOMMetaAdded", this, false);
     this.browser.addEventListener("DOMTitleChanged", this, true);
+    this.browser.addEventListener("DOMAudioPlaybackStarted", this, true);
+    this.browser.addEventListener("DOMAudioPlaybackStopped", this, true);
     this.browser.addEventListener("DOMWindowClose", this, true);
     this.browser.addEventListener("DOMWillOpenModalDialog", this, true);
     this.browser.addEventListener("DOMAutoComplete", this, true);
@@ -3757,6 +3770,8 @@ Tab.prototype = {
     this.browser.removeEventListener("DOMLinkChanged", this, true);
     this.browser.removeEventListener("DOMMetaAdded", this, false);
     this.browser.removeEventListener("DOMTitleChanged", this, true);
+    this.browser.removeEventListener("DOMAudioPlaybackStarted", this, true);
+    this.browser.removeEventListener("DOMAudioPlaybackStopped", this, true);
     this.browser.removeEventListener("DOMWindowClose", this, true);
     this.browser.removeEventListener("DOMWillOpenModalDialog", this, true);
     this.browser.removeEventListener("DOMAutoComplete", this, true);
@@ -4240,6 +4255,14 @@ Tab.prototype = {
     }
   },
 
+  toggleMuteAudio: function() {
+    if (this.browser.audioMuted) {
+      this.browser.unmute();
+    } else {
+      this.browser.mute();
+    }
+  },
+
   handleEvent: function(aEvent) {
     switch (aEvent.type) {
       case "DOMContentLoaded": {
@@ -4379,6 +4402,26 @@ Tab.prototype = {
           title: truncate(aEvent.target.title, MAX_TITLE_LENGTH)
         });
         break;
+      }
+
+      case "DOMAudioPlaybackStarted":
+      case "DOMAudioPlaybackStopped": {
+        if (!Services.prefs.getBoolPref("browser.tabs.showAudioPlayingIcon") ||
+            !aEvent.isTrusted) {
+          return;
+        }
+
+        let browser = aEvent.originalTarget;
+        if (browser != this.browser) {
+          return;
+        }
+
+        Messaging.sendRequest({
+          type: "Tab:AudioPlayingChange",
+          tabID: this.id,
+          isAudioPlaying: aEvent.type === "DOMAudioPlaybackStarted"
+        });
+        return;
       }
 
       case "DOMWindowClose": {
@@ -4631,12 +4674,13 @@ Tab.prototype = {
     this.pluginDoorhangerTimeout = null;
     this.shouldShowPluginDoorhanger = true;
     this.clickToPlayPluginsActivated = false;
-    // Borrowed from desktop Firefox: http://mxr.mozilla.org/mozilla-central/source/browser/base/content/urlbarBindings.xml#174
-    let documentURI = contentWin.document.documentURIObject.spec
+
+    let documentURI = contentWin.document.documentURIObject.spec;
 
     // If reader mode, get the base domain for the original url.
     let strippedURI = this._stripAboutReaderURL(documentURI);
 
+    // Borrowed from desktop Firefox: http://hg.mozilla.org/mozilla-central/annotate/72835344333f/browser/base/content/urlbarBindings.xml#l236
     let matchedURL = strippedURI.match(/^((?:[a-z]+:\/\/)?(?:[^\/]+@)?)(.+?)(?::\d+)?(?:\/|$)/);
     let baseDomain = "";
     if (matchedURL) {
@@ -4653,13 +4697,24 @@ Tab.prototype = {
       } catch (e) {}
     }
 
+    // If we are navigating to a new location with a different host,
+    // clear any URL origin that might have been pinned to this tab.
+    let ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
+    let appOrigin = ss.getTabValue(this, "appOrigin");
+    if (appOrigin) {
+      let originHost = Services.io.newURI(appOrigin, null, null).host;
+      if (originHost != aLocationURI.host) {
+        // Note: going 'back' will not make this tab pinned again
+        ss.deleteTabValue(this, "appOrigin");
+      }
+    }
+
     // Update the page actions URI for helper apps.
     if (BrowserApp.selectedTab == this) {
       ExternalApps.updatePageActionUri(fixedURI);
     }
 
-    let webNav = contentWin.QueryInterface(Ci.nsIInterfaceRequestor)
-        .getInterface(Ci.nsIWebNavigation);
+    let webNav = contentWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
 
     let message = {
       type: "Content:LocationChange",
@@ -6017,6 +6072,10 @@ var FormAssistant = {
       aCallback(false);
       return;
     }
+    if (this._isDisabledElement(aElement)) {
+      aCallback(false);
+      return;
+    }
 
     // Don't display the form auto-complete popup after the user starts typing
     // to avoid confusing somes IME. See bug 758820 and bug 632744.
@@ -6083,6 +6142,17 @@ var FormAssistant = {
 
   _hideFormAssistPopup: function _hideFormAssistPopup() {
     Messaging.sendRequest({ type: "FormAssist:Hide" });
+  },
+
+  _isDisabledElement : function(aElement) {
+    let currentElement = aElement;
+    while (currentElement) {
+      if(currentElement.disabled)
+	return true;
+
+      currentElement = currentElement.parentElement;
+    }
+    return false;
   }
 };
 
@@ -6584,7 +6654,7 @@ var ViewportHandler = {
         minZoom: kViewportMinScale,
         maxZoom: kViewportMaxScale,
         width: kDefaultCSSViewportWidth,
-        height: kDefaultCSSViewportHeight,
+        height: -1,
         allowZoom: true,
         allowDoubleTapZoom: true,
         isSpecified: false
@@ -7106,7 +7176,7 @@ var IdentityHandler = {
 
     // Only show an indicator for loaded mixed content if the pref to block it is enabled
     if ((aState & Ci.nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT) &&
-         Services.prefs.getBoolPref("security.mixed_content.block_active_content")) {
+         !Services.prefs.getBoolPref("security.mixed_content.block_active_content")) {
       return this.MIXED_MODE_CONTENT_LOADED;
     }
 

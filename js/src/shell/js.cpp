@@ -55,7 +55,6 @@
 # include "jswin.h"
 #endif
 #include "jswrapper.h"
-#include "prmjtime.h"
 
 #include "builtin/TestingFunctions.h"
 #include "frontend/Parser.h"
@@ -77,6 +76,7 @@
 #include "vm/Monitor.h"
 #include "vm/Shape.h"
 #include "vm/SharedArrayObject.h"
+#include "vm/Time.h"
 #include "vm/TypedArrayObject.h"
 #include "vm/WrapperObject.h"
 
@@ -3094,7 +3094,7 @@ Parse(JSContext* cx, unsigned argc, Value* vp)
     if (!parser.checkOptions())
         return false;
 
-    ParseNode* pn = parser.parse(nullptr);
+    ParseNode* pn = parser.parse();
     if (!pn)
         return false;
 #ifdef DEBUG
@@ -3141,7 +3141,7 @@ SyntaxParse(JSContext* cx, unsigned argc, Value* vp)
     if (!parser.checkOptions())
         return false;
 
-    bool succeeded = parser.parse(nullptr);
+    bool succeeded = parser.parse();
     if (cx->isExceptionPending())
         return false;
 

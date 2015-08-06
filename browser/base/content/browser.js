@@ -274,7 +274,6 @@ let gInitialPages = [
 #include browser-loop.js
 #include browser-places.js
 #include browser-plugins.js
-#include browser-readinglist.js
 #include browser-safebrowsing.js
 #include browser-sidebar.js
 #include browser-social.js
@@ -1139,7 +1138,9 @@ var gBrowserInit = {
 
     gBrowser.addEventListener("AboutTabCrashedLoad", function(event) {
 #ifdef MOZ_CRASHREPORTER
-      TabCrashReporter.onAboutTabCrashedLoad(gBrowser.getBrowserForDocument(event.target));
+      TabCrashReporter.onAboutTabCrashedLoad(gBrowser.getBrowserForDocument(event.target), {
+        crashedTabCount: SessionStore.crashedTabCount,
+      });
 #endif
     }, false, true);
 
@@ -1171,11 +1172,7 @@ var gBrowserInit = {
         SessionStore.reviveCrashedTab(tab);
         break;
       case "restoreAll":
-        for (let browserWin of browserWindows()) {
-          for (let tab of browserWin.gBrowser.tabs) {
-            SessionStore.reviveCrashedTab(tab);
-          }
-        }
+        SessionStore.reviveAllCrashedTabs();
         break;
       }
     }, false, true);
@@ -1269,8 +1266,6 @@ var gBrowserInit = {
 #ifdef E10S_TESTING_ONLY
     gRemoteTabsUI.init();
 #endif
-    ReadingListUI.init();
-
     // Initialize the full zoom setting.
     // We do this before the session restore service gets initialized so we can
     // apply full zoom settings to tabs restored by the session restore service.
@@ -1550,8 +1545,6 @@ var gBrowserInit = {
     TrackingProtection.uninit();
 
     gMenuButtonUpdateBadge.uninit();
-
-    ReadingListUI.uninit();
 
     SidebarUI.uninit();
 
@@ -2411,8 +2404,10 @@ function BrowserViewSource(browser) {
 // doc - document to use for source, or null for this window's document
 // initialTab - name of the initial tab to display, or null for the first tab
 // imageElement - image to load in the Media Tab of the Page Info window; can be null/omitted
-function BrowserPageInfo(doc, initialTab, imageElement) {
-  var args = {doc: doc, initialTab: initialTab, imageElement: imageElement};
+// frameOuterWindowID - the id of the frame that the context menu opened in; can be null/omitted
+function BrowserPageInfo(doc, initialTab, imageElement, frameOuterWindowID) {
+  var args = {doc: doc, initialTab: initialTab, imageElement: imageElement,
+              frameOuterWindowID: frameOuterWindowID};
   var windows = Services.wm.getEnumerator("Browser:page-info");
 
   var documentURL = doc ? doc.location : window.gBrowser.selectedBrowser.contentDocumentAsCPOW.location;
@@ -2549,8 +2544,6 @@ function UpdatePageProxyState()
 function SetPageProxyState(aState)
 {
   BookmarkingUI.onPageProxyStateChanged(aState);
-  ReadingListUI.onPageProxyStateChanged(aState);
-
   if (!gURLBar)
     return;
 
@@ -6633,6 +6626,7 @@ var gIdentityHandler = {
   IDENTITY_MODE_MIXED_ACTIVE_BLOCKED                   : "verifiedDomain mixedContent mixedActiveBlocked",  // SSL with unauthenticated active content blocked; no unauthenticated display content
   IDENTITY_MODE_MIXED_ACTIVE_BLOCKED_IDENTIFIED        : "verifiedIdentity mixedContent mixedActiveBlocked",  // SSL with unauthenticated active content blocked; no unauthenticated display content
   IDENTITY_MODE_CHROMEUI                               : "chromeUI",         // Part of the product's UI
+  IDENTITY_MODE_FILE_URI                               : "fileURI",  // File path
 
   // Cache the most recent SSLStatus and Location seen in checkIdentity
   _lastStatus : null,
@@ -6848,7 +6842,20 @@ var gIdentityHandler = {
         this.setMode(this.IDENTITY_MODE_USES_WEAK_CIPHER);
       }
     } else {
-      this.setMode(this.IDENTITY_MODE_UNKNOWN);
+      // Create a channel for the sole purpose of getting the resolved URI
+      // of the request to determine if it's loaded from the file system.
+      let resolvedURI = NetUtil.newChannel({uri,loadUsingSystemPrincipal:true}).URI;
+      if (resolvedURI.schemeIs("jar")) {
+        // Given a URI "jar:<jar-file-uri>!/<jar-entry>"
+        // create a new URI using <jar-file-uri>!/<jar-entry>
+        resolvedURI = NetUtil.newURI(resolvedURI.path);
+      }
+
+      if (resolvedURI.schemeIs("file")) {
+        this.setMode(this.IDENTITY_MODE_FILE_URI);
+      } else {
+        this.setMode(this.IDENTITY_MODE_UNKNOWN);
+      }
     }
 
     // Show the doorhanger when:
@@ -6862,10 +6869,6 @@ var gIdentityHandler = {
          nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT     |
          nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT)) {
       this.showBadContentDoorhanger(state);
-    } else if (TrackingProtection.enabled) {
-      // We didn't show the shield
-      Services.telemetry.getHistogramById("TRACKING_PROTECTION_SHIELD")
-        .add(0);
     }
   },
 
@@ -6887,19 +6890,6 @@ var gIdentityHandler = {
     // default
     let iconState = "bad-content-blocked-notification-icon";
 
-    // Telemetry for whether the shield was due to tracking protection or not
-    let histogram = Services.telemetry.getHistogramById
-                      ("TRACKING_PROTECTION_SHIELD");
-    if (state & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT) {
-      histogram.add(1);
-    } else if (state &
-               Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT) {
-      histogram.add(2);
-    } else if (gPrefService.getBoolPref("privacy.trackingprotection.enabled")) {
-      // Tracking protection is enabled but no tracking elements are loaded,
-      // the shield is due to mixed content.
-      histogram.add(3);
-    }
     if (state &
         (Ci.nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT |
          Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT)) {
@@ -7569,17 +7559,30 @@ function safeModeRestart() {
  * delta is the offset to the history entry that you want to load.
  */
 function duplicateTabIn(aTab, where, delta) {
-  let newTab = SessionStore.duplicateTab(window, aTab, delta);
-
   switch (where) {
     case "window":
-      gBrowser.hideTab(newTab);
-      gBrowser.replaceTabWithWindow(newTab);
+      let otherWin = OpenBrowserWindow();
+      let delayedStartupFinished = (subject, topic) => {
+        if (topic == "browser-delayed-startup-finished" &&
+            subject == otherWin) {
+          Services.obs.removeObserver(delayedStartupFinished, topic);
+          let otherGBrowser = otherWin.gBrowser;
+          let otherTab = otherGBrowser.selectedTab;
+          SessionStore.duplicateTab(otherWin, aTab, delta);
+          otherGBrowser.removeTab(otherTab, { animate: false });
+        }
+      };
+
+      Services.obs.addObserver(delayedStartupFinished,
+                               "browser-delayed-startup-finished",
+                               false);
       break;
     case "tabshifted":
+      SessionStore.duplicateTab(window, aTab, delta);
       // A background tab has been opened, nothing else to do here.
       break;
     case "tab":
+      let newTab = SessionStore.duplicateTab(window, aTab, delta);
       gBrowser.selectedTab = newTab;
       break;
   }

@@ -22,6 +22,7 @@
 #include "mozilla/dom/bluetooth/BluetoothClassOfDevice.h"
 #include "mozilla/dom/bluetooth/BluetoothDevice.h"
 #include "mozilla/dom/bluetooth/BluetoothDiscoveryHandle.h"
+#include "mozilla/dom/bluetooth/BluetoothGattServer.h"
 #include "mozilla/dom/bluetooth/BluetoothPairingListener.h"
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 
@@ -361,6 +362,27 @@ BluetoothAdapter::Cleanup()
   }
 }
 
+BluetoothGattServer*
+BluetoothAdapter::GetGattServer()
+{
+  /* Only expose GATT server if the adapter is enabled. It would be worth
+   * noting that the enabling state and the disabling state are just
+   * intermediate states, and the adapter would change into the enabled state
+   * or the disabled state sooner or later. So we invalidate and nullify the
+   * created GATT server object only when the adapter changes to a steady
+   * state, i.e., the disabled state.
+   */
+  if (mState != BluetoothAdapterState::Enabled) {
+    return nullptr;
+  }
+
+  if (!mGattServer) {
+    mGattServer = new BluetoothGattServer(GetOwner());
+  }
+
+  return mGattServer;
+}
+
 void
 BluetoothAdapter::GetPairedDeviceProperties(
   const nsTArray<nsString>& aDeviceAddresses)
@@ -391,6 +413,10 @@ BluetoothAdapter::SetPropertyByValue(const BluetoothNamedValue& aValue)
     if (mState == BluetoothAdapterState::Disabled) {
       mDevices.Clear();
       mLeScanHandleArray.Clear();
+      if (mGattServer) {
+        mGattServer->Invalidate();
+        mGattServer = nullptr;
+      }
     }
   } else if (name.EqualsLiteral("Name")) {
     mName = value.get_nsString();
@@ -974,6 +1000,13 @@ BluetoothAdapter::SetAdapterState(BluetoothAdapterState aState)
 
   mState = aState;
 
+  if (mState == BluetoothAdapterState::Disabled) {
+    if (mGattServer) {
+      mGattServer->Invalidate();
+      mGattServer = nullptr;
+    }
+  }
+
   // Fire BluetoothAttributeEvent for changed adapter state
   Sequence<nsString> types;
   BT_APPEND_ENUM_STRING_FALLIBLE(types,
@@ -1006,6 +1039,11 @@ BluetoothAdapter::HandlePropertyChanged(const BluetoothValue& aValue)
       SetPropertyByValue(arr[i]);
       BT_APPEND_ENUM_STRING_FALLIBLE(types, BluetoothAdapterAttribute, type);
     }
+  }
+
+  if (types.IsEmpty()) {
+    // No adapter attribute changed
+    return;
   }
 
   DispatchAttributeEvent(types);
@@ -1134,7 +1172,7 @@ BluetoothAdapter::HandleDeviceUnpaired(const BluetoothValue& aValue)
 void
 BluetoothAdapter::DispatchAttributeEvent(const Sequence<nsString>& aTypes)
 {
-  NS_ENSURE_TRUE_VOID(aTypes.Length());
+  MOZ_ASSERT(!aTypes.IsEmpty());
 
   BluetoothAttributeEventInit init;
   init.mAttrs = aTypes;

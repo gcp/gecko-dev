@@ -54,13 +54,15 @@ public:
     SpeechRecognitionResultList* resultList =
       new SpeechRecognitionResultList(mRecognition);
     SpeechRecognitionResult* result = new SpeechRecognitionResult(mRecognition);
-    SpeechRecognitionAlternative* alternative =
-      new SpeechRecognitionAlternative(mRecognition);
+    if (0 < mRecognition->MaxAlternatives()) {
+      SpeechRecognitionAlternative* alternative =
+        new SpeechRecognitionAlternative(mRecognition);
 
-    alternative->mTranscript = mResult;
-    alternative->mConfidence = 100;
+      alternative->mTranscript = mResult;
+      alternative->mConfidence = 100;
 
-    result->mItems.AppendElement(alternative);
+      result->mItems.AppendElement(alternative);
+    }
     resultList->mItems.AppendElement(result);
 
     event->mRecognitionResultList = resultList;
@@ -103,9 +105,7 @@ public:
     rv = ps_end_utt(mPs);
     if (rv >= 0) {
       hyp = ps_get_hyp(mPs, &score);
-      if (hyp == nullptr) {
-        hypoValue.Assign("ERROR");
-      } else {
+      if (hyp) {
         hypoValue.Assign(hyp);
       }
     }
@@ -330,13 +330,15 @@ PocketSphinxSpeechRecognitionService::BuildMockResultList()
   SpeechRecognitionResultList* resultList =
     new SpeechRecognitionResultList(mRecognition);
   SpeechRecognitionResult* result = new SpeechRecognitionResult(mRecognition);
-  SpeechRecognitionAlternative* alternative =
-    new SpeechRecognitionAlternative(mRecognition);
+  if (0 < mRecognition->MaxAlternatives()) {
+    SpeechRecognitionAlternative* alternative =
+      new SpeechRecognitionAlternative(mRecognition);
 
-  alternative->mTranscript = NS_LITERAL_STRING("Mock final result");
-  alternative->mConfidence = 0.0f;
+    alternative->mTranscript = NS_LITERAL_STRING("Mock final result");
+    alternative->mConfidence = 0.0f;
 
-  result->mItems.AppendElement(alternative);
+    result->mItems.AppendElement(alternative);
+  }
   resultList->mItems.AppendElement(result);
 
   return resultList;

@@ -18,9 +18,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "fxaMigrator",
 const PAGE_NO_ACCOUNT = 0;
 const PAGE_HAS_ACCOUNT = 1;
 const PAGE_NEEDS_UPDATE = 2;
-const PAGE_PLEASE_WAIT = 3;
-const FXA_PAGE_LOGGED_OUT = 4;
-const FXA_PAGE_LOGGED_IN = 5;
+const FXA_PAGE_LOGGED_OUT = 3;
+const FXA_PAGE_LOGGED_IN = 4;
 
 // Indexes into the "login status" deck.
 // We are in a successful verified state - everything should work!
@@ -68,7 +67,7 @@ let gSyncPane = {
 
     // it may take some time before we can determine what provider to use
     // and the state of that provider, so show the "please wait" page.
-    this.page = PAGE_PLEASE_WAIT;
+    this._showLoadPage(xps);
 
     let onUnload = function () {
       window.removeEventListener("unload", onUnload, false);
@@ -89,6 +88,30 @@ let gSyncPane = {
     xps.ensureLoaded();
   },
 
+  _showLoadPage: function (xps) {
+    let username;
+    try {
+      username = Services.prefs.getCharPref("services.sync.username");
+    } catch (e) {}
+    if (!username) {
+      this.page = FXA_PAGE_LOGGED_OUT;
+    } else if (xps.fxAccountsEnabled) {
+      // Use cached values while we wait for the up-to-date values
+      let cachedComputerName;
+      try {
+        cachedComputerName = Services.prefs.getCharPref("services.sync.client.name");
+      }
+      catch (e) {
+        cachedComputerName = "";
+      }
+      document.getElementById("fxaEmailAddress1").textContent = username;
+      document.getElementById("fxaSyncComputerName").value = cachedComputerName;
+      this.page = FXA_PAGE_LOGGED_IN;
+    } else { // Old Sync
+      this.page = PAGE_HAS_ACCOUNT;
+    }
+  },
+
   _init: function () {
     let topics = ["weave:service:login:error",
                   "weave:service:login:finish",
@@ -96,6 +119,7 @@ let gSyncPane = {
                   "weave:service:setup-complete",
                   "weave:service:logout:finish",
                   FxAccountsCommon.ONVERIFIED_NOTIFICATION,
+                  FxAccountsCommon.ONLOGIN_NOTIFICATION,
                   FxAccountsCommon.ON_PROFILE_CHANGE_NOTIFICATION,
                   ];
     let migrateTopic = "fxa-migration:state-changed";
@@ -216,16 +240,12 @@ let gSyncPane = {
       gSyncPane.startOver(true);
       return false;
     });
-    setEventListener("noFxaSignUp", "click", function () {
+    setEventListener("noFxaSignUp", "command", function () {
       gSyncPane.signUp();
       return false;
     });
-    setEventListener("noFxaSignIn", "click", function () {
+    setEventListener("noFxaSignIn", "command", function () {
       gSyncPane.signIn();
-      return false;
-    });
-    setEventListener("noFxaUseOldSync", "click", function () {
-      gSyncPane.openOldSyncSupportPage();
       return false;
     });
     setEventListener("verifiedManage", "command",
@@ -235,13 +255,13 @@ let gSyncPane = {
     });
     setEventListener("verifyFxaAccount", "command",
       gSyncPane.verifyFirefoxAccount);
-    setEventListener("unverifiedUnlinkFxaAccount", "click", function () {
+    setEventListener("unverifiedUnlinkFxaAccount", "command", function () {
       /* no warning as account can't have previously synced */
       gSyncPane.unlinkFirefoxAccount(false);
     });
     setEventListener("rejectReSignIn", "command",
       gSyncPane.reSignIn);
-    setEventListener("rejectUnlinkFxaAccount", "click", function () {
+    setEventListener("rejectUnlinkFxaAccount", "command", function () {
       gSyncPane.unlinkFirefoxAccount(true);
     });
     setEventListener("tosPP-small-ToS", "click", gSyncPane.openToS);
@@ -295,19 +315,13 @@ let gSyncPane = {
       fxaEmailAddress1Label.hidden = false;
       displayNameLabel.hidden = true;
 
-      // unhide the reading-list engine if readinglist is enabled (note we do
-      // it here as it must remain disabled for legacy sync users)
-      if (Services.prefs.getBoolPref("browser.readinglist.enabled")) {
-        document.getElementById("readinglist-engine").removeAttribute("hidden");
-      }
-
       let profileInfoEnabled;
       try {
         profileInfoEnabled = Services.prefs.getBoolPref("identity.fxaccounts.profile_image.enabled");
       } catch (ex) {}
 
       // determine the fxa status...
-      this.page = PAGE_PLEASE_WAIT;
+      this._showLoadPage(service);
 
       fxAccounts.getSignedInUser().then(data => {
         if (!data) {

@@ -33,6 +33,7 @@ let gFxAccounts = {
       "weave:service:setup-complete",
       "weave:ui:login:error",
       "fxa-migration:state-changed",
+      this.FxAccountsCommon.ONLOGIN_NOTIFICATION,
       this.FxAccountsCommon.ONVERIFIED_NOTIFICATION,
       this.FxAccountsCommon.ONLOGOUT_NOTIFICATION,
       "weave:notification:removed",
@@ -222,10 +223,11 @@ let gFxAccounts = {
     this.updateMigrationNotification();
   },
 
+  // Note that updateAppMenuItem() returns a Promise that's only used by tests.
   updateAppMenuItem: function () {
     if (this._migrationInfo) {
       this.updateAppMenuItemForMigration();
-      return;
+      return Promise.resolve();
     }
 
     let profileInfoEnabled = false;
@@ -239,9 +241,12 @@ let gFxAccounts = {
       // fxAccountsEnabled is false because migration has not yet finished.  In
       // that case, hide the button.  We'll get another notification with a null
       // state once migration is complete.
+      this.panelUIFooter.hidden = true;
       this.panelUIFooter.removeAttribute("fxastatus");
-      return;
+      return Promise.resolve();
     }
+
+    this.panelUIFooter.hidden = false;
 
     // Make sure the button is disabled in customization mode.
     if (this._inCustomizationMode) {
@@ -308,12 +313,18 @@ let gFxAccounts = {
       }
     }
 
-    // Calling getSignedInUserProfile() without a user logged in causes log
-    // noise that looks like an actual error...
-    fxAccounts.getSignedInUser().then(userData => {
+    return fxAccounts.getSignedInUser().then(userData => {
       // userData may be null here when the user is not signed-in, but that's expected
       updateWithUserData(userData);
-      return userData ? fxAccounts.getSignedInUserProfile() : null;
+      // unverified users cause us to spew log errors fetching an OAuth token
+      // to fetch the profile, so don't even try in that case.
+      if (!userData || !userData.verified || !profileInfoEnabled) {
+        return null; // don't even try to grab the profile.
+      }
+      return fxAccounts.getSignedInUserProfile().catch(err => {
+        // Not fetching the profile is sad but the FxA logs will already have noise.
+        return null;
+      });
     }).then(profile => {
       if (!profile) {
         return;
@@ -324,7 +335,7 @@ let gFxAccounts = {
       // The most likely scenario is a user logged out, so reflect that.
       // Bug 995134 calls for better errors so we could retry if we were
       // sure this was the failure reason.
-      this.FxAccountsCommon.log.error("Error updating FxA profile", error);
+      this.FxAccountsCommon.log.error("Error updating FxA account info", error);
       updateWithUserData(null);
     });
   },

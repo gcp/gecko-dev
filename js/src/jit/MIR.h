@@ -9186,14 +9186,16 @@ class MArrayConcat
 {
     CompilerObject templateObj_;
     gc::InitialHeap initialHeap_;
-    JSValueType unboxedType_;
+    bool unboxedThis_, unboxedArg_;
 
     MArrayConcat(CompilerConstraintList* constraints, MDefinition* lhs, MDefinition* rhs,
-                 JSObject* templateObj, gc::InitialHeap initialHeap, JSValueType unboxedType)
+                 JSObject* templateObj, gc::InitialHeap initialHeap,
+                 bool unboxedThis, bool unboxedArg)
       : MBinaryInstruction(lhs, rhs),
         templateObj_(templateObj),
         initialHeap_(initialHeap),
-        unboxedType_(unboxedType)
+        unboxedThis_(unboxedThis),
+        unboxedArg_(unboxedArg)
     {
         setResultType(MIRType_Object);
         setResultTypeSet(MakeSingletonTypeSet(constraints, templateObj));
@@ -9205,10 +9207,10 @@ class MArrayConcat
     static MArrayConcat* New(TempAllocator& alloc, CompilerConstraintList* constraints,
                              MDefinition* lhs, MDefinition* rhs,
                              JSObject* templateObj, gc::InitialHeap initialHeap,
-                             JSValueType unboxedType)
+                             bool unboxedThis, bool unboxedArg)
     {
         return new(alloc) MArrayConcat(constraints, lhs, rhs, templateObj,
-                                       initialHeap, unboxedType);
+                                       initialHeap, unboxedThis, unboxedArg);
     }
 
     JSObject* templateObj() const {
@@ -9219,12 +9221,17 @@ class MArrayConcat
         return initialHeap_;
     }
 
-    JSValueType unboxedType() const {
-        return unboxedType_;
+    bool unboxedThis() const {
+        return unboxedThis_;
+    }
+
+    bool unboxedArg() const {
+        return unboxedArg_;
     }
 
     AliasSet getAliasSet() const override {
-        return AliasSet::Store(AliasSet::BoxedOrUnboxedElements(unboxedType()) |
+        return AliasSet::Store(AliasSet::BoxedOrUnboxedElements(unboxedThis() ? JSVAL_TYPE_INT32 : JSVAL_TYPE_MAGIC) |
+                               AliasSet::BoxedOrUnboxedElements(unboxedArg() ? JSVAL_TYPE_INT32 : JSVAL_TYPE_MAGIC) |
                                AliasSet::ObjectFields);
     }
     bool possiblyCalls() const override {
@@ -9628,17 +9635,29 @@ class MStoreUnboxedScalar
     public StoreUnboxedScalarBase,
     public StoreUnboxedScalarPolicy::Data
 {
+  public:
+    enum TruncateInputKind {
+        DontTruncateInput,
+        TruncateInput
+    };
+
+  private:
     Scalar::Type storageType_;
+
+    // Whether this store truncates out of range inputs, for use by range analysis.
+    TruncateInputKind truncateInput_;
+
     bool requiresBarrier_;
     int32_t offsetAdjustment_;
     unsigned numElems_; // used only for SIMD
 
     MStoreUnboxedScalar(MDefinition* elements, MDefinition* index, MDefinition* value,
-                        Scalar::Type storageType, MemoryBarrierRequirement requiresBarrier,
-                        int32_t offsetAdjustment)
+                        Scalar::Type storageType, TruncateInputKind truncateInput,
+                        MemoryBarrierRequirement requiresBarrier, int32_t offsetAdjustment)
       : MTernaryInstruction(elements, index, value),
         StoreUnboxedScalarBase(storageType),
         storageType_(storageType),
+        truncateInput_(truncateInput),
         requiresBarrier_(requiresBarrier == DoesRequireMemoryBarrier),
         offsetAdjustment_(offsetAdjustment),
         numElems_(1)
@@ -9658,12 +9677,13 @@ class MStoreUnboxedScalar
     static MStoreUnboxedScalar* New(TempAllocator& alloc,
                                     MDefinition* elements, MDefinition* index,
                                     MDefinition* value, Scalar::Type storageType,
+                                    TruncateInputKind truncateInput,
                                     MemoryBarrierRequirement requiresBarrier =
                                         DoesNotRequireMemoryBarrier,
                                     int32_t offsetAdjustment = 0)
     {
         return new(alloc) MStoreUnboxedScalar(elements, index, value, storageType,
-                                              requiresBarrier, offsetAdjustment);
+                                              truncateInput, requiresBarrier, offsetAdjustment);
     }
 
     void setSimdWrite(Scalar::Type writeType, unsigned numElems) {
@@ -9688,6 +9708,9 @@ class MStoreUnboxedScalar
     }
     AliasSet getAliasSet() const override {
         return AliasSet::Store(AliasSet::UnboxedElement);
+    }
+    TruncateInputKind truncateInput() const {
+        return truncateInput_;
     }
     bool requiresMemoryBarrier() const {
         return requiresBarrier_;

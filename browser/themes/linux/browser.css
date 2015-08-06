@@ -35,6 +35,8 @@
   --toolbarbutton-combined-backgroundimage: linear-gradient(hsla(210,54%,20%,.2) 0, hsla(210,54%,20%,.2) 18px);
 
   --identity-box-verified-background-color: #fff;
+
+  --panel-separator-color: ThreeDShadow;
 }
 
 #menubar-items {
@@ -518,11 +520,6 @@ menuitem:not([type]):not(.menuitem-tooltip):not(.menuitem-iconic-tooltip) {
 #BMB_unsortedBookmarks,
 #panelMenu_unsortedBookmarks {
   list-style-image: url("chrome://browser/skin/places/unsortedBookmarks.png");
-}
-
-#menu_readingList,
-#BMB_readingList {
-  list-style-image: url("chrome://browser/skin/readinglist/readinglist-icon.svg");
 }
 
 #panelMenu_pocket,
@@ -1287,8 +1284,6 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
   list-style-image: url("chrome://browser/skin/Info.png");
 }
 
-%include ../shared/readinglist/readinglist.inc.css
-
 /* Reader mode button */
 
 #reader-mode-button {
@@ -1950,4 +1945,8 @@ chatbox {
   /* override toolkit/themes/linux/global/menu.css */
   -moz-padding-end: 0 !important;
   -moz-margin-end: 0 !important;
+}
+
+.browser-action-panel > .panel-arrowcontainer > .panel-arrowcontent {
+  padding: 0;
 }

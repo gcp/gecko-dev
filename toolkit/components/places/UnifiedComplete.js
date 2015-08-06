@@ -78,6 +78,9 @@ const MINIMUM_LOCAL_MATCHES = 5;
 // don't need to be exhaustive here, so allow dashes anywhere.
 const REGEXP_SINGLEWORD_HOST = new RegExp("^[a-z0-9-]+$", "i");
 
+// Regex used to match one or more whitespace.
+const REGEXP_SPACES = /\s+/;
+
 // Sqlite result row index constants.
 const QUERYINDEX_QUERYTYPE     = 0;
 const QUERYINDEX_URL           = 1;
@@ -517,7 +520,7 @@ function fixupSearchText(spec)
  *       an empty array then.
  */
 function getUnfilteredSearchTokens(searchString)
-  searchString.length ? searchString.split(" ") : [];
+  searchString.length ? searchString.split(REGEXP_SPACES) : [];
 
 /**
  * Strip prefixes from the URI that we don't care about for searching.
@@ -627,6 +630,7 @@ function Search(searchString, searchParam, autocompleteListener,
   this._enableActions = params.has("enable-actions");
   this._disablePrivateActions = params.has("disable-private-actions");
   this._inPrivateWindow = params.has("private-window");
+  this._prohibitAutoFill = params.has("prohibit-autofill");
 
   this._searchTokens =
     this.filterTokens(getUnfilteredSearchTokens(this._searchString));
@@ -941,6 +945,9 @@ Search.prototype = {
       );
     let promise = this._searchSuggestionController.fetchCompletePromise
       .then(() => {
+        // The search has been canceled already.
+        if (!this._searchSuggestionController)
+          return;
         if (this._searchSuggestionController.resultsCount >= 0 &&
             this._searchSuggestionController.resultsCount < 2) {
           // The original string is used to properly compare with the next search.
@@ -973,7 +980,7 @@ Search.prototype = {
     if (searchString.length < 2)
       return true;
 
-    let tokens = searchString.split(/\s/);
+    let tokens = searchString.split(REGEXP_SPACES);
 
     // The first token may be a whitelisted host.
     if (REGEXP_SINGLEWORD_HOST.test(tokens[0]) &&
@@ -1101,7 +1108,7 @@ Search.prototype = {
   },
 
   _matchSearchEngineAlias: function* () {
-    if (this._searchTokens.length < 2)
+    if (this._searchTokens.length < 1)
       return false;
 
     let alias = this._searchTokens[0];
@@ -1585,10 +1592,13 @@ Search.prototype = {
     // This may confuse completeDefaultIndex cause the AUTOCOMPLETE_MATCH
     // tokenizer ends up trimming the search string and returning a value
     // that doesn't match it, or is even shorter.
-    if (/\s/.test(this._originalSearchString))
+    if (REGEXP_SPACES.test(this._originalSearchString))
       return false;
 
     if (this._searchString.length == 0)
+      return false;
+
+    if (this._prohibitAutoFill)
       return false;
 
     return true;
@@ -1831,7 +1841,13 @@ UnifiedComplete.prototype = {
   //////////////////////////////////////////////////////////////////////////////
   //// nsIAutoCompleteSearchDescriptor
 
-  get searchType() Ci.nsIAutoCompleteSearchDescriptor.SEARCH_TYPE_IMMEDIATE,
+  get searchType() {
+    return Ci.nsIAutoCompleteSearchDescriptor.SEARCH_TYPE_IMMEDIATE;
+  },
+
+  get clearingAutoFillSearchesAgain() {
+    return true;
+  },
 
   //////////////////////////////////////////////////////////////////////////////
   //// nsISupports

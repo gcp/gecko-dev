@@ -67,7 +67,7 @@ static unsigned int kDefaultTimeout = 7000;
 //solution like discussed in bug 860775.
 const std::string kDefaultStunServerAddress((char *)"52.27.56.60");
 const std::string kDefaultStunServerHostname(
-    (char *)"global.stun.twillio.com");
+    (char *)"global.stun.twilio.com");
 const std::string kBogusStunServerHostname(
     (char *)"stun-server-nonexistent.invalid");
 const uint16_t kDefaultStunServerPort=3478;
@@ -2914,7 +2914,7 @@ static std::string get_environment(const char *name) {
 
 int main(int argc, char **argv)
 {
-#ifdef LINUX
+#ifdef ANDROID
   // This test can cause intermittent oranges on the builders on Linux
   CHECK_ENVIRONMENT_FLAG("MOZ_WEBRTC_TESTS")
 #endif

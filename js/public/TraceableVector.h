@@ -8,12 +8,12 @@
 #define js_TraceableVector_h
 
 #include "mozilla/Vector.h"
+
 #include "js/RootingAPI.h"
+#include "js/TracingAPI.h"
 #include "js/Vector.h"
 
 namespace js {
-
-template <typename> struct DefaultTracer;
 
 // A TraceableVector is a Vector with an additional trace method that knows how
 // to visit all of the items stored in the Vector. For vectors that contain GC
@@ -37,7 +37,7 @@ class TraceableVector
                                MinInlineCapacity,
                                AllocPolicy,
                                TraceableVector<T, MinInlineCapacity, AllocPolicy, TraceFunc>>,
-    public JS::DynamicTraceable
+    public JS::Traceable
 {
     using Base = mozilla::VectorBase<T, MinInlineCapacity, AllocPolicy, TraceableVector>;
 
@@ -48,7 +48,8 @@ class TraceableVector
         return Base::operator=(mozilla::Forward<TraceableVector>(vec));
     }
 
-    void trace(JSTracer* trc) override {
+    static void trace(TraceableVector* vec, JSTracer* trc) { vec->trace(trc); }
+    void trace(JSTracer* trc) {
         for (size_t i = 0; i < this->length(); ++i)
             TraceFunc::trace(trc, &Base::operator[](i), "vector element");
     }
@@ -67,9 +68,12 @@ class TraceableVectorOperations
     size_t capacity() const { return vec().capacity(); }
     const T* begin() const { return vec().begin(); }
     const T* end() const { return vec().end(); }
-    const T& operator[](size_t aIndex) const { return vec().operator[](aIndex); }
     const T& back() const { return vec().back(); }
     bool canAppendWithoutRealloc(size_t aNeeded) const { return vec().canAppendWithoutRealloc(); }
+
+    JS::Handle<T> operator[](size_t aIndex) const {
+        return JS::Handle<T>::fromMarkedLocation(&vec().operator[](aIndex));
+    }
 };
 
 template <typename Outer, typename T, size_t Capacity, typename AllocPolicy, typename TraceFunc>
@@ -77,14 +81,23 @@ class MutableTraceableVectorOperations
   : public TraceableVectorOperations<Outer, T, Capacity, AllocPolicy, TraceFunc>
 {
     using Vec = TraceableVector<T, Capacity, AllocPolicy, TraceFunc>;
+    const Vec& vec() const { return static_cast<const Outer*>(this)->extract(); }
     Vec& vec() { return static_cast<Outer*>(this)->extract(); }
 
   public:
+    const AllocPolicy& allocPolicy() const { return vec().allocPolicy(); }
     AllocPolicy& allocPolicy() { return vec().allocPolicy(); }
+    const T* begin() const { return vec().begin(); }
     T* begin() { return vec().begin(); }
+    const T* end() const { return vec().end(); }
     T* end() { return vec().end(); }
-    T& operator[](size_t aIndex) { return vec().operator[](aIndex); }
+    const T& operator[](size_t aIndex) const { return vec().operator[](aIndex); }
+    const T& back() const { return vec().back(); }
     T& back() { return vec().back(); }
+
+    JS::MutableHandle<T> operator[](size_t aIndex) {
+        return JS::MutableHandle<T>::fromMarkedLocation(&vec().operator[](aIndex));
+    }
 
     bool initCapacity(size_t aRequest) { return vec().initCapacity(aRequest); }
     bool reserve(size_t aRequest) { return vec().reserve(aRequest); }
@@ -120,7 +133,7 @@ class MutableTraceableVectorOperations
         vec().infallibleAppend(aBegin, aLength);
     }
     void popBack() { vec().popBack(); }
-    T popCopy() { return vec().podCopy(); }
+    T popCopy() { return vec().popCopy(); }
     template<typename U> T* insert(T* aP, U&& aVal) {
         return vec().insert(aP, mozilla::Forward<U>(aVal));
     }
@@ -128,44 +141,61 @@ class MutableTraceableVectorOperations
     void erase(T* aBegin, T* aEnd) { vec().erase(aBegin, aEnd); }
 };
 
-template <typename A, size_t B, typename C, typename D>
-class RootedBase<TraceableVector<A,B,C,D>>
-  : public MutableTraceableVectorOperations<JS::Rooted<TraceableVector<A,B,C,D>>, A,B,C,D>
+template <typename T, size_t N, typename AP, typename TP>
+class RootedBase<TraceableVector<T,N,AP,TP>>
+  : public MutableTraceableVectorOperations<JS::Rooted<TraceableVector<T,N,AP,TP>>, T,N,AP,TP>
 {
-    using Vec = TraceableVector<A,B,C,D>;
+    using Vec = TraceableVector<T,N,AP,TP>;
 
-    friend class TraceableVectorOperations<JS::Rooted<Vec>, A,B,C,D>;
+    friend class TraceableVectorOperations<JS::Rooted<Vec>, T,N,AP,TP>;
     const Vec& extract() const { return *static_cast<const JS::Rooted<Vec>*>(this)->address(); }
 
-    friend class MutableTraceableVectorOperations<JS::Rooted<Vec>, A,B,C,D>;
+    friend class MutableTraceableVectorOperations<JS::Rooted<Vec>, T,N,AP,TP>;
     Vec& extract() { return *static_cast<JS::Rooted<Vec>*>(this)->address(); }
 };
 
-template <typename A, size_t B, typename C, typename D>
-class MutableHandleBase<TraceableVector<A,B,C,D>>
-  : public MutableTraceableVectorOperations<JS::MutableHandle<TraceableVector<A,B,C,D>>, A,B,C,D>
+template <typename T, size_t N, typename AP, typename TP>
+class MutableHandleBase<TraceableVector<T,N,AP,TP>>
+  : public MutableTraceableVectorOperations<JS::MutableHandle<TraceableVector<T,N,AP,TP>>,
+                                            T,N,AP,TP>
 {
-    using Vec = TraceableVector<A,B,C,D>;
+    using Vec = TraceableVector<T,N,AP,TP>;
 
-    friend class TraceableVectorOperations<JS::MutableHandle<Vec>, A,B,C,D>;
+    friend class TraceableVectorOperations<JS::MutableHandle<Vec>, T,N,AP,TP>;
     const Vec& extract() const {
         return *static_cast<const JS::MutableHandle<Vec>*>(this)->address();
     }
 
-    friend class MutableTraceableVectorOperations<JS::MutableHandle<Vec>, A,B,C,D>;
+    friend class MutableTraceableVectorOperations<JS::MutableHandle<Vec>, T,N,AP,TP>;
     Vec& extract() { return *static_cast<JS::MutableHandle<Vec>*>(this)->address(); }
 };
 
-template <typename A, size_t B, typename C, typename D>
-class HandleBase<TraceableVector<A,B,C,D>>
-  : public TraceableVectorOperations<JS::Handle<TraceableVector<A,B,C,D>>, A,B,C,D>
+template <typename T, size_t N, typename AP, typename TP>
+class HandleBase<TraceableVector<T,N,AP,TP>>
+  : public TraceableVectorOperations<JS::Handle<TraceableVector<T,N,AP,TP>>, T,N,AP,TP>
 {
-    using Vec = TraceableVector<A,B,C,D>;
+    using Vec = TraceableVector<T,N,AP,TP>;
 
-    friend class TraceableVectorOperations<JS::Handle<Vec>, A,B,C,D>;
+    friend class TraceableVectorOperations<JS::Handle<Vec>, T,N,AP,TP>;
     const Vec& extract() const {
         return *static_cast<const JS::Handle<Vec>*>(this)->address();
     }
+};
+
+template <typename T, size_t N, typename AP, typename TP>
+class PersistentRootedBase<TraceableVector<T,N,AP,TP>>
+  : public MutableTraceableVectorOperations<JS::PersistentRooted<TraceableVector<T,N,AP,TP>>,
+                                            T,N,AP,TP>
+{
+    using Vec = TraceableVector<T,N,AP,TP>;
+
+    friend class TraceableVectorOperations<JS::PersistentRooted<Vec>, T,N,AP,TP>;
+    const Vec& extract() const {
+        return *static_cast<const JS::PersistentRooted<Vec>*>(this)->address();
+    }
+
+    friend class MutableTraceableVectorOperations<JS::PersistentRooted<Vec>, T,N,AP,TP>;
+    Vec& extract() { return *static_cast<JS::PersistentRooted<Vec>*>(this)->address(); }
 };
 
 } // namespace js

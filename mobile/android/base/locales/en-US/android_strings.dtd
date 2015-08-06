@@ -68,6 +68,8 @@
 <!ENTITY edit_mode_cancel "Cancel">
 
 <!ENTITY close_tab "Close Tab">
+<!ENTITY tab_audio_playing "This tab is playing audio">
+<!ENTITY tab_audio_muted "This tab has been muted">
 <!ENTITY one_tab "1 tab">
 <!-- Localization note (num_tabs2) : Number of tabs is always more than one.
      We can't use android plural forms, sadly. See bug #753859. -->
@@ -408,6 +410,11 @@ size. -->
 <!ENTITY pref_titlebar_mode_title "Show page title">
 <!ENTITY pref_titlebar_mode_url "Show page address">
 
+<!-- Localization note (pref_prevent_magnifying_glass): Label for setting that controls
+     whether or not the magnifying glass is disabled. -->
+<!ENTITY pref_prevent_magnifying_glass "Disable magnifying glass ">
+<!ENTITY pref_prevent_magnifying_glass_summary "Prevent magnifying glass for use in resolving ambiguous screen touches">
+
 <!-- Localization note (pref_scroll_title_bar2): Label for setting that controls
      whether or not the dynamic toolbar is enabled. -->
 <!ENTITY pref_scroll_title_bar2 "Full-screen browsing">
@@ -552,12 +559,13 @@ The layout of the identity dialog prevents combining this into a single string w
 substitution variables.  If it is difficult to translate the sense of the string
 with that structure, consider a translation which ignores the preceding domain and
 just addresses the organization to follow, e.g. "This site is run by " -->
-<!ENTITY identity_run_by "which is run by">
-<!ENTITY identity_no_info "This website does not supply identity information.">
-<!ENTITY identity_not_encrypted "Your connection to this website is not encrypted.">
-<!ENTITY identity_encrypted "Encrypted">
+<!ENTITY identity_connection_secure "Secure Connection">
+<!ENTITY identity_connection_insecure "Insecure connection">
 
 <!-- Mixed content notifications in site identity popup -->
+<!ENTITY mixed_content_blocked_all "&brandShortName; has blocked insecure elements on this page.">
+<!ENTITY mixed_content_protection_disabled "You have disabled protection from insecure elements.">
+
 <!ENTITY loaded_mixed_content_message "This page is displaying content that isn\'t secure.">
 <!ENTITY blocked_mixed_content_message_top "&brandShortName; has blocked content that isn\'t secure.">
 <!ENTITY blocked_mixed_content_message_bottom "Most websites will still work properly even when this content is blocked.">
@@ -566,8 +574,8 @@ just addresses the organization to follow, e.g. "This site is run by " -->
 <!ENTITY doorhanger_tracking_title "Tracking protection">
 <!ENTITY doorhanger_tracking_state_enabled "Enabled">
 <!ENTITY doorhanger_tracking_state_disabled "Disabled">
-<!ENTITY doorhanger_tracking_message_enabled "Blocking tracking elements that may affect your browsing experience.">
-<!ENTITY doorhanger_tracking_message_disabled "Attempts to track your online behavior are not being blocked.">
+<!ENTITY doorhanger_tracking_message_enabled1 "Attempts to track your online behavior have been blocked.">
+<!ENTITY doorhanger_tracking_message_disabled1 "This site includes content that tracks your browsing.">
 
 <!-- Common mixed and tracking content strings in site identity popup -->
 <!ENTITY learn_more "Learn More">
@@ -692,4 +700,17 @@ just addresses the organization to follow, e.g. "This site is run by " -->
 <!ENTITY restriction_disallow_addons_description "Disallow installation of add-ons.">
 <!ENTITY restriction_disallow_apps_title "Disallow apps">
 <!ENTITY restriction_disallow_apps_description "Disallow installing apps from Firefox Marketplace.">
-
+<!ENTITY restriction_disallow_devtools_title "Disallow developer tools">
+<!ENTITY restriction_disallow_devtools_description "Disallow usage of developer tools.">
+<!ENTITY restriction_disallow_customize_home_title "Disallow customizing home">
+<!ENTITY restriction_disallow_customize_home_description "Disallow customizing home panels.">
+<!ENTITY restriction_disallow_private_browsing_title "Disallow private browsing">
+<!ENTITY restriction_disallow_private_browsing_description "Disallow private browsing mode.">
+<!ENTITY restriction_disallow_location_services_title "Disallow location services">
+<!ENTITY restriction_disallow_location_services_description "Disallow sharing of location data to improve geolocation service.">
+<!ENTITY restriction_disallow_display_settings_title "Disallow display settings">
+<!ENTITY restriction_disallow_display_settings_description "Disallow changing of advanced display settings.">
+<!ENTITY restriction_disallow_clear_history_title "Disallow clearing history">
+<!ENTITY restriction_disallow_clear_history_description "Disallow clearing of browser history.">
+<!ENTITY restriction_disallow_master_password_title "Disallow master password">
+<!ENTITY restriction_disallow_master_password_description "Disallow setting a master password for logins.">

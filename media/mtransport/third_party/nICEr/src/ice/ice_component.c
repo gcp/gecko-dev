@@ -237,6 +237,10 @@ static int nr_ice_component_initialize_udp(struct nr_ice_ctx_ *ctx,nr_ice_compon
 
       /* And a srvrflx candidate for each STUN server */
       for(j=0;j<ctx->stun_server_ct;j++){
+        /* Skip non-UDP */
+        if(ctx->stun_servers[j].transport!=IPPROTO_UDP)
+          continue;
+
         if(r=nr_ice_candidate_create(ctx,component,
           isock,sock,SERVER_REFLEXIVE,0,
           &ctx->stun_servers[j],component->component_id,&cand))
@@ -590,15 +594,15 @@ int nr_ice_component_initialize(struct nr_ice_ctx_ *ctx,nr_ice_component *compon
 
     /* Initialize the UDP candidates */
     if (r=nr_ice_component_initialize_udp(ctx, component, addrs, addr_ct, lufrag, &pwd))
-      ABORT(r);
+      r_log(LOG_ICE,LOG_INFO,"ICE(%s): failed to create UDP candidates with error %d",ctx->label,r);
     /* And the TCP candidates */
     if (r=nr_ice_component_initialize_tcp(ctx, component, addrs, addr_ct, lufrag, &pwd))
-      ABORT(r);
+      r_log(LOG_ICE,LOG_INFO,"ICE(%s): failed to create TCP candidates with error %d",ctx->label,r);
 
     /* count the candidates that will be initialized */
     cand=TAILQ_FIRST(&component->candidates);
     if(!cand){
-      r_log(LOG_ICE,LOG_DEBUG,"ICE(%s): couldn't create any valid candidates",ctx->label);
+      r_log(LOG_ICE,LOG_ERR,"ICE(%s): couldn't create any valid candidates",ctx->label);
       ABORT(R_NOT_FOUND);
     }
 

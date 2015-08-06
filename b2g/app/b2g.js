@@ -627,9 +627,7 @@ pref("app.update.socket.maxErrors", 20);
 pref("app.update.log", true);
 
 // SystemUpdate API
-#ifdef MOZ_WIDGET_GONK
 pref("dom.system_update.active", "@mozilla.org/updates/update-prompt;1");
-#endif
 #else
 // Explicitly disable the shutdown watchdog.  It's enabled by default.
 // When the updater is disabled, we want to know about shutdown hangs.
@@ -1018,7 +1016,6 @@ pref("media.webspeech.synth.enabled", true);
 
 // Enable Web Speech recognition API
 pref("media.webspeech.recognition.enable", true);
-pref("media.webspeech.service.default", "pocketsphinx");
 
 // Downloads API
 pref("dom.mozDownloads.enabled", true);
@@ -1162,5 +1159,15 @@ pref("dom.serviceWorkers.enabled", false);
 // Retain at most 10 processes' layers buffers
 pref("layers.compositor-lru-size", 10);
 
+// Enable Cardboard VR on mobile, assuming VR at all is enabled
+pref("dom.vr.cardboard.enabled", true);
+
 // In B2G by deafult any AudioChannelAgent is muted when created.
 pref("dom.audiochannel.mutedByDefault", true);
+
+// Default device name for Presentation API
+pref("dom.presentation.device.name", "Firefox OS");
+
+// Enable notification of performance timing
+pref("dom.performance.enable_notify_performance_timing", true);
+

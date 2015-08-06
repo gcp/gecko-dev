@@ -368,12 +368,12 @@ IterPerformanceStats(JSContext* cx,
             continue;
         }
         js::AutoCompartment autoCompartment(cx, compartment);
-        PerformanceGroup* ownGroup = compartment->performanceMonitoring.getOwnGroup(cx);
+        mozilla::RefPtr<PerformanceGroup> ownGroup = compartment->performanceMonitoring.getOwnGroup();
         if (ownGroup->data.ticks == 0) {
             // Don't report compartments that have never been used.
             continue;
         }
-        PerformanceGroup* sharedGroup = compartment->performanceMonitoring.getSharedGroup(cx);
+        mozilla::RefPtr<PerformanceGroup> sharedGroup = compartment->performanceMonitoring.getSharedGroup(cx);
         if (!(*walker)(cx,
                        ownGroup->data, ownGroup->uid, &sharedGroup->uid,
                        closure)) {
@@ -383,7 +383,7 @@ IterPerformanceStats(JSContext* cx,
     }
 
     // Finally, report the process stats
-    *processStats = rt->stopwatch.performance;
+    *processStats = rt->stopwatch.performance.getOwnGroup()->data;
     return true;
 }
 
@@ -3813,18 +3813,13 @@ AutoFile::open(JSContext* cx, const char* filename)
     return true;
 }
 
-JSObject * const JS::ReadOnlyCompileOptions::nullObjectPtr = nullptr;
-
 void
-JS::ReadOnlyCompileOptions::copyPODOptions(const ReadOnlyCompileOptions& rhs)
+JS::TransitiveCompileOptions::copyPODTransitiveOptions(const TransitiveCompileOptions& rhs)
 {
+    mutedErrors_ = rhs.mutedErrors_;
     version = rhs.version;
     versionSet = rhs.versionSet;
     utf8 = rhs.utf8;
-    lineno = rhs.lineno;
-    column = rhs.column;
-    forEval = rhs.forEval;
-    noScriptRval = rhs.noScriptRval;
     selfHostingMode = rhs.selfHostingMode;
     canLazilyParse = rhs.canLazilyParse;
     strictOption = rhs.strictOption;
@@ -3838,6 +3833,17 @@ JS::ReadOnlyCompileOptions::copyPODOptions(const ReadOnlyCompileOptions& rhs)
     introductionLineno = rhs.introductionLineno;
     introductionOffset = rhs.introductionOffset;
     hasIntroductionInfo = rhs.hasIntroductionInfo;
+};
+
+void
+JS::ReadOnlyCompileOptions::copyPODOptions(const ReadOnlyCompileOptions& rhs)
+{
+    copyPODTransitiveOptions(rhs);
+    lineno = rhs.lineno;
+    column = rhs.column;
+    isRunOnce = rhs.isRunOnce;
+    forEval = rhs.forEval;
+    noScriptRval = rhs.noScriptRval;
 }
 
 JS::OwningCompileOptions::OwningCompileOptions(JSContext* cx)
@@ -3862,7 +3868,6 @@ JS::OwningCompileOptions::copy(JSContext* cx, const ReadOnlyCompileOptions& rhs)
 {
     copyPODOptions(rhs);
 
-    setMutedErrors(rhs.mutedErrors());
     setElement(rhs.element());
     setElementAttributeName(rhs.elementAttributeName());
     setIntroductionScript(rhs.introductionScript());
@@ -4171,7 +4176,7 @@ JS_BufferIsCompilableUnit(JSContext* cx, HandleObject obj, const char* utf8, siz
                                               options, chars, length,
                                               /* foldConstants = */ true, nullptr, nullptr);
     JSErrorReporter older = JS_SetErrorReporter(cx->runtime(), nullptr);
-    if (!parser.checkOptions() || !parser.parse(obj)) {
+    if (!parser.checkOptions() || !parser.parse()) {
         // We ran into an error. If it was because we ran out of source, we
         // return false so our caller knows to try to collect more buffered
         // source.
@@ -4270,8 +4275,7 @@ CompileFunction(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
     MOZ_ASSERT_IF(!enclosingDynamicScope->is<GlobalObject>(),
                   HasNonSyntacticStaticScopeChain(enclosingStaticScope));
 
-    CompileOptions options(cx, optionsArg);
-    if (!frontend::CompileFunctionBody(cx, fun, options, formals, srcBuf, enclosingStaticScope))
+    if (!frontend::CompileFunctionBody(cx, fun, optionsArg, formals, srcBuf, enclosingStaticScope))
         return false;
 
     return true;

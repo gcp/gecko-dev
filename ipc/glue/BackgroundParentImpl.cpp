@@ -11,6 +11,7 @@
 #include "mozilla/AppProcessChecker.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/NuwaParent.h"
 #include "mozilla/dom/PBlobParent.h"
 #include "mozilla/dom/MessagePortParent.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
@@ -26,7 +27,7 @@
 #include "nsIAppsService.h"
 #include "nsNetUtil.h"
 #include "nsIScriptSecurityManager.h"
-#include "nsRefPtr.h"
+#include "mozilla/nsRefPtr.h"
 #include "nsThreadUtils.h"
 #include "nsTraceRefcnt.h"
 #include "nsXULAppAPI.h"
@@ -44,6 +45,8 @@ using mozilla::dom::cache::PCacheStorageParent;
 using mozilla::dom::cache::PCacheStreamControlParent;
 using mozilla::dom::MessagePortParent;
 using mozilla::dom::PMessagePortParent;
+using mozilla::dom::PNuwaParent;
+using mozilla::dom::NuwaParent;
 using mozilla::dom::UDPSocketParent;
 
 namespace {
@@ -235,6 +238,24 @@ BackgroundParentImpl::DeallocPFileDescriptorSetParent(
   return true;
 }
 
+PNuwaParent*
+BackgroundParentImpl::AllocPNuwaParent()
+{
+  return mozilla::dom::NuwaParent::Alloc();
+}
+
+bool
+BackgroundParentImpl::RecvPNuwaConstructor(PNuwaParent* aActor)
+{
+  return mozilla::dom::NuwaParent::ActorConstructed(aActor);
+}
+
+bool
+BackgroundParentImpl::DeallocPNuwaParent(PNuwaParent *aActor)
+{
+  return mozilla::dom::NuwaParent::Dealloc(aActor);
+}
+
 BackgroundParentImpl::PVsyncParent*
 BackgroundParentImpl::AllocPVsyncParent()
 {
@@ -377,8 +398,7 @@ BackgroundParentImpl::AllocPBroadcastChannelParent(
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
 
-  return new BroadcastChannelParent(aPrincipalInfo, aOrigin, aChannel,
-                                    aPrivateBrowsing);
+  return new BroadcastChannelParent(aOrigin, aChannel, aPrivateBrowsing);
 }
 
 namespace {

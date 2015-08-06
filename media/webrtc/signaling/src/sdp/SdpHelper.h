@@ -5,6 +5,8 @@
 #ifndef _SDPHELPER_H_
 #define _SDPHELPER_H_
 
+#include "nsError.h"
+
 #include "signaling/src/sdp/SdpMediaSection.h"
 #include "signaling/src/sdp/SdpAttribute.h"
 
@@ -64,6 +66,13 @@ class SdpHelper {
                              uint16_t defaultCandidatePort,
                              const std::string& defaultRtcpCandidateAddr,
                              uint16_t defaultRtcpCandidatePort,
+                             Sdp* sdp,
+                             uint16_t level,
+                             BundledMids bundledMids);
+    void SetDefaultAddresses(const std::string& defaultCandidateAddr,
+                             uint16_t defaultCandidatePort,
+                             const std::string& defaultRtcpCandidateAddr,
+                             uint16_t defaultRtcpCandidatePort,
                              SdpMediaSection* msection);
     void SetupMsidSemantic(const std::vector<std::string>& msids,
                            Sdp* sdp) const;
@@ -87,6 +96,13 @@ class SdpHelper {
     void appendSdpParseErrors(
           const std::vector<std::pair<size_t, std::string> >& aErrors,
           std::string* aErrorString);
+
+    static bool GetPtAsInt(const std::string& ptString, uint16_t* ptOutparam);
+
+    void AddCommonExtmaps(
+        const SdpMediaSection& remoteMsection,
+        const std::vector<SdpExtmapAttributeList::Extmap>& localExtensions,
+        SdpMediaSection* localMsection);
 
   private:
     std::string& mLastError;

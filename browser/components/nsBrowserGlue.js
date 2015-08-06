@@ -94,6 +94,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "RemotePrompt",
 XPCOMUtils.defineLazyModuleGetter(this, "ContentPrefServiceParent",
                                   "resource://gre/modules/ContentPrefServiceParent.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "Feeds",
+                                  "resource:///modules/Feeds.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "SelfSupportBackend",
                                   "resource:///modules/SelfSupportBackend.jsm");
 
@@ -165,6 +168,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "AddonWatcher",
 
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
                                   "resource://gre/modules/LightweightThemeManager.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "ExtensionManagement",
+                                  "resource://gre/modules/ExtensionManagement.jsm");
 
 const PREF_PLUGINS_NOTIFYUSER = "plugins.update.notifyUser";
 const PREF_PLUGINS_UPDATEURL  = "plugins.update.url";
@@ -485,8 +491,15 @@ BrowserGlue.prototype = {
         this._handleFlashHang();
         break;
       case "xpi-signature-changed":
-        if (JSON.parse(data).disabled.length)
-          this._notifyUnsignedAddonsDisabled();
+        let disabledAddons = JSON.parse(data).disabled;
+        AddonManager.getAddonsByIDs(disabledAddons, (addons) => {
+          for (let addon of addons) {
+            if (addon.type != "experiment") {
+              this._notifyUnsignedAddonsDisabled();
+              break;
+            }
+          }
+        });
         break;
       case "autocomplete-did-enter-text":
         this._handleURLBarTelemetry(subject.QueryInterface(Ci.nsIAutoCompleteInput));
@@ -597,6 +610,12 @@ BrowserGlue.prototype = {
     os.addObserver(this, "flash-plugin-hang", false);
     os.addObserver(this, "xpi-signature-changed", false);
     os.addObserver(this, "autocomplete-did-enter-text", false);
+
+    ExtensionManagement.registerScript("chrome://browser/content/ext-utils.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-browserAction.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-contextMenus.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-tabs.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-windows.js");
 
     this._flashHangCount = 0;
   },
@@ -762,6 +781,7 @@ BrowserGlue.prototype = {
 
     ContentClick.init();
     RemotePrompt.init();
+    Feeds.init();
     ContentPrefServiceParent.init();
 
     LoginManagerParent.init();
@@ -992,7 +1012,7 @@ BrowserGlue.prototype = {
     // handler and init message manager child shim for privileged api access.
     // With older versions of the extension installed, this load will fail
     // passively.
-    aWindow.messageManager.loadFrameScript("resource://pdf.js/pdfjschildbootstrap.js", true);
+    Services.ppmm.loadProcessScript("resource://pdf.js/pdfjschildbootstrap.js", true);
 
 #ifdef NIGHTLY_BUILD
     // Registering Shumway bootstrap script the child processes.
@@ -1045,16 +1065,6 @@ BrowserGlue.prototype = {
 
     this._checkForOldBuildUpdates();
 
-    let disabledAddons = AddonManager.getStartupChanges(AddonManager.STARTUP_CHANGE_DISABLED);
-    AddonManager.getAddonsByIDs(disabledAddons, (addons) => {
-      for (let addon of addons) {
-        if (addon.signedState <= AddonManager.SIGNEDSTATE_MISSING) {
-          this._notifyUnsignedAddonsDisabled();
-          break;
-        }
-      }
-    });
-
     this._firstWindowTelemetry(aWindow);
   },
 
@@ -1104,7 +1114,6 @@ BrowserGlue.prototype = {
         Cu.import("resource://gre/modules/RokuApp.jsm");
         return new RokuApp(aService);
       },
-      mirror: true,
       types: ["video/mp4"],
       extensions: ["mp4"]
     };
@@ -1154,6 +1163,19 @@ BrowserGlue.prototype = {
         })
       });
     }
+
+    let disabledAddons = AddonManager.getStartupChanges(AddonManager.STARTUP_CHANGE_DISABLED);
+    AddonManager.getAddonsByIDs(disabledAddons, (addons) => {
+      for (let addon of addons) {
+        if (addon.type == "experiment")
+          continue;
+
+        if (addon.signedState <= AddonManager.SIGNEDSTATE_MISSING) {
+          this._notifyUnsignedAddonsDisabled();
+          break;
+        }
+      }
+    });
 
     // Perform default browser checking.
     if (ShellService) {

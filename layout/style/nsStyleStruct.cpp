@@ -1600,7 +1600,7 @@ nsChangeHint nsStylePosition::CalcDifference(const nsStylePosition& aOther) cons
     // elements with percentage heights in descendants which also have
     // percentage heights. This is handled via nsChangeHint_UpdateComputedBSize
     // which clears intrinsic sizes for frames that have such replaced elements.
-    return NS_CombineHint(hint, nsChangeHint_NeedReflow |
+    NS_UpdateHint(hint, nsChangeHint_NeedReflow |
         nsChangeHint_UpdateComputedBSize |
         nsChangeHint_ReflowChangesSizeOrPosition);
   }
@@ -1610,16 +1610,13 @@ nsChangeHint nsStylePosition::CalcDifference(const nsStylePosition& aOther) cons
       mMaxWidth != aOther.mMaxWidth) {
     // None of our width differences can affect descendant intrinsic
     // sizes and none of them need to force children to reflow.
-    return
-      NS_CombineHint(hint,
-                     NS_SubtractHint(nsChangeHint_AllReflowHints,
-                                     NS_CombineHint(nsChangeHint_ClearDescendantIntrinsics,
-                                                    nsChangeHint_NeedDirtyReflow)));
+    NS_UpdateHint(hint, NS_SubtractHint(nsChangeHint_AllReflowHints,
+                                        NS_CombineHint(nsChangeHint_ClearDescendantIntrinsics,
+                                                       nsChangeHint_NeedDirtyReflow)));
   }
 
-  // If width and height have not changed, but any of the offsets have changed,
-  // then return the respective hints so that we would hopefully be able to
-  // avoid reflowing.
+  // If any of the offsets have changed, then return the respective hints
+  // so that we would hopefully be able to avoid reflowing.
   // Note that it is possible that we'll need to reflow when processing
   // restyles, but we don't have enough information to make a good decision
   // right now.
@@ -1630,7 +1627,7 @@ nsChangeHint nsStylePosition::CalcDifference(const nsStylePosition& aOther) cons
       NS_UpdateHint(hint, nsChangeHint(nsChangeHint_RecomputePosition |
                                        nsChangeHint_UpdateParentOverflow));
     } else {
-      return NS_CombineHint(hint, nsChangeHint_AllReflowHints);
+      NS_UpdateHint(hint, nsChangeHint_AllReflowHints);
     }
   }
   return hint;
@@ -2803,7 +2800,7 @@ nsChangeHint nsStyleDisplay::CalcDifference(const nsStyleDisplay& aOther) const
     // We do not need to apply nsChangeHint_UpdateTransformLayer since
     // nsChangeHint_RepaintFrame will forcibly invalidate the frame area and
     // ensure layers are rebuilt (or removed).
-    NS_UpdateHint(hint, NS_CombineHint(nsChangeHint_AddOrRemoveTransform,
+    NS_UpdateHint(hint, NS_CombineHint(nsChangeHint_UpdateContainingBlock,
                           NS_CombineHint(nsChangeHint_UpdateOverflow,
                                          nsChangeHint_RepaintFrame)));
   } else {
@@ -2846,6 +2843,11 @@ nsChangeHint nsStyleDisplay::CalcDifference(const nsStyleDisplay& aOther) const
         NS_UpdateHint(transformHint, kUpdateOverflowAndRepaintHint);
         break;
       }
+
+    if (HasPerspectiveStyle() != aOther.HasPerspectiveStyle()) {
+      // A change from/to being a containing block for position:fixed.
+      NS_UpdateHint(hint, nsChangeHint_UpdateContainingBlock);
+    }
 
     if (mChildPerspective != aOther.mChildPerspective ||
         mTransformStyle != aOther.mTransformStyle ||

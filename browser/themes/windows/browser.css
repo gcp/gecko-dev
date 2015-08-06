@@ -48,6 +48,8 @@
   --urlbar-dropmarker-2x-region: rect(0, 22px, 28px, 0);
   --urlbar-dropmarker-hover-2x-region: rect(0, 44px, 28px, 22px);
   --urlbar-dropmarker-active-2x-region: rect(0, 66px, 28px, 44px);
+
+  --panel-separator-color: ThreeDLightShadow;
 }
 
 #menubar-items {
@@ -772,9 +774,9 @@ toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-ba
 }
 
 #nav-bar .toolbarbutton-1[type=panel] > .toolbarbutton-icon,
-#nav-bar .toolbarbutton-1[type=panel] > .toolbarbutton-badge-container,
-#nav-bar .toolbarbutton-1[type=menu]:not(#back-button):not(#forward-button):not(#feed-button):not(#PanelUI-menu-button) > .toolbarbutton-icon,
-#nav-bar .toolbarbutton-1[type=menu]:not(#back-button):not(#forward-button):not(#feed-button):not(#PanelUI-menu-button) > .toolbarbutton-badge-container,
+#nav-bar .toolbarbutton-1[type=panel] > .toolbarbutton-badge-stack,
+#nav-bar .toolbarbutton-1[type=menu]:not(#PanelUI-menu-button):not(#back-button):not(#forward-button) > .toolbarbutton-icon,
+#nav-bar .toolbarbutton-1[type=menu]:not(#PanelUI-menu-button) > .toolbarbutton-badge-stack,
 #nav-bar .toolbarbutton-1[type=menu] > .toolbarbutton-text /* hack for add-ons that forcefully display the label */ {
   -moz-padding-end: 17px;
 }
@@ -1764,8 +1766,6 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
   -moz-image-region: rect(0, 48px, 16px, 32px);
 }
 
-%include ../shared/readinglist/readinglist.inc.css
-
 /* Reader mode button */
 
 #reader-mode-button {
@@ -2439,12 +2439,6 @@ notification[value="loop-sharing-notification"] .messageImage {
   -moz-image-region: auto;
 }
 
-#menu_readingList,
-#BMB_readingList {
-  list-style-image: url("chrome://browser/skin/readinglist/readinglist-icon.svg");
-  -moz-image-region: auto;
-}
-
 #panelMenu_pocket,
 #menu_pocket,
 #BMB_pocket {
@@ -2911,4 +2905,8 @@ chatbox {
 
 @media not all and (-moz-os-version: windows-xp) {
 %include browser-aero.css
+}
+
+.browser-action-panel > .panel-arrowcontainer > .panel-arrowcontent {
+  padding: 0;
 }

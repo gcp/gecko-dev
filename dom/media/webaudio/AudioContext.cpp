@@ -12,7 +12,7 @@
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/AudioContextBinding.h"
 #include "mozilla/dom/OfflineAudioContextBinding.h"
-#include "mozilla/dom/OwningNonNull.h"
+#include "mozilla/OwningNonNull.h"
 #include "MediaStreamGraph.h"
 #include "AudioChannelService.h"
 #include "AudioDestinationNode.h"
@@ -101,12 +101,17 @@ AudioContext::AudioContext(nsPIDOMWindow* aWindow,
   , mIsShutDown(false)
   , mCloseCalled(false)
 {
-  aWindow->AddAudioContext(this);
+  bool mute = aWindow->AddAudioContext(this);
 
   // Note: AudioDestinationNode needs an AudioContext that must already be
   // bound to the window.
   mDestination = new AudioDestinationNode(this, aIsOffline, aChannel,
                                           aNumberOfChannels, aLength, aSampleRate);
+
+  // The context can't be muted until it has a destination.
+  if (mute) {
+    Mute();
+  }
 }
 
 void
@@ -1031,12 +1036,12 @@ AudioContext::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   if (mListener) {
     amount += mListener->SizeOfIncludingThis(aMallocSizeOf);
   }
-  amount += mDecodeJobs.SizeOfExcludingThis(aMallocSizeOf);
+  amount += mDecodeJobs.ShallowSizeOfExcludingThis(aMallocSizeOf);
   for (uint32_t i = 0; i < mDecodeJobs.Length(); ++i) {
     amount += mDecodeJobs[i]->SizeOfIncludingThis(aMallocSizeOf);
   }
-  amount += mActiveNodes.SizeOfExcludingThis(nullptr, aMallocSizeOf);
-  amount += mPannerNodes.SizeOfExcludingThis(nullptr, aMallocSizeOf);
+  amount += mActiveNodes.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  amount += mPannerNodes.ShallowSizeOfExcludingThis(aMallocSizeOf);
   return amount;
 }
 

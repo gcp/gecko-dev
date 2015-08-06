@@ -23,6 +23,7 @@
 #include "js/Conversions.h"
 #include "js/GCAPI.h"
 #include "js/HeapAPI.h"
+#include "js/TraceableVector.h"
 #include "vm/Shape.h"
 #include "vm/String.h"
 #include "vm/Xdr.h"
@@ -33,7 +34,7 @@ struct ClassInfo;
 
 namespace js {
 
-typedef AutoVectorRooter<PropertyDescriptor> AutoPropertyDescriptorVector;
+using PropertyDescriptorVector = TraceableVector<PropertyDescriptor>;
 class GCMarker;
 class Nursery;
 
@@ -348,7 +349,8 @@ class JSObject : public js::gc::Cell
      * is a proxy. In the lazy case, we store (JSObject*)0x1 in the proto field
      * of the object's group. We offer three ways of getting the prototype:
      *
-     * 1. obj->getProto() returns the prototype, but asserts if obj is a proxy.
+     * 1. obj->getProto() returns the prototype, but asserts if obj is a proxy
+     *    with a relevant getPrototype() handler.
      * 2. obj->getTaggedProto() returns a TaggedProto, which can be tested to
      *    check if the proto is an object, nullptr, or lazily computed.
      * 3. js::GetPrototype(cx, obj, &proto) computes the proto of an object.
@@ -365,7 +367,7 @@ class JSObject : public js::gc::Cell
     bool uninlinedIsProxy() const;
 
     JSObject* getProto() const {
-        MOZ_ASSERT(!uninlinedIsProxy());
+        MOZ_ASSERT(!hasLazyPrototype());
         return getTaggedProto().toObjectOrNull();
     }
 
@@ -1163,7 +1165,7 @@ CompletePropertyDescriptor(MutableHandle<PropertyDescriptor> desc);
  */
 extern bool
 ReadPropertyDescriptors(JSContext* cx, HandleObject props, bool checkAccessors,
-                        AutoIdVector* ids, AutoPropertyDescriptorVector* descs);
+                        AutoIdVector* ids, MutableHandle<PropertyDescriptorVector> descs);
 
 /* Read the name using a dynamic lookup on the scopeChain. */
 extern bool

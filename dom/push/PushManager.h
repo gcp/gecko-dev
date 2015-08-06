@@ -38,7 +38,7 @@
 #include "mozilla/dom/BindingDeclarations.h"
 
 #include "nsCOMPtr.h"
-#include "nsRefPtr.h"
+#include "mozilla/nsRefPtr.h"
 #include "jsapi.h"
 
 class nsIGlobalObject;
@@ -105,9 +105,6 @@ class PushManager final : public nsISupports
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(PushManager)
-
-  static bool
-  Enabled(JSContext* aCx, JSObject* aObj);
 
   explicit PushManager(nsIGlobalObject* aGlobal, const nsAString& aScope);
 

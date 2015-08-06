@@ -10,8 +10,9 @@
 
 #include "nsDebug.h"
 #include "nsError.h"
-#include "nspr/prprf.h"
+#include "prprf.h"
 
+#include <string.h>
 #include <set>
 
 namespace mozilla {
@@ -137,6 +138,11 @@ SdpHelper::DisableMsection(Sdp* sdp, SdpMediaSection* msection) const
     new SdpDirectionAttribute(SdpDirectionAttribute::kInactive);
   msection->GetAttributeList().SetAttribute(direction);
   msection->SetPort(0);
+
+  msection->ClearCodecs();
+
+  // We need to have something here to fit the grammar, this seems safe.
+  msection->AddCodec("0", "PCMU", 8000, 1);
 }
 
 void
@@ -263,6 +269,61 @@ SdpHelper::AddCandidateToSdp(Sdp* sdp,
   attrList.SetAttribute(candidates.release());
 
   return NS_OK;
+}
+
+void
+SdpHelper::SetDefaultAddresses(const std::string& defaultCandidateAddr,
+                               uint16_t defaultCandidatePort,
+                               const std::string& defaultRtcpCandidateAddr,
+                               uint16_t defaultRtcpCandidatePort,
+                               Sdp* sdp,
+                               uint16_t level,
+                               BundledMids bundledMids)
+{
+  SdpMediaSection& msection = sdp->GetMediaSection(level);
+
+  if (msection.GetAttributeList().HasAttribute(SdpAttribute::kMidAttribute)) {
+    std::string mid(msection.GetAttributeList().GetMid());
+    if (bundledMids.count(mid)) {
+      const SdpMediaSection* masterBundleMsection(bundledMids[mid]);
+      if (msection.GetLevel() != masterBundleMsection->GetLevel()) {
+        // Slave bundle m-section. Skip.
+        return;
+      }
+
+      // Master bundle m-section. Set defaultCandidateAddr and
+      // defaultCandidatePort on all bundled m-sections.
+      for (auto i = bundledMids.begin(); i != bundledMids.end(); ++i) {
+        if (i->second != masterBundleMsection) {
+          continue;
+        }
+        SdpMediaSection* bundledMsection = FindMsectionByMid(*sdp, i->first);
+        if (!bundledMsection) {
+          MOZ_ASSERT(false);
+          continue;
+        }
+        SetDefaultAddresses(defaultCandidateAddr,
+                            defaultCandidatePort,
+                            defaultRtcpCandidateAddr,
+                            defaultRtcpCandidatePort,
+                            bundledMsection);
+      }
+    }
+  }
+
+  SetDefaultAddresses(defaultCandidateAddr,
+                      defaultCandidatePort,
+                      defaultRtcpCandidateAddr,
+                      defaultRtcpCandidatePort,
+                      &msection);
+
+  // TODO(bug 1095793): Will this have an mid someday?
+
+  SdpAttributeList& attrs = msection.GetAttributeList();
+  attrs.SetAttribute(
+      new SdpFlagAttribute(SdpAttribute::kEndOfCandidatesAttribute));
+  // Remove trickle-ice option
+  attrs.RemoveAttribute(SdpAttribute::kIceOptionsAttribute);
 }
 
 void
@@ -588,6 +649,52 @@ SdpHelper::appendSdpParseErrors(
        << std::endl;
   }
   *aErrorString += os.str();
+}
+
+/* static */ bool
+SdpHelper::GetPtAsInt(const std::string& ptString, uint16_t* ptOutparam)
+{
+  char* end;
+  unsigned long pt = strtoul(ptString.c_str(), &end, 10);
+  size_t length = static_cast<size_t>(end - ptString.c_str());
+  if ((pt > UINT16_MAX) || (length != ptString.size())) {
+    return false;
+  }
+  *ptOutparam = pt;
+  return true;
+}
+
+void
+SdpHelper::AddCommonExtmaps(
+    const SdpMediaSection& remoteMsection,
+    const std::vector<SdpExtmapAttributeList::Extmap>& localExtensions,
+    SdpMediaSection* localMsection)
+{
+  if (!remoteMsection.GetAttributeList().HasAttribute(
+        SdpAttribute::kExtmapAttribute)) {
+    return;
+  }
+
+  UniquePtr<SdpExtmapAttributeList> localExtmap(new SdpExtmapAttributeList);
+  auto& theirExtmap = remoteMsection.GetAttributeList().GetExtmap().mExtmaps;
+  for (auto i = theirExtmap.begin(); i != theirExtmap.end(); ++i) {
+    for (auto j = localExtensions.begin(); j != localExtensions.end(); ++j) {
+      if (i->extensionname == j->extensionname) {
+        localExtmap->mExtmaps.push_back(*i);
+
+        // RFC 5285 says that ids >= 4096 can be used by the offerer to
+        // force the answerer to pick, otherwise the value in the offer is
+        // used.
+        if (localExtmap->mExtmaps.back().entry >= 4096) {
+          localExtmap->mExtmaps.back().entry = j->entry;
+        }
+      }
+    }
+  }
+
+  if (!localExtmap->mExtmaps.empty()) {
+    localMsection->GetAttributeList().SetAttribute(localExtmap.release());
+  }
 }
 
 } // namespace mozilla

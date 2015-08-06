@@ -387,10 +387,6 @@ protected:
         gfxFont* mFont;
     };
 
-    static size_t AddSizeOfFontEntryExcludingThis(HashEntry* aHashEntry,
-                                                  mozilla::MallocSizeOf aMallocSizeOf,
-                                                  void* aUserArg);
-
     nsTHashtable<HashEntry> mFonts;
 
     static void WordCacheExpirationTimerCallback(nsITimer* aTimer, void* aCache);
@@ -1064,8 +1060,8 @@ protected:
 
         size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) {
             return aMallocSizeOf(this) +
-                mDetails.SizeOfExcludingThis(aMallocSizeOf) +
-                mOffsetToIndex.SizeOfExcludingThis(aMallocSizeOf);
+                mDetails.ShallowSizeOfExcludingThis(aMallocSizeOf) +
+                mOffsetToIndex.ShallowSizeOfExcludingThis(aMallocSizeOf);
         }
 
     private:

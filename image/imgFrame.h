@@ -264,8 +264,8 @@ public:
   already_AddRefed<SourceSurface> GetSurface();
   already_AddRefed<DrawTarget> GetDrawTarget();
 
-  size_t SizeOfExcludingThis(gfxMemoryLocation aLocation,
-                             MallocSizeOf aMallocSizeOf) const;
+  void AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf, size_t& aHeapSizeOut,
+                              size_t& aNonHeapSizeOut) const;
 
 private: // methods
 
@@ -342,6 +342,7 @@ private: // data
 
   bool mHasNoAlpha;
   bool mAborted;
+  bool mOptimizable;
 
 
   //////////////////////////////////////////////////////////////////////////////
@@ -371,7 +372,6 @@ private: // data
 
   bool mSinglePixel;
   bool mCompositingFailed;
-  bool mOptimizable;
 };
 
 /**

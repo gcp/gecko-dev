@@ -1815,26 +1815,6 @@ nsComponentManagerImpl::ContractIDToCID(const char* aContractID,
   return NS_ERROR_FACTORY_NOT_REGISTERED;
 }
 
-static size_t
-SizeOfFactoriesEntryExcludingThis(nsIDHashKey::KeyType aKey,
-                                  nsFactoryEntry* const& aData,
-                                  MallocSizeOf aMallocSizeOf,
-                                  void* aUserArg)
-{
-  return aData->SizeOfIncludingThis(aMallocSizeOf);
-}
-
-static size_t
-SizeOfContractIDsEntryExcludingThis(nsCStringHashKey::KeyType aKey,
-                                    nsFactoryEntry* const& aData,
-                                    MallocSizeOf aMallocSizeOf,
-                                    void* aUserArg)
-{
-  // We don't measure the nsFactoryEntry data because its owned by mFactories
-  // (which measures them in SizeOfFactoriesEntryExcludingThis).
-  return aKey.SizeOfExcludingThisMustBeUnshared(aMallocSizeOf);
-}
-
 MOZ_DEFINE_MALLOC_SIZE_OF(ComponentManagerMallocSizeOf)
 
 NS_IMETHODIMP
@@ -1849,23 +1829,33 @@ nsComponentManagerImpl::CollectReports(nsIHandleReportCallback* aHandleReport,
 
 size_t
 nsComponentManagerImpl::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
+  const
 {
   size_t n = aMallocSizeOf(this);
-  n += mLoaderMap.SizeOfExcludingThis(nullptr, aMallocSizeOf);
-  n += mFactories.SizeOfExcludingThis(SizeOfFactoriesEntryExcludingThis,
-                                      aMallocSizeOf);
-  n += mContractIDs.SizeOfExcludingThis(SizeOfContractIDsEntryExcludingThis,
-                                        aMallocSizeOf);
 
-  n += sStaticModules->SizeOfIncludingThis(aMallocSizeOf);
-  n += sModuleLocations->SizeOfIncludingThis(aMallocSizeOf);
+  n += mLoaderMap.ShallowSizeOfExcludingThis(aMallocSizeOf);
 
-  n += mKnownStaticModules.SizeOfExcludingThis(aMallocSizeOf);
-  n += mKnownModules.SizeOfExcludingThis(nullptr, aMallocSizeOf);
+  n += mFactories.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  for (auto iter = mFactories.ConstIter(); !iter.Done(); iter.Next()) {
+    n += iter.Data()->SizeOfIncludingThis(aMallocSizeOf);
+  }
+
+  n += mContractIDs.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  for (auto iter = mContractIDs.ConstIter(); !iter.Done(); iter.Next()) {
+    // We don't measure the nsFactoryEntry data because it's owned by
+    // mFactories (which is measured above).
+    n += iter.Key().SizeOfExcludingThisMustBeUnshared(aMallocSizeOf);
+  }
+
+  n += sStaticModules->ShallowSizeOfIncludingThis(aMallocSizeOf);
+  n += sModuleLocations->ShallowSizeOfIncludingThis(aMallocSizeOf);
+
+  n += mKnownStaticModules.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  n += mKnownModules.ShallowSizeOfExcludingThis(aMallocSizeOf);
 
   n += PL_SizeOfArenaPoolExcludingPool(&mArena, aMallocSizeOf);
 
-  n += mPendingServices.SizeOfExcludingThis(aMallocSizeOf);
+  n += mPendingServices.ShallowSizeOfExcludingThis(aMallocSizeOf);
 
   // Measurement of the following members may be added later if DMD finds it is
   // worthwhile:

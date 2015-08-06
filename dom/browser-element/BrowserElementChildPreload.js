@@ -55,8 +55,9 @@ let CERTIFICATE_ERROR_PAGE_PREF = 'security.alternate_certificate_error_page';
 
 const OBSERVED_EVENTS = [
   'xpcom-shutdown',
-  'media-playback',
-  'activity-done'
+  'audio-playback',
+  'activity-done',
+  'invalid-widget'
 ];
 
 const COMMAND_MAP = {
@@ -221,6 +222,11 @@ BrowserElementChild.prototype = {
       "send-touch-event": this._recvSendTouchEvent,
       "get-can-go-back": this._recvCanGoBack,
       "get-can-go-forward": this._recvCanGoForward,
+      "mute": this._recvMute.bind(this),
+      "unmute": this._recvUnmute.bind(this),
+      "get-muted": this._recvGetMuted.bind(this),
+      "set-volume": this._recvSetVolume.bind(this),
+      "get-volume": this._recvGetVolume.bind(this),
       "go-back": this._recvGoBack,
       "go-forward": this._recvGoForward,
       "reload": this._recvReload,
@@ -282,7 +288,7 @@ BrowserElementChild.prototype = {
     // Ignore notifications not about our document.  (Note that |content| /can/
     // be null; see bug 874900.)
 
-    if (topic !== 'activity-done' && topic !== 'media-playback' &&
+    if (topic !== 'activity-done' && topic !== 'audio-playback' &&
         (!content || subject !== content.document)) {
       return;
     }
@@ -292,13 +298,16 @@ BrowserElementChild.prototype = {
       case 'activity-done':
         sendAsyncMsg('activitydone', { success: (data == 'activity-success') });
         break;
-      case 'media-playback':
+      case 'audio-playback':
         if (subject === content) {
-          sendAsyncMsg('mediaplaybackchange', { _payload_: data });
+          sendAsyncMsg('audioplaybackchange', { _payload_: data });
         }
         break;
       case 'xpcom-shutdown':
         this._shuttingDown = true;
+        break;
+      case 'invalid-widget':
+        sendAsyncMsg('error', { type: 'invalid-widget' });
         break;
     }
   },
@@ -1293,6 +1302,32 @@ BrowserElementChild.prototype = {
     sendAsyncMsg('got-can-go-forward', {
       id: data.json.id,
       successRv: webNav.canGoForward
+    });
+  },
+
+  _recvMute: function(data) {
+    this._windowUtils.audioMuted = true;
+  },
+
+  _recvUnmute: function(data) {
+    this._windowUtils.audioMuted = false;
+  },
+
+  _recvGetMuted: function(data) {
+    sendAsyncMsg('got-muted', {
+      id: data.json.id,
+      successRv: this._windowUtils.audioMuted
+    });
+  },
+
+  _recvSetVolume: function(data) {
+    this._windowUtils.audioVolume = data.json.volume;
+  },
+
+  _recvGetVolume: function(data) {
+    sendAsyncMsg('got-volume', {
+      id: data.json.id,
+      successRv: this._windowUtils.audioVolume
     });
   },
 

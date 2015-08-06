@@ -414,14 +414,14 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
             self.fatal("Talos requires a path to the binary.  You can specify binary_path or add download-and-extract to your action list.")
 
         # talos options
-        options = ['-v', ]  # hardcoded options (for now)
+        options = []
         if self.config.get('python_webserver', True):
             options.append('--develop')
         # talos can't gather data if the process name ends with '.exe'
         if binary_path.endswith('.exe'):
             binary_path = binary_path[:-4]
-        kw_options = {'output': 'talos.yml',  # options overwritten from **kw
-                      'executablePath': binary_path}
+        # options overwritten from **kw
+        kw_options = {'executablePath': binary_path}
         kw_options['activeTests'] = self.query_tests()
         if self.config.get('title'):
             kw_options['title'] = self.config['title']
@@ -522,27 +522,13 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         talos from its source, we have to wrap that method here."""
         # XXX This method could likely be replaced with a PreScriptAction hook.
         if self.has_cloned_talos:
-            requirements = self.read_from_file(
-                os.path.join(self.talos_path, 'requirements.txt'),
-                verbose=False
+            # talos in harness requires mozinstall and what is
+            # listed in talos requirements.txt file.
+            return super(Talos, self).create_virtualenv(
+                modules=['mozinstall'],
+                requirements=[os.path.join(self.talos_path,
+                                           'requirements.txt')]
             )
-            # talos in harness requires mozinstall
-            virtualenv_modules = ['mozinstall']
-            for requirement in requirements.splitlines():
-                requirement = requirement.strip()
-                if requirement:
-                    virtualenv_modules.append(requirement)
-
-            # Bug 900015 - Silent warnings on osx when libyaml is not found
-            pyyaml_module = {
-                'name': 'PyYAML',
-                'url': None,
-                'global_options': ['--without-libyaml']
-            }
-            virtualenv_modules.insert(0, pyyaml_module)
-
-            self.info(pprint.pformat(virtualenv_modules))
-            return super(Talos, self).create_virtualenv(modules=virtualenv_modules)
         else:
             return super(Talos, self).create_virtualenv(**kwargs)
 
@@ -574,9 +560,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         # XXX temporary python version check
         python = self.query_python_path()
         self.run_command([python, "--version"])
-        # run talos tests
-        talos = os.path.join(self.talos_path, 'talos', 'PerfConfigurator.py')
-        command = [python, talos] + options
         parser = TalosOutputParser(config=self.config, log_obj=self.log_obj,
                                    error_list=TalosErrorList)
         env = {}
@@ -585,17 +568,17 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         if not os.path.isdir(env['MOZ_UPLOAD_DIR']):
             self.mkdir_p(env['MOZ_UPLOAD_DIR'])
         env = self.query_env(partial_env=env, log_level=INFO)
+        # adjust PYTHONPATH to be able to use talos as a python package
+        if 'PYTHONPATH' in env:
+            env['PYTHONPATH'] = self.talos_path + os.pathsep + env['PYTHONPATH']
+        else:
+            env['PYTHONPATH'] = self.talos_path
+
         # sets a timeout for how long talos should run without output
         output_timeout = self.config.get('talos_output_timeout', 3600)
-        # Call PerfConfigurator to generate talos.yml
-        self.return_code = self.run_command(command, cwd=self.workdir,
-                                            output_timeout=output_timeout,
-                                            output_parser=parser,
-                                            env=env)
-        # Call run_tests on generated talos.yml
+        # run talos tests
         run_tests = os.path.join(self.talos_path, 'talos', 'run_tests.py')
-        options = "talos.yml"
-        command = [python, run_tests, '--noisy', '--debug'] + [options]
+        command = [python, run_tests, '--debug'] + options
         self.return_code = self.run_command(command, cwd=self.workdir,
                                             output_timeout=output_timeout,
                                             output_parser=parser,

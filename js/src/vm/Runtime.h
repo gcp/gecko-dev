@@ -36,6 +36,7 @@
 #ifdef DEBUG
 # include "js/Proxy.h" // For AutoEnterPolicy
 #endif
+#include "js/TraceableVector.h"
 #include "js/Vector.h"
 #include "vm/CommonPropertyNames.h"
 #include "vm/DateTime.h"
@@ -139,7 +140,7 @@ struct ScopeCoordinateNameCache {
     void purge();
 };
 
-typedef Vector<ScriptAndCounts, 0, SystemAllocPolicy> ScriptAndCountsVector;
+using ScriptAndCountsVector = TraceableVector<ScriptAndCounts, 0, SystemAllocPolicy>;
 
 struct EvalCacheEntry
 {
@@ -690,12 +691,12 @@ struct JSRuntime : public JS::shadow::Runtime,
      * New activations will reset this to nullptr on construction after getting
      * the current value, and will restore the previous value on destruction.
      */
-    js::SavedFrame* asyncStackForNewActivations;
+    JS::PersistentRooted<js::SavedFrame*> asyncStackForNewActivations;
 
     /*
      * Value of asyncCause to be attached to asyncStackForNewActivations.
      */
-    JSString* asyncCauseForNewActivations;
+    JS::PersistentRooted<JSString*> asyncCauseForNewActivations;
 
     /*
      * True if the async call was explicitly requested, e.g. via
@@ -1051,7 +1052,7 @@ struct JSRuntime : public JS::shadow::Runtime,
 #endif
 
     /* Strong references on scripts held for PCCount profiling API. */
-    js::ScriptAndCountsVector* scriptAndCountsVector;
+    JS::PersistentRooted<js::ScriptAndCountsVector>* scriptAndCountsVector;
 
     /* Well-known numbers held for use by this runtime's contexts. */
     const js::Value     NaNValue;
@@ -1513,6 +1514,11 @@ struct JSRuntime : public JS::shadow::Runtime,
         }
 
         /**
+         * Performance data on the entire runtime.
+         */
+        js::PerformanceGroupHolder performance;
+
+        /**
          * The number of times we have entered the event loop.
          * Used to reset counters whenever we enter the loop,
          * which may be caused either by having completed the
@@ -1522,17 +1528,6 @@ struct JSRuntime : public JS::shadow::Runtime,
          * Always incremented by 1, may safely overflow.
          */
         uint64_t iteration;
-
-        /**
-         * `true` if no stopwatch has been registered for the
-         * current run of the event loop, `false` until then.
-         */
-        bool isEmpty;
-
-        /**
-         * Performance data on the entire runtime.
-         */
-        js::PerformanceData performance;
 
         /**
          * Callback used to ask the embedding to determine in which
@@ -1546,9 +1541,9 @@ struct JSRuntime : public JS::shadow::Runtime,
          */
         JSCurrentPerfGroupCallback currentPerfGroupCallback;
 
-        Stopwatch()
-          : iteration(0)
-          , isEmpty(true)
+        explicit Stopwatch(JSRuntime* runtime)
+          : performance(runtime)
+          , iteration(0)
           , currentPerfGroupCallback(nullptr)
           , isMonitoringJank_(false)
           , isMonitoringCPOW_(false)
@@ -1565,7 +1560,6 @@ struct JSRuntime : public JS::shadow::Runtime,
          */
         void reset() {
             ++iteration;
-            isEmpty = true;
         }
         /**
          * Activate/deactivate stopwatch measurement of jank.
@@ -1652,6 +1646,9 @@ struct JSRuntime : public JS::shadow::Runtime,
         MonotonicTimeStamp userTimeFix;
 
     private:
+        Stopwatch(const Stopwatch&) = delete;
+        Stopwatch& operator=(const Stopwatch&) = delete;
+
         Groups groups_;
         friend struct js::PerformanceGroupHolder;
 

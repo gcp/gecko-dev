@@ -13,6 +13,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Range.h"
 #include "mozilla/RangedPtr.h"
+#include "mozilla/RefPtr.h"
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -525,7 +526,7 @@ class HandleValueArray
       : length_(values.length()), elements_(values.begin()) {}
 
     template <size_t N>
-    HandleValueArray(const AutoValueArray<N>& values) : length_(N), elements_(values.begin()) {}
+    MOZ_IMPLICIT HandleValueArray(const AutoValueArray<N>& values) : length_(N), elements_(values.begin()) {}
 
     /* CallArgs must already be rooted somewhere up the stack. */
     MOZ_IMPLICIT HandleValueArray(const JS::CallArgs& args) : length_(args.length()), elements_(args.array()) {}
@@ -2507,7 +2508,7 @@ JS_New(JSContext* cx, JS::HandleObject ctor, const JS::HandleValueArray& args);
 
 /*** Property descriptors ************************************************************************/
 
-struct JSPropertyDescriptor : public JS::StaticTraceable {
+struct JSPropertyDescriptor : public JS::Traceable {
     JSObject* obj;
     unsigned attrs;
     JSGetterOp getter;
@@ -3383,10 +3384,20 @@ namespace JS {
  * it doesn't care who owns them, or what's keeping them alive. It does its own
  * addrefs/copies/tracing/etc.
  *
- * So, we have a class hierarchy that reflects these three use cases:
+ * Furthermore, in some cases compile options are propagated from one entity to
+ * another (e.g. from a scriipt to a function defined in that script).  This
+ * involves copying over some, but not all, of the options.
  *
- * - ReadOnlyCompileOptions is the common base class. It can be used by code
- *   that simply needs to access options set elsewhere, like the compiler.
+ * So, we have a class hierarchy that reflects these four use cases:
+ *
+ * - TransitiveCompileOptions is the common base class, representing options
+ *   that should get propagated from a script to functions defined in that
+ *   script.  This is never instantiated directly.
+ *
+ * - ReadOnlyCompileOptions is the only subclass of TransitiveCompileOptions,
+ *   representing a full set of compile options.  It can be used by code that
+ *   simply needs to access options set elsewhere, like the compiler.  This,
+ *   again, is never instantiated directly.
  *
  * - The usual CompileOptions class must be stack-allocated, and holds
  *   non-owning references to the filename, element, and so on. It's derived
@@ -3400,15 +3411,11 @@ namespace JS {
 /*
  * The common base class for the CompileOptions hierarchy.
  *
- * Use this in code that only needs to access compilation options created
- * elsewhere, like the compiler. Don't instantiate this class (the constructor
- * is protected anyway); instead, create instances only of the derived classes:
- * CompileOptions and OwningCompileOptions.
+ * Use this in code that needs to propagate compile options from one compilation
+ * unit to another.
  */
-class JS_FRIEND_API(ReadOnlyCompileOptions)
+class JS_FRIEND_API(TransitiveCompileOptions)
 {
-    friend class CompileOptions;
-
   protected:
     // The Web Platform allows scripts to be loaded from arbitrary cross-origin
     // sources. This allows an attack by which a malicious website loads a
@@ -3430,7 +3437,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
     // is unusable until that's set to something more specific; the derived
     // classes' constructors take care of that, in ways appropriate to their
     // purpose.
-    ReadOnlyCompileOptions()
+    TransitiveCompileOptions()
       : mutedErrors_(false),
         filename_(nullptr),
         introducerFilename_(nullptr),
@@ -3438,11 +3445,6 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
         version(JSVERSION_UNKNOWN),
         versionSet(false),
         utf8(false),
-        lineno(1),
-        column(0),
-        isRunOnce(false),
-        forEval(false),
-        noScriptRval(false),
         selfHostingMode(false),
         canLazilyParse(true),
         strictOption(false),
@@ -3460,7 +3462,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
 
     // Set all POD options (those not requiring reference counts, copies,
     // rooting, or other hand-holding) to their values in |rhs|.
-    void copyPODOptions(const ReadOnlyCompileOptions& rhs);
+    void copyPODTransitiveOptions(const TransitiveCompileOptions& rhs);
 
   public:
     // Read-only accessors for non-POD options. The proper way to set these
@@ -3477,12 +3479,6 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
     JSVersion version;
     bool versionSet;
     bool utf8;
-    unsigned lineno;
-    unsigned column;
-    // isRunOnce only applies to non-function scripts.
-    bool isRunOnce;
-    bool forEval;
-    bool noScriptRval;
     bool selfHostingMode;
     bool canLazilyParse;
     bool strictOption;
@@ -3501,7 +3497,55 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
     bool hasIntroductionInfo;
 
   private:
-    static JSObject * const nullObjectPtr;
+    void operator=(const TransitiveCompileOptions&) = delete;
+};
+
+/*
+ * The class representing a full set of compile options.
+ *
+ * Use this in code that only needs to access compilation options created
+ * elsewhere, like the compiler. Don't instantiate this class (the constructor
+ * is protected anyway); instead, create instances only of the derived classes:
+ * CompileOptions and OwningCompileOptions.
+ */
+class JS_FRIEND_API(ReadOnlyCompileOptions) : public TransitiveCompileOptions
+{
+    friend class CompileOptions;
+
+  protected:
+    ReadOnlyCompileOptions()
+      : TransitiveCompileOptions(),
+        lineno(1),
+        column(0),
+        isRunOnce(false),
+        forEval(false),
+        noScriptRval(false)
+    { }
+
+    // Set all POD options (those not requiring reference counts, copies,
+    // rooting, or other hand-holding) to their values in |rhs|.
+    void copyPODOptions(const ReadOnlyCompileOptions& rhs);
+
+  public:
+    // Read-only accessors for non-POD options. The proper way to set these
+    // depends on the derived type.
+    bool mutedErrors() const { return mutedErrors_; }
+    const char* filename() const { return filename_; }
+    const char* introducerFilename() const { return introducerFilename_; }
+    const char16_t* sourceMapURL() const { return sourceMapURL_; }
+    virtual JSObject* element() const = 0;
+    virtual JSString* elementAttributeName() const = 0;
+    virtual JSScript* introductionScript() const = 0;
+
+    // POD options.
+    unsigned lineno;
+    unsigned column;
+    // isRunOnce only applies to non-function scripts.
+    bool isRunOnce;
+    bool forEval;
+    bool noScriptRval;
+
+  private:
     void operator=(const ReadOnlyCompileOptions&) = delete;
 };
 
@@ -3616,8 +3660,22 @@ class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) : public ReadOnlyCompileOpti
     {
         copyPODOptions(rhs);
 
-        mutedErrors_ = rhs.mutedErrors_;
         filename_ = rhs.filename();
+        introducerFilename_ = rhs.introducerFilename();
+        sourceMapURL_ = rhs.sourceMapURL();
+        elementRoot = rhs.element();
+        elementAttributeNameRoot = rhs.elementAttributeName();
+        introductionScriptRoot = rhs.introductionScript();
+    }
+
+    CompileOptions(js::ContextFriendFields* cx, const TransitiveCompileOptions& rhs)
+      : ReadOnlyCompileOptions(), elementRoot(cx), elementAttributeNameRoot(cx),
+        introductionScriptRoot(cx)
+    {
+        copyPODTransitiveOptions(rhs);
+
+        filename_ = rhs.filename();
+        introducerFilename_ = rhs.introducerFilename();
         sourceMapURL_ = rhs.sourceMapURL();
         elementRoot = rhs.element();
         elementAttributeNameRoot = rhs.elementAttributeName();
@@ -5514,14 +5572,21 @@ struct PerformanceGroup {
         stopwatch_ = nullptr;
     }
 
-    explicit PerformanceGroup(JSContext* cx, void* key);
-    ~PerformanceGroup()
-    {
-        MOZ_ASSERT(refCount_ == 0);
-    }
-  private:
+    // Refcounting. For use with mozilla::RefPtr.
+    void AddRef();
+    void Release();
+
+    // Construct a PerformanceGroup for a single compartment.
+    explicit PerformanceGroup(JSRuntime* rt);
+
+    // Construct a PerformanceGroup for a group of compartments.
+    explicit PerformanceGroup(JSContext* rt, void* key);
+
+private:
     PerformanceGroup& operator=(const PerformanceGroup&) = delete;
     PerformanceGroup(const PerformanceGroup&) = delete;
+
+    JSRuntime* runtime_;
 
     // The stopwatch currently monitoring the group,
     // or `nullptr` if none. Used ony for comparison.
@@ -5534,20 +5599,14 @@ struct PerformanceGroup {
     // The hash key for this PerformanceGroup.
     void* const key_;
 
-    // Increment/decrement the refcounter, return the updated value.
-    uint64_t incRefCount() {
-        MOZ_ASSERT(refCount_ + 1 > 0);
-        return ++refCount_;
-    }
-    uint64_t decRefCount() {
-        MOZ_ASSERT(refCount_ > 0);
-        return --refCount_;
-    }
-    friend struct PerformanceGroupHolder;
-
-private:
-    // A reference counter. Maintained by PerformanceGroupHolder.
+    // A reference counter.
     uint64_t refCount_;
+
+
+    // `true` if this PerformanceGroup may be shared by several
+    // compartments, `false` if it is dedicated to a single
+    // compartment.
+    const bool isSharedGroup_;
 };
 
 //
@@ -5564,7 +5623,7 @@ struct PerformanceGroupHolder {
     js::PerformanceGroup* getSharedGroup(JSContext*);
 
     // Get the own group.
-    js::PerformanceGroup* getOwnGroup(JSContext*);
+    js::PerformanceGroup* getOwnGroup();
 
     // `true` if the this holder is currently associated to a shared
     // PerformanceGroup, `false` otherwise. Use this method to avoid
@@ -5584,8 +5643,6 @@ struct PerformanceGroupHolder {
 
     explicit PerformanceGroupHolder(JSRuntime* runtime)
       : runtime_(runtime)
-      , sharedGroup_(nullptr)
-      , ownGroup_(nullptr)
     {   }
     ~PerformanceGroupHolder();
 
@@ -5600,8 +5657,8 @@ struct PerformanceGroupHolder {
     // The PerformanceGroups held by this object.
     // Initially set to `nullptr` until the first call to `getGroup`.
     // May be reset to `nullptr` by a call to `unlink`.
-    js::PerformanceGroup* sharedGroup_;
-    js::PerformanceGroup* ownGroup_;
+    mozilla::RefPtr<js::PerformanceGroup> sharedGroup_;
+    mozilla::RefPtr<js::PerformanceGroup> ownGroup_;
 };
 
 /**
