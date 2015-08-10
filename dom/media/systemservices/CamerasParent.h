@@ -34,7 +34,8 @@ public:
   CallbackHelper(CaptureEngine aCapEng, int aCapId, CamerasParent *aParent)
     : mCapEngine(aCapEng), mCapturerId(aCapId), mParent(aParent) {};
 
-  // ViEExternalRenderer implementation
+  // ViEExternalRenderer implementation. These callbacks end up
+  // running on the VideoCapture thread.
   virtual int FrameSizeChange(unsigned int w, unsigned int h,
                               unsigned int streams) override;
   virtual int DeliverFrame(unsigned char* buffer,
@@ -77,6 +78,7 @@ class CamerasParent :  public PCamerasParent
   DISALLOW_COPY_AND_ASSIGN(CamerasParent);
 
 public:
+  // Messages received form the child. These run on the IPC/PBackground thread.
   virtual bool RecvAllocateCaptureDevice(const int&, const nsCString&) override;
   virtual bool RecvReleaseCaptureDevice(const int&, const int &) override;
   virtual bool RecvNumberOfCaptureDevices(const int&) override;
@@ -93,7 +95,7 @@ public:
   bool ChildIsAlive() { return mChildIsAlive; };
   ShmemBuffer GetBuffer(size_t aSize);
 
-  // forwarded to PBackground thread
+  // helper to forward to the PBackground thread
   int DeliverFrameOverIPC(CaptureEngine capEng,
                           int cap_id,
                           ShmemBuffer buffer,

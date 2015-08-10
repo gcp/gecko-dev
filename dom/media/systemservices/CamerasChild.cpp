@@ -37,6 +37,19 @@ namespace camera {
 // a pointer to the IPC object. Users can then do IPC calls on that object
 // after dispatching them to aforementioned thread.
 
+// 2 Threads are involved in this code:
+// - the MediaManager thread, which will call the (static, sync API) functions
+//   through MediaEngineRemoteVideoSource
+// - the Cameras IPC thread, which will be doing our IPC to the parent process
+//   via PBackground
+
+// Our main complication is that we emulate a sync API while (having to do)
+// async messaging. We dispatch the messages to another thread to send them
+// async and hold a Monitor to wait for the result to be asynchronously received
+// again. The requirement for async messaging originates on the parent side:
+// it's not reasonable to block all PBackground IPC there while waiting for
+// something like device enumeration to complete.
+
 class CamerasSingleton {
 public:
   CamerasSingleton()
@@ -126,7 +139,8 @@ private:
   CamerasChild* mCamerasChild;
 };
 
-static CamerasChild* Cameras() {
+static CamerasChild*
+Cameras() {
   OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
   if (!CamerasSingleton::Child()) {
     MOZ_ASSERT(!NS_IsMainThread(), "Should not be on the main Thread");
@@ -164,6 +178,7 @@ CamerasChild::RecvReplyFailure(void)
 {
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
+  mReceivedReply = true;
   mReplySuccess = false;
   monitor.Notify();
   return true;
@@ -174,6 +189,7 @@ CamerasChild::RecvReplySuccess(void)
 {
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
+  mReceivedReply = true;
   mReplySuccess = true;
   monitor.Notify();
   return true;
@@ -189,6 +205,7 @@ CamerasChild::RecvReplyNumberOfCapabilities(const int& numdev)
 {
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
+  mReceivedReply = true;
   mReplySuccess = true;
   mReplyInteger = numdev;
   monitor.Notify();
@@ -196,7 +213,7 @@ CamerasChild::RecvReplyNumberOfCapabilities(const int& numdev)
 }
 
 bool
-CamerasChild::DispatchToParent(nsCOMPtr<nsIRunnable> aRunnable,
+CamerasChild::DispatchToParent(nsIRunnable* aRunnable,
                                MonitorAutoLock& aMonitor)
 {
   {
@@ -208,8 +225,12 @@ CamerasChild::DispatchToParent(nsCOMPtr<nsIRunnable> aRunnable,
   if (!mIPCIsAlive) {
     return false;
   }
+  // Guard against spurious wakeups.
+  mReceivedReply = false;
   // Wait for a reply
-  aMonitor.Wait();
+  do {
+    aMonitor.Wait();
+  } while (!mReceivedReply && mIPCIsAlive);
   if (!mReplySuccess) {
     return false;
   }
@@ -233,7 +254,7 @@ CamerasChild::NumberOfCapabilities(CaptureEngine aCapEngine,
       return NS_ERROR_FAILURE;
     });
   // Prevent concurrent use of the reply variables. Note
-  // that his is unlocked while waiting for the reply to be
+  // that this is unlocked while waiting for the reply to be
   // filled in, necessitating the first Mutex above.
   MonitorAutoLock monitor(mReplyMonitor);
   if (!DispatchToParent(runnable, monitor)) {
@@ -275,6 +296,7 @@ CamerasChild::RecvReplyNumberOfCaptureDevices(const int& numdev)
 {
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
+  mReceivedReply = true;
   mReplySuccess = true;
   mReplyInteger = numdev;
   monitor.Notify();
@@ -320,6 +342,7 @@ CamerasChild::RecvReplyGetCaptureCapability(const CaptureCapability& ipcCapabili
 {
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
+  mReceivedReply = true;
   mReplySuccess = true;
   mReplyCapability.width = ipcCapability.width();
   mReplyCapability.height = ipcCapability.height();
@@ -380,6 +403,7 @@ CamerasChild::RecvReplyGetCaptureDevice(const nsCString& device_name,
 {
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
+  mReceivedReply = true;
   mReplySuccess = true;
   mReplyDeviceName = device_name;
   mReplyDeviceID = device_id;
@@ -430,6 +454,7 @@ CamerasChild::RecvReplyAllocateCaptureDevice(const int& numdev)
 {
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
+  mReceivedReply = true;
   mReplySuccess = true;
   mReplyInteger = numdev;
   monitor.Notify();
@@ -569,8 +594,8 @@ Shutdown(void)
 
 class ShutdownRunnable : public nsRunnable {
 public:
-  ShutdownRunnable(nsCOMPtr<nsIRunnable> aReplyEvent,
-                   nsCOMPtr<nsIThread> aReplyThread)
+  ShutdownRunnable(nsRefPtr<nsRunnable> aReplyEvent,
+                   nsIThread* aReplyThread)
     : mReplyEvent(aReplyEvent), mReplyThread(aReplyThread) {};
 
   NS_IMETHOD Run() override {
@@ -584,8 +609,8 @@ public:
   }
 
 private:
-  nsCOMPtr<nsIRunnable> mReplyEvent;
-  nsCOMPtr<nsIThread> mReplyThread;
+  nsRefPtr<nsRunnable> mReplyEvent;
+  nsIThread* mReplyThread;
 };
 
 void
@@ -600,9 +625,11 @@ CamerasChild::Shutdown()
   OffTheBooksMutexAutoLock lock(CamerasSingleton::Mutex());
   if (CamerasSingleton::Thread()) {
     LOG(("Dispatching actor deletion"));
-    // Delete the parent actor
+    // Delete the parent actor.
     nsCOMPtr<nsIRunnable> deleteRunnable =
-      media::NewRunnableFrom([=]() -> nsresult {
+      // CamerasChild (this) will remain alive and is only deleted by the
+      // IPC layer when SendAllDone returns.
+      media::NewRunnableFrom([this]() -> nsresult {
         unused << this->SendAllDone();
         return NS_OK;
       });
@@ -610,7 +637,7 @@ CamerasChild::Shutdown()
     LOG(("PBackground thread exists, dispatching close"));
     // Dispatch closing the IPC thread back to us when the
     // BackgroundChild is closed.
-    nsCOMPtr<nsIRunnable> event =
+    nsRefPtr<nsRunnable> event =
       new ThreadDestructor(CamerasSingleton::Thread());
     nsRefPtr<ShutdownRunnable> runnable =
       new ShutdownRunnable(event, NS_GetCurrentThread());

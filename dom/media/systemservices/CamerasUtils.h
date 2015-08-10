@@ -41,7 +41,7 @@ private:
 class RunnableTask : public Task
 {
 public:
-  explicit RunnableTask(nsRefPtr<nsIRunnable> aRunnable)
+  explicit RunnableTask(nsRefPtr<nsRunnable> aRunnable)
     : mRunnable(aRunnable) {}
 
   void Run() override {
@@ -50,7 +50,7 @@ public:
 
 private:
   ~RunnableTask() {}
-  nsCOMPtr<nsIRunnable> mRunnable;
+  nsRefPtr<nsIRunnable> mRunnable;
 };
 
 }
