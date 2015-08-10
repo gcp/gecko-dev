@@ -86,7 +86,7 @@ protected:
 private:
   // Initialize the needed Video engine interfaces.
   void Init();
-  void Shutdown();
+  void Shutdown() override;
   size_t NumCapabilities() override;
   void GetCapability(size_t aIndex, webrtc::CaptureCapability& aOut) override;
 
