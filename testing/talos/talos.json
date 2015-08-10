@@ -5,7 +5,7 @@
     },
     "global": {
         "talos_repo": "https://hg.mozilla.org/build/talos",
-        "talos_revision": "d44548b8feb9"
+        "talos_revision": "c7446ecc3bfb"
     },
     "extra_options": {
         "android": [ "--apkPath=%(apk_path)s" ]
@@ -23,10 +23,10 @@
             "talos_options": ["--e10s"]
         },
         "dromaeojs": {
-            "tests": ["dromaeo_css", "dromaeo_dom", "kraken", "v8_7"]
+            "tests": ["dromaeo_css", "kraken", "v8_7"]
         },
         "dromaeojs-e10s": {
-            "tests": ["dromaeo_css", "dromaeo_dom", "kraken", "v8_7"],
+            "tests": ["dromaeo_css", "kraken", "v8_7"],
             "talos_options": ["--e10s"]
         },
         "other": {

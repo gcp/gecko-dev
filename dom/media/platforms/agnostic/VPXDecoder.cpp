@@ -30,8 +30,7 @@ VPXDecoder::VPXDecoder(const VideoInfo& aConfig,
   , mTaskQueue(aTaskQueue)
   , mCallback(aCallback)
   , mIter(nullptr)
-  , mDisplayWidth(aConfig.mDisplay.width)
-  , mDisplayHeight(aConfig.mDisplay.height)
+  , mInfo(aConfig)
 {
   MOZ_COUNT_CTOR(VPXDecoder);
   if (aConfig.mMimeType.EqualsLiteral("video/webm; codecs=vp8")) {
@@ -87,15 +86,15 @@ VPXDecoder::DoDecodeFrame(MediaRawData* aSample)
   PodZero(&si);
   si.sz = sizeof(si);
   if (mCodec == Codec::VP8) {
-    vpx_codec_peek_stream_info(vpx_codec_vp8_dx(), aSample->mData, aSample->mSize, &si);
+    vpx_codec_peek_stream_info(vpx_codec_vp8_dx(), aSample->Data(), aSample->Size(), &si);
   } else if (mCodec == Codec::VP9) {
-    vpx_codec_peek_stream_info(vpx_codec_vp9_dx(), aSample->mData, aSample->mSize, &si);
+    vpx_codec_peek_stream_info(vpx_codec_vp9_dx(), aSample->Data(), aSample->Size(), &si);
   }
   NS_ASSERTION(bool(si.is_kf) == aSample->mKeyframe,
                "VPX Decode Keyframe error sample->mKeyframe and si.si_kf out of sync");
 #endif
 
-  if (vpx_codec_err_t r = vpx_codec_decode(&mVPX, aSample->mData, aSample->mSize, nullptr, 0)) {
+  if (vpx_codec_err_t r = vpx_codec_decode(&mVPX, aSample->Data(), aSample->Size(), nullptr, 0)) {
     LOG("VPX Decode error: %s", vpx_codec_err_to_string(r));
     return -1;
   }
@@ -125,9 +124,8 @@ VPXDecoder::DoDecodeFrame(MediaRawData* aSample)
     b.mPlanes[2].mWidth = (img->d_w + 1) >> img->x_chroma_shift;
     b.mPlanes[2].mOffset = b.mPlanes[2].mSkip = 0;
 
-    IntRect picture = IntRect(0, 0, img->d_w, img->d_h);
     VideoInfo info;
-    info.mDisplay = nsIntSize(mDisplayWidth, mDisplayHeight);
+    info.mDisplay = mInfo.mDisplay;
     nsRefPtr<VideoData> v = VideoData::Create(info,
                                               mImageContainer,
                                               aSample->mOffset,
@@ -136,12 +134,12 @@ VPXDecoder::DoDecodeFrame(MediaRawData* aSample)
                                               b,
                                               aSample->mKeyframe,
                                               aSample->mTimecode,
-                                              picture);
+                                              mInfo.mImage);
 
     if (!v) {
       LOG("Image allocation error source %ldx%ld display %ldx%ld picture %ldx%ld",
-          img->d_w, img->d_h, mDisplayWidth, mDisplayHeight,
-          picture.width, picture.height);
+          img->d_w, img->d_h, mInfo.mDisplay.width, mInfo.mDisplay.height,
+          mInfo.mImage.width, mInfo.mImage.height);
       return -1;
     }
     mCallback->Output(v);

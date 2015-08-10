@@ -10,8 +10,8 @@ function run_test() {
 }
 
 add_task(function () {
-  let { TIMELINE_BLUEPRINT } = devtools.require("devtools/performance/markers");
-  let Utils = devtools.require("devtools/performance/marker-utils");
+  let { TIMELINE_BLUEPRINT } = require("devtools/performance/markers");
+  let Utils = require("devtools/performance/marker-utils");
 
   Services.prefs.setBoolPref(PLATFORM_DATA_PREF, false);
 
@@ -38,6 +38,12 @@ add_task(function () {
   equal(fields[0].value, "mouseclick", "getMarkerFields() correctly returns fields via function (2)");
   equal(fields[1].label, "Phase:", "getMarkerFields() correctly returns fields via function (3)");
   equal(fields[1].value, "Target", "getMarkerFields() correctly returns fields via function (4)");
+
+  fields = Utils.getMarkerFields({ name: "GarbageCollection", cause: "ALLOC_TRIGGER" });
+  equal(fields[0].value, "Too Many Allocations", "Uses L10N for GC reasons");
+
+  fields = Utils.getMarkerFields({ name: "GarbageCollection", cause: "NOT_A_GC_REASON" });
+  equal(fields[0].value, "NOT_A_GC_REASON", "Defaults to enum for GC reasons when not L10N'd");
 
   equal(Utils.getMarkerFields({ name: "Javascript", causeName: "Some Platform Field" })[0].value, "(Gecko)",
     "Correctly obfuscates JS markers when platform data is off.");

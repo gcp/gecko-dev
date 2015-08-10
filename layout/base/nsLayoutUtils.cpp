@@ -381,20 +381,20 @@ nsLayoutUtils::HasAnimationsForCompositor(const nsIFrame* aFrame,
 }
 
 bool
-nsLayoutUtils::HasAnimations(const nsIFrame* aFrame,
-                             nsCSSProperty aProperty)
+nsLayoutUtils::HasCurrentAnimationOfProperty(const nsIFrame* aFrame,
+                                             nsCSSProperty aProperty)
 {
   nsPresContext* presContext = aFrame->PresContext();
   AnimationCollection* collection =
     presContext->AnimationManager()->GetAnimationCollection(aFrame);
   if (collection &&
-      collection->HasAnimationOfProperty(aProperty)) {
+      collection->HasCurrentAnimationOfProperty(aProperty)) {
     return true;
   }
   collection =
     presContext->TransitionManager()->GetAnimationCollection(aFrame);
   if (collection &&
-      collection->HasAnimationOfProperty(aProperty)) {
+      collection->HasCurrentAnimationOfProperty(aProperty)) {
     return true;
   }
   return false;
@@ -464,7 +464,7 @@ GetMinAndMaxScaleForAnimationProperty(const nsIFrame* aFrame,
 {
   for (size_t animIdx = aAnimations->mAnimations.Length(); animIdx-- != 0; ) {
     dom::Animation* anim = aAnimations->mAnimations[animIdx];
-    if (!anim->GetEffect() || anim->GetEffect()->IsFinishedTransition()) {
+    if (!anim->IsRelevant()) {
       continue;
     }
     dom::KeyframeEffectReadOnly* effect = anim->GetEffect();
@@ -1075,6 +1075,10 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
     static_cast<DisplayPortMarginsPropertyData*>(aContent->GetProperty(nsGkAtoms::DisplayPortMargins));
   if (currentData && currentData->mPriority > aPriority) {
     return false;
+  }
+
+  if (currentData && currentData->mMargins == aMargins) {
+    return true;
   }
 
   aContent->SetProperty(nsGkAtoms::DisplayPortMargins,
@@ -7901,8 +7905,9 @@ nsLayoutUtils::CalculateRootCompositionSize(nsIFrame* aFrame,
   // Adjust composition size for the size of scroll bars.
   nsIFrame* rootRootScrollFrame = rootPresShell ? rootPresShell->GetRootScrollFrame() : nullptr;
   nsMargin scrollbarMargins = ScrollbarAreaToExcludeFromCompositionBoundsFor(rootRootScrollFrame);
-  CSSMargin margins = CSSMargin::FromAppUnits(scrollbarMargins);
-  // Scrollbars are not subject to scaling, so CSS pixels = layer pixels for them.
+  LayoutDeviceMargin margins = LayoutDeviceMargin::FromAppUnits(scrollbarMargins,
+    rootPresContext->AppUnitsPerDevPixel());
+  // Scrollbars are not subject to resolution scaling, so LD pixels = layer pixels for them.
   rootCompositionSize.width -= margins.LeftRight();
   rootCompositionSize.height -= margins.TopBottom();
 
@@ -8433,8 +8438,9 @@ nsLayoutUtils::ComputeFrameMetrics(nsIFrame* aForFrame,
   }
 
   nsMargin sizes = ScrollbarAreaToExcludeFromCompositionBoundsFor(aScrollFrame);
-  // Scrollbars are not subject to scaling, so CSS pixels = layer pixels for them.
-  ParentLayerMargin boundMargins = CSSMargin::FromAppUnits(sizes) * CSSToParentLayerScale(1.0f);
+  // Scrollbars are not subject to resolution scaling, so LD pixels = layer pixels for them.
+  ParentLayerMargin boundMargins = LayoutDeviceMargin::FromAppUnits(sizes, auPerDevPixel)
+    * LayoutDeviceToParentLayerScale(1.0f);
   frameBounds.Deflate(boundMargins);
 
   metrics.SetCompositionBounds(frameBounds);

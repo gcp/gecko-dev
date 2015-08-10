@@ -207,6 +207,12 @@ WMFVideoMFTManager::InitInternal(bool aForceD3D9)
       attr->GetUINT32(MF_SA_D3D_AWARE, &aware);
       attr->SetUINT32(CODECAPI_AVDecNumWorkerThreads,
                       WMFDecoderModule::GetNumDecoderThreads());
+      hr = attr->SetUINT32(CODECAPI_AVLowLatencyMode, TRUE);
+      if (SUCCEEDED(hr)) {
+        LOG("Enabling Low Latency Mode");
+      } else {
+        LOG("Couldn't enable Low Latency Mode");
+      }
   }
 
   if (useDxva) {
@@ -272,8 +278,8 @@ WMFVideoMFTManager::Input(MediaRawData* aSample)
     return E_FAIL;
   }
   // Forward sample data to the decoder.
-  return mDecoder->Input(aSample->mData,
-                         uint32_t(aSample->mSize),
+  return mDecoder->Input(aSample->Data(),
+                         uint32_t(aSample->Size()),
                          aSample->mTime);
 }
 

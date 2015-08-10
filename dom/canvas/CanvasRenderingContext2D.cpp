@@ -4268,7 +4268,7 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& image,
   RefPtr<SourceSurface> srcSurf;
   gfx::IntSize imgSize;
 
-  Element* element;
+  Element* element = nullptr;
 
   EnsureTarget();
   if (image.IsHTMLCanvasElement()) {
@@ -5446,12 +5446,7 @@ CanvasRenderingContext2D::GetBufferProvider(LayerManager* aManager)
     return nullptr;
   }
 
-  mBufferProvider = aManager->CreatePersistentBufferProvider(mTarget->GetSize(), mTarget->GetFormat());
-
-  RefPtr<SourceSurface> surf = mTarget->Snapshot();
-
-  mTarget = mBufferProvider->GetDT(IntRect(IntPoint(), mTarget->GetSize()));
-  mTarget->CopySurface(surf, IntRect(IntPoint(), mTarget->GetSize()), IntPoint());
+  mBufferProvider = new PersistentBufferProviderBasic(mTarget);
 
   return mBufferProvider;
 }

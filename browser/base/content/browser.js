@@ -1391,6 +1391,8 @@ var gBrowserInit = {
     // Add Devtools menuitems and listeners
     gDevToolsBrowser.registerBrowserWindow(window);
 
+    gMenuButtonBadgeManager.init();
+
     gMenuButtonUpdateBadge.init();
 
     window.addEventListener("mousemove", MousePosTracker, false);
@@ -1545,6 +1547,8 @@ var gBrowserInit = {
     TrackingProtection.uninit();
 
     gMenuButtonUpdateBadge.uninit();
+
+    gMenuButtonBadgeManager.uninit();
 
     SidebarUI.uninit();
 
@@ -1796,7 +1800,7 @@ function HandleAppCommandEvent(evt) {
                            gBrowser.selectedBrowser);
     break;
   case "Save":
-    saveDocument(gBrowser.selectedBrowser.contentDocumentAsCPOW);
+    saveBrowser(gBrowser.selectedBrowser);
     break;
   case "SendMail":
     MailIntegration.sendLinkForBrowser(gBrowser.selectedBrowser);
@@ -2569,6 +2573,67 @@ function PageProxyClickHandler(aEvent)
     middleMousePaste(aEvent);
 }
 
+let gMenuButtonBadgeManager = {
+  BADGEID_APPUPDATE: "update",
+  BADGEID_FXA: "fxa",
+
+  fxaBadge: null,
+  appUpdateBadge: null,
+
+  init: function () {
+    PanelUI.panel.addEventListener("popupshowing", this, true);
+  },
+
+  uninit: function () {
+    PanelUI.panel.removeEventListener("popupshowing", this, true);
+  },
+
+  handleEvent: function (e) {
+    if (e.type === "popupshowing") {
+      this.clearBadges();
+    }
+  },
+
+  _showBadge: function () {
+    let badgeToShow = this.appUpdateBadge || this.fxaBadge;
+
+    if (badgeToShow) {
+      PanelUI.menuButton.setAttribute("badge-status", badgeToShow);
+    } else {
+      PanelUI.menuButton.removeAttribute("badge-status");
+    }
+  },
+
+  _changeBadge: function (badgeId, badgeStatus = null) {
+    if (badgeId == this.BADGEID_APPUPDATE) {
+      this.appUpdateBadge = badgeStatus;
+    } else if (badgeId == this.BADGEID_FXA) {
+      this.fxaBadge = badgeStatus;
+    } else {
+      Cu.reportError("This badge ID is unknown!");
+    }
+    this._showBadge();
+  },
+
+  addBadge: function (badgeId, badgeStatus) {
+    if (!badgeStatus) {
+      Cu.reportError("badgeStatus must be defined");
+      return;
+    }
+    this._changeBadge(badgeId, badgeStatus);
+  },
+
+  removeBadge: function (badgeId) {
+    this._changeBadge(badgeId);
+  },
+
+  clearBadges: function () {
+    this.appUpdateBadge = null;
+    this.fxaBadge = null;
+    this._showBadge();
+  }
+};
+
 // Setup the hamburger button badges for updates, if enabled.
 let gMenuButtonUpdateBadge = {
   enabled: false,
@@ -2585,7 +2650,6 @@ let gMenuButtonUpdateBadge = {
       } catch (e) {
         this.badgeWaitTime = 345600; // 4 days
       }
-      PanelUI.menuButton.classList.add("badged-button");
       Services.obs.addObserver(this, "update-staged", false);
       Services.obs.addObserver(this, "update-downloaded", false);
     }
@@ -2597,7 +2661,6 @@ let gMenuButtonUpdateBadge = {
     if (this.enabled) {
       Services.obs.removeObserver(this, "update-staged");
       Services.obs.removeObserver(this, "update-downloaded");
-      PanelUI.panel.removeEventListener("popupshowing", this, true);
       this.enabled = false;
     }
   },
@@ -2645,10 +2708,8 @@ let gMenuButtonUpdateBadge = {
 
   displayBadge: function (succeeded) {
     let status = succeeded ? "succeeded" : "failed";
-    PanelUI.menuButton.setAttribute("update-status", status);
-    if (!succeeded) {
-      PanelUI.menuButton.setAttribute("badge", "!");
-    }
+    let badgeStatus = "update-" + status;
+    gMenuButtonBadgeManager.addBadge(gMenuButtonBadgeManager.BADGEID_APPUPDATE, badgeStatus);
 
     let stringId;
     let updateButtonText;
@@ -2667,15 +2728,6 @@ let gMenuButtonUpdateBadge = {
     updateButton.setAttribute("label", updateButtonText);
     updateButton.setAttribute("update-status", status);
     updateButton.hidden = false;
-
-    PanelUI.panel.addEventListener("popupshowing", this, true);
-  },
-
-  handleEvent: function(e) {
-    if (e.type === "popupshowing") {
-      PanelUI.menuButton.removeAttribute("badge");
-      PanelUI.panel.removeEventListener("popupshowing", this, true);
-    }
   }
 };
 
@@ -6626,12 +6678,10 @@ var gIdentityHandler = {
   IDENTITY_MODE_MIXED_ACTIVE_BLOCKED                   : "verifiedDomain mixedContent mixedActiveBlocked",  // SSL with unauthenticated active content blocked; no unauthenticated display content
   IDENTITY_MODE_MIXED_ACTIVE_BLOCKED_IDENTIFIED        : "verifiedIdentity mixedContent mixedActiveBlocked",  // SSL with unauthenticated active content blocked; no unauthenticated display content
   IDENTITY_MODE_CHROMEUI                               : "chromeUI",         // Part of the product's UI
-  IDENTITY_MODE_FILE_URI                               : "fileURI",  // File path
 
-  // Cache the most recent SSLStatus and Location seen in checkIdentity
-  _lastStatus : null,
-  _lastUri : null,
-  _mode : "unknownIdentity",
+  _isChromeUI: false,
+  _sslStatus: null,
+  _uri: null,
 
   // smart getters
   get _identityPopup () {
@@ -6662,20 +6712,10 @@ var gIdentityHandler = {
     return this._identityPopupContentVerif =
       document.getElementById("identity-popup-content-verifier");
   },
-  get _identityPopupSecurityContent () {
-    delete this._identityPopupSecurityContent;
-    return this._identityPopupSecurityContent =
-      document.getElementById("identity-popup-security-content");
-  },
-  get _identityPopupSecurityView () {
-    delete this._identityPopupSecurityView;
-    return this._identityPopupSecurityView =
-      document.getElementById("identity-popup-securityView");
-  },
-  get _identityPopupMainView () {
-    delete this._identityPopupMainView;
-    return this._identityPopupMainView =
-      document.getElementById("identity-popup-mainView");
+  get _identityPopupMixedContentLearnMore () {
+    delete this._identityPopupMixedContentLearnMore;
+    return this._identityPopupMixedContentLearnMore =
+      document.getElementById("identity-popup-mcb-learn-more");
   },
   get _identityIconLabel () {
     delete this._identityIconLabel;
@@ -6754,13 +6794,33 @@ var gIdentityHandler = {
     }
   },
 
+  disableMixedContentProtection() {
+    // Use telemetry to measure how often unblocking happens
+    const kMIXED_CONTENT_UNBLOCK_EVENT = 2;
+    let histogram =
+      Services.telemetry.getHistogramById(
+        "MIXED_CONTENT_UNBLOCK_COUNTER");
+    histogram.add(kMIXED_CONTENT_UNBLOCK_EVENT);
+    // Reload the page with the content unblocked
+    BrowserReloadWithFlags(
+      Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_MIXED_CONTENT);
+    this._identityPopup.hidePopup();
+  },
+
+  enableMixedContentProtection() {
+    gBrowser.selectedBrowser.messageManager.sendAsyncMessage(
+      "MixedContent:ReenableProtection", {});
+    BrowserReload();
+    this._identityPopup.hidePopup();
+  },
+
   /**
-   * Helper to parse out the important parts of _lastStatus (of the SSL cert in
+   * Helper to parse out the important parts of _sslStatus (of the SSL cert in
    * particular) for use in constructing identity UI strings
   */
   getIdentityData : function() {
     var result = {};
-    var status = this._lastStatus.QueryInterface(Components.interfaces.nsISSLStatus);
+    var status = this._sslStatus.QueryInterface(Ci.nsISSLStatus);
     var cert = status.serverCert;
 
     // Human readable name of Subject
@@ -6796,16 +6856,11 @@ var gIdentityHandler = {
    * @param nsIURI uri The address for which the UI should be updated.
    */
   checkIdentity : function(state, uri) {
-    var currentStatus = gBrowser.securityUI
-                                .QueryInterface(Components.interfaces.nsISSLStatusProvider)
-                                .SSLStatus;
-    this._lastStatus = currentStatus;
-    this._lastUri = uri;
-
     let nsIWebProgressListener = Ci.nsIWebProgressListener;
 
-    // For some URIs like data: we can't get a host and so can't do
-    // anything useful here.
+    // For some URIs like data: we can't get a host. URIs without a host will
+    // usually be treated as a non-secure connection if they're not on the
+    // whitelist below and don't resolve to file:// URIs internally.
     let unknown = false;
     try {
       uri.host;
@@ -6815,89 +6870,53 @@ var gIdentityHandler = {
     // whitelisted to provide a positive security signal to the user.
     let whitelist = /^about:(accounts|addons|app-manager|config|crashes|customizing|downloads|healthreport|home|license|newaddon|permissions|preferences|privatebrowsing|rights|sessionrestore|support|welcomeback)/i;
     let isChromeUI = uri.schemeIs("about") && whitelist.test(uri.spec);
+    let mode = this.IDENTITY_MODE_UNKNOWN;
+
     if (isChromeUI) {
-      this.setMode(this.IDENTITY_MODE_CHROMEUI);
+      mode = this.IDENTITY_MODE_CHROMEUI;
     } else if (unknown) {
-      this.setMode(this.IDENTITY_MODE_UNKNOWN);
+      // Use default mode.
     } else if (state & nsIWebProgressListener.STATE_IDENTITY_EV_TOPLEVEL) {
       if (state & nsIWebProgressListener.STATE_BLOCKED_MIXED_ACTIVE_CONTENT) {
-        this.setMode(this.IDENTITY_MODE_MIXED_ACTIVE_BLOCKED_IDENTIFIED);
+        mode = this.IDENTITY_MODE_MIXED_ACTIVE_BLOCKED_IDENTIFIED;
       } else {
-        this.setMode(this.IDENTITY_MODE_IDENTIFIED);
+        mode = this.IDENTITY_MODE_IDENTIFIED;
       }
     } else if (state & nsIWebProgressListener.STATE_IS_SECURE) {
       if (state & nsIWebProgressListener.STATE_BLOCKED_MIXED_ACTIVE_CONTENT) {
-        this.setMode(this.IDENTITY_MODE_MIXED_ACTIVE_BLOCKED);
+        mode = this.IDENTITY_MODE_MIXED_ACTIVE_BLOCKED;
       } else {
-        this.setMode(this.IDENTITY_MODE_DOMAIN_VERIFIED);
+        mode = this.IDENTITY_MODE_DOMAIN_VERIFIED;
       }
     } else if (state & nsIWebProgressListener.STATE_IS_BROKEN) {
       if (state & nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT) {
-        this.setMode(this.IDENTITY_MODE_MIXED_ACTIVE_LOADED);
+        mode = this.IDENTITY_MODE_MIXED_ACTIVE_LOADED;
       } else if (state & nsIWebProgressListener.STATE_BLOCKED_MIXED_ACTIVE_CONTENT) {
-        this.setMode(this.IDENTITY_MODE_MIXED_DISPLAY_LOADED_ACTIVE_BLOCKED);
+        mode = this.IDENTITY_MODE_MIXED_DISPLAY_LOADED_ACTIVE_BLOCKED;
       } else if (state & nsIWebProgressListener.STATE_LOADED_MIXED_DISPLAY_CONTENT) {
-        this.setMode(this.IDENTITY_MODE_MIXED_DISPLAY_LOADED);
+        mode = this.IDENTITY_MODE_MIXED_DISPLAY_LOADED;
       } else {
-        this.setMode(this.IDENTITY_MODE_USES_WEAK_CIPHER);
-      }
-    } else {
-      // Create a channel for the sole purpose of getting the resolved URI
-      // of the request to determine if it's loaded from the file system.
-      let resolvedURI = NetUtil.newChannel({uri,loadUsingSystemPrincipal:true}).URI;
-      if (resolvedURI.schemeIs("jar")) {
-        // Given a URI "jar:<jar-file-uri>!/<jar-entry>"
-        // create a new URI using <jar-file-uri>!/<jar-entry>
-        resolvedURI = NetUtil.newURI(resolvedURI.path);
-      }
-
-      if (resolvedURI.schemeIs("file")) {
-        this.setMode(this.IDENTITY_MODE_FILE_URI);
-      } else {
-        this.setMode(this.IDENTITY_MODE_UNKNOWN);
+        mode = this.IDENTITY_MODE_USES_WEAK_CIPHER;
       }
     }
 
-    // Show the doorhanger when:
-    // - mixed active content is blocked
-    // - mixed active content is loaded (detected but not blocked)
-    // - tracking content is blocked
-    // - tracking content is not blocked
-    if (state &
-        (nsIWebProgressListener.STATE_BLOCKED_MIXED_ACTIVE_CONTENT |
-         nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT  |
-         nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT     |
-         nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT)) {
-      this.showBadContentDoorhanger(state);
-    }
-  },
+    // We need those values later when populating the control center.
+    this._uri = uri;
+    this._state = state;
+    this._isChromeUI = isChromeUI;
+    this._sslStatus =
+      gBrowser.securityUI.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus;
 
-  showBadContentDoorhanger : function(state) {
-    var currentNotification =
-      PopupNotifications.getNotification("bad-content",
-        gBrowser.selectedBrowser);
-
-    // Avoid showing the same notification (same state) repeatedly.
-    if (currentNotification && currentNotification.options.state == state)
-      return;
-
-    let options = {
-      /* keep doorhanger collapsed */
-      dismissed: true,
-      state: state
-    };
-
-    // default
-    let iconState = "bad-content-blocked-notification-icon";
-
-    if (state &
-        (Ci.nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT |
-         Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT)) {
-      iconState = "bad-content-unblocked-notification-icon";
+    // Update the identity block.
+    if (this._identityBox) {
+      this._identityBox.className = mode;
+      this.refreshIdentityBlock(mode);
     }
 
-    PopupNotifications.show(gBrowser.selectedBrowser, "bad-content",
-                            "", iconState, null, null, options);
+    // NOTE: We do NOT update the identity popup (the control center) when
+    // we receive a new security state. If the user opened the popup and looks
+    // at the provided information we don't want to suddenly change the panel
+    // contents.
   },
 
   /**
@@ -6909,37 +6928,13 @@ var gIdentityHandler = {
                          .getService(Ci.nsIIDNService);
     try {
       let baseDomain =
-        Services.eTLD.getBaseDomainFromHost(this._lastUri.host);
+        Services.eTLD.getBaseDomainFromHost(this._uri.host);
       return this._IDNService.convertToDisplayIDN(baseDomain, {});
     } catch (e) {
       // If something goes wrong (e.g. host is an IP address) just fail back
       // to the full domain.
-      return this._lastUri.host;
+      return this._uri.host;
     }
-  },
-
-  /**
-   * Update the UI to reflect the specified mode, which should be one of the
-   * IDENTITY_MODE_* constants.
-   */
-  setMode : function(newMode) {
-    if (!this._identityBox) {
-      // No identity box means the identity box is not visible, in which
-      // case there's nothing to do.
-      return;
-    }
-
-    this._identityPopup.className = newMode;
-    this._identityBox.className = newMode;
-    this.setIdentityMessages(newMode);
-
-    // Update the popup too, if it's open
-    if (this._identityPopup.state == "open") {
-      this.setPopupMessages(newMode);
-      this.updateSitePermissions();
-    }
-
-    this._mode = newMode;
   },
 
   /**
@@ -6948,7 +6943,7 @@ var gIdentityHandler = {
    *
    * @param newMode The newly set identity mode.  Should be one of the IDENTITY_MODE_* constants.
    */
-  setIdentityMessages : function(newMode) {
+  refreshIdentityBlock(newMode) {
     let icon_label = "";
     let tooltip = "";
     let icon_country_label = "";
@@ -6965,11 +6960,11 @@ var gIdentityHandler = {
                                                     [iData.caOrg]);
 
       // This can't throw, because URI's with a host that throw don't end up in this case.
-      let host = this._lastUri.host;
+      let host = this._uri.host;
       let port = 443;
       try {
-        if (this._lastUri.port > 0)
-          port = this._lastUri.port;
+        if (this._uri.port > 0)
+          port = this._uri.port;
       } catch (e) {}
 
       if (this._overrideService.hasMatchingOverride(host, port, iData.cert, {}, {}))
@@ -7018,15 +7013,78 @@ var gIdentityHandler = {
    * Set up the title and content messages for the identity message popup,
    * based on the specified mode, and the details of the SSL cert, where
    * applicable
-   *
-   * @param newMode The newly set identity mode.  Should be one of the IDENTITY_MODE_* constants.
    */
-  setPopupMessages : function(newMode) {
+  refreshIdentityPopup() {
+    // Update the "Learn More" hrefs for Mixed Content Blocking.
+    let baseURL = Services.urlFormatter.formatURLPref("app.support.baseURL");
+    let learnMoreHref = `${baseURL}mixed-content`;
+    this._identityPopupMixedContentLearnMore.setAttribute("href", learnMoreHref);
 
-    this._identityPopup.className = newMode;
-    this._identityPopupMainView.className = newMode;
-    this._identityPopupSecurityView.className = newMode;
-    this._identityPopupSecurityContent.className = newMode;
+    // Basic connection properties.
+    let isBroken = this._state & Ci.nsIWebProgressListener.STATE_IS_BROKEN;
+    let isSecure = this._state & Ci.nsIWebProgressListener.STATE_IS_SECURE;
+    let isEV = this._state & Ci.nsIWebProgressListener.STATE_IDENTITY_EV_TOPLEVEL;
+
+    // Determine connection security information.
+    let connection = "not-secure";
+    if (this._isChromeUI) {
+      connection = "chrome";
+    } else if (this._isURILoadedFromFile(this._uri)) {
+      connection = "file";
+    } else if (isEV) {
+      connection = "secure-ev";
+    } else if (isSecure) {
+      connection = "secure";
+    }
+
+    // Mixed content flags.
+    let isMixedActiveContentLoaded =
+      this._state & Ci.nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT;
+    let isMixedActiveContentBlocked =
+      this._state & Ci.nsIWebProgressListener.STATE_BLOCKED_MIXED_ACTIVE_CONTENT;
+    let isMixedPassiveContentLoaded =
+      this._state & Ci.nsIWebProgressListener.STATE_LOADED_MIXED_DISPLAY_CONTENT;
+
+    // Determine the mixed content state.
+    let mixedcontent = [];
+    if (isMixedPassiveContentLoaded) {
+      mixedcontent.push("passive-loaded");
+    }
+    if (isMixedActiveContentLoaded) {
+      mixedcontent.push("active-loaded");
+    } else if (isMixedActiveContentBlocked) {
+      mixedcontent.push("active-blocked");
+    }
+    mixedcontent = mixedcontent.join(" ");
+
+    // We have no specific flags for weak ciphers (yet). If a connection is
+    // broken and we can't detect any mixed active content loaded then it's
+    // a weak cipher.
+    let ciphers = "";
+    if (isBroken && !isMixedActiveContentLoaded) {
+      ciphers = "weak";
+    }
+
+    // Update all elements.
+    let elementIDs = [
+      "identity-popup",
+      "identity-popup-securityView-body",
+    ];
+
+    function updateAttribute(elem, attr, value) {
+      if (value) {
+        elem.setAttribute(attr, value);
+      } else {
+        elem.removeAttribute(attr);
+      }
+    }
+
+    for (let id of elementIDs) {
+      let element = document.getElementById(id);
+      updateAttribute(element, "connection", connection);
+      updateAttribute(element, "ciphers", ciphers);
+      updateAttribute(element, "mixedcontent", mixedcontent);
+    }
 
     // Initialize the optional strings to empty values
     let supplemental = "";
@@ -7040,19 +7098,18 @@ var gIdentityHandler = {
       // Some URIs might have no hosts.
     }
 
+    // Fallback for special protocols.
     if (!host) {
-      // Fallback for special protocols.
-      host = this._lastUri.specIgnoringRef;
+      host = this._uri.specIgnoringRef;
     }
 
-    switch (newMode) {
-    case this.IDENTITY_MODE_DOMAIN_VERIFIED:
-    case this.IDENTITY_MODE_MIXED_ACTIVE_BLOCKED:
+    // Fill in the CA name if we have a valid TLS certificate.
+    if (isSecure) {
       verifier = this._identityBox.tooltipText;
-      break;
-    case this.IDENTITY_MODE_IDENTIFIED:
-    case this.IDENTITY_MODE_MIXED_ACTIVE_BLOCKED_IDENTIFIED: {
-      // If it's identified, then we can populate the dialog with credentials
+    }
+
+    // Fill in organization information if we have a valid EV certificate.
+    if (isEV) {
       let iData = this.getIdentityData();
       host = owner = iData.subjectOrg;
       verifier = this._identityBox.tooltipText;
@@ -7067,21 +7124,6 @@ var gIdentityHandler = {
         supplemental += iData.state;
       else if (iData.country) // Country only
         supplemental += iData.country;
-      break;
-    }
-    case this.IDENTITY_MODE_UNKNOWN:
-      supplemental = gNavigatorBundle.getString("identity.not_secure");
-      break;
-    case this.IDENTITY_MODE_USES_WEAK_CIPHER:
-      supplemental = gNavigatorBundle.getString("identity.uses_weak_cipher");
-      break;
-    case this.IDENTITY_MODE_MIXED_DISPLAY_LOADED:
-    case this.IDENTITY_MODE_MIXED_DISPLAY_LOADED_ACTIVE_BLOCKED:
-      supplemental = gNavigatorBundle.getString("identity.mixed_display_loaded");
-      break;
-    case this.IDENTITY_MODE_MIXED_ACTIVE_LOADED:
-      supplemental = gNavigatorBundle.getString("identity.mixed_active_loaded2");
-      break;
     }
 
     // Push the appropriate strings out to the UI. Need to use |value| for the
@@ -7092,8 +7134,23 @@ var gIdentityHandler = {
     this._identityPopupContentSupp.textContent = supplemental;
     this._identityPopupContentVerif.textContent = verifier;
 
-    // Hide subviews when updating panel information.
-    document.getElementById("identity-popup-multiView").showMainView();
+    // Update per-site permissions section.
+    this.updateSitePermissions();
+  },
+
+  _isURILoadedFromFile(uri) {
+    // Create a channel for the sole purpose of getting the resolved URI
+    // of the request to determine if it's loaded from the file system.
+    let chanOptions = {uri, loadUsingSystemPrincipal: true};
+    let resolvedURI = NetUtil.newChannel(chanOptions).URI;
+    if (resolvedURI.schemeIs("jar")) {
+      // Given a URI "jar:<jar-file-uri>!/<jar-entry>"
+      // create a new URI using <jar-file-uri>!/<jar-entry>
+      resolvedURI = NetUtil.newURI(resolvedURI.path);
+    }
+
+    // Check the URI again after resolving.
+    return resolvedURI.schemeIs("file");
   },
 
   /**
@@ -7118,9 +7175,7 @@ var gIdentityHandler = {
     this._identityPopup.hidden = false;
 
     // Update the popup strings
-    this.setPopupMessages(this._identityBox.className);
-
-    this.updateSitePermissions();
+    this.refreshIdentityPopup();
 
     // Add the "open" attribute to the identity box for styling
     this._identityBox.setAttribute("open", "true");
@@ -7147,9 +7202,11 @@ var gIdentityHandler = {
     let position = elem.compareDocumentPosition(this._identityPopup);
 
     if (!(position & (Node.DOCUMENT_POSITION_CONTAINS |
-                      Node.DOCUMENT_POSITION_CONTAINED_BY))) {
+                      Node.DOCUMENT_POSITION_CONTAINED_BY)) &&
+        !this._identityPopup.hasAttribute("noautohide")) {
       // Hide the panel when focusing an element that is
-      // neither an ancestor nor descendant.
+      // neither an ancestor nor descendant unless the panel has
+      // @noautohide (e.g. for a tour).
       this._identityPopup.hidePopup();
     }
   },
@@ -7818,9 +7875,10 @@ let AboutPrivateBrowsingListener = {
         OpenBrowserWindow({private: true});
     });
     window.messageManager.addMessageListener(
-      "AboutPrivateBrowsing:EnableTrackingProtection",
+      "AboutPrivateBrowsing:ToggleTrackingProtection",
       msg => {
-        Services.prefs.setBoolPref("privacy.trackingprotection.pbmode.enabled", true);
+        const PREF = "privacy.trackingprotection.pbmode.enabled";
+        Services.prefs.setBoolPref(PREF, !Services.prefs.getBoolPref(PREF));
     });
   }
 };

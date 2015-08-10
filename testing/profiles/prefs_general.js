@@ -141,6 +141,7 @@ user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
 // works. It just can't hit the default production endpoint.
 user_pref("datareporting.healthreport.documentServerURI", "http://%(server)s/healthreport/");
 user_pref("datareporting.healthreport.about.reportUrl", "http://%(server)s/abouthealthreport/");
+user_pref("datareporting.healthreport.about.reportUrlUnified", "http://%(server)s/abouthealthreport/v4/");
 
 // Make sure CSS error reporting is enabled for tests
 user_pref("layout.css.report_errors", true);
@@ -165,7 +166,7 @@ user_pref("layout.spammy_warnings.enabled", false);
 
 // Enable Media Source Extensions for testing
 user_pref("media.mediasource.mp4.enabled", true);
-user_pref("media.mediasource.webm.enabled", false);
+user_pref("media.mediasource.webm.enabled", true);
 
 // Enable mozContacts
 user_pref("dom.mozContacts.enabled", true);
@@ -333,5 +334,9 @@ user_pref("media.webspeech.synth.test", true);
 // Turn off search suggestions in the location bar so as not to trigger network
 // connections.
 user_pref("browser.urlbar.suggest.searches", false);
+
+// Turn off the location bar search suggestions opt-in.  It interferes with
+// tests that don't expect it to be there.
+user_pref("browser.urlbar.userMadeSearchSuggestionsChoice", true);
 
 user_pref("dom.audiochannel.mutedByDefault", false);

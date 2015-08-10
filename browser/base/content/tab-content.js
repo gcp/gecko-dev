@@ -235,7 +235,7 @@ let AboutPrivateBrowsingListener = {
   init(chromeGlobal) {
     chromeGlobal.addEventListener("AboutPrivateBrowsingOpenWindow", this,
                                   false, true);
-    chromeGlobal.addEventListener("AboutPrivateBrowsingEnableTrackingProtection", this,
+    chromeGlobal.addEventListener("AboutPrivateBrowsingToggleTrackingProtection", this,
                                   false, true);
   },
 
@@ -251,8 +251,8 @@ let AboutPrivateBrowsingListener = {
       case "AboutPrivateBrowsingOpenWindow":
         sendAsyncMessage("AboutPrivateBrowsing:OpenPrivateWindow");
         break;
-      case "AboutPrivateBrowsingEnableTrackingProtection":
-        sendAsyncMessage("AboutPrivateBrowsing:EnableTrackingProtection");
+      case "AboutPrivateBrowsingToggleTrackingProtection":
+        sendAsyncMessage("AboutPrivateBrowsing:ToggleTrackingProtection");
         break;
     }
   },
@@ -646,6 +646,12 @@ let DOMFullscreenHandler = {
       case "MozDOMFullscreen:Entered":
       case "MozDOMFullscreen:Exited": {
         addEventListener("MozAfterPaint", this);
+        if (!content || !content.document.mozFullScreen) {
+          // If we receive any fullscreen change event, and find we are
+          // actually not in fullscreen, also ask the parent to exit to
+          // ensure that the parent always exits fullscreen when we do.
+          sendAsyncMessage("DOMFullscreen:Exit");
+        }
         break;
       }
       case "MozAfterPaint": {

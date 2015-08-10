@@ -6,12 +6,14 @@
 
 :root {
   --tab-toolbar-navbar-overlap: 1px;
+  --navbar-tab-toolbar-highlight-overlap: 1px;
   --tab-min-height: 31px;
 }
 #TabsToolbar {
   --tab-separator-image: url(chrome://browser/skin/tabbrowser/tab-separator.png);
   --tab-separator-size: 3px 100%;
   --tab-separator-opacity: 1;
+  --tab-stroke-background-size: auto 100%;
 }
 
 %define tabCurveWidth 30px
@@ -94,21 +96,26 @@
   margin-top: -12px;
   -moz-margin-start: -16px;
   display: none;
+  position: relative;
 }
 
 .tab-icon-overlay[crashed] {
-  display: -moz-box;
   list-style-image: url("chrome://browser/skin/tabbrowser/crashed.svg");
 }
 
+.tab-icon-overlay[crashed],
 .tab-icon-overlay[soundplaying][pinned],
-.tab-icon-overlay[muted][pinned] {
+.tab-icon-overlay[muted][pinned]:not([crashed]) {
   display: -moz-box;
+}
+
+.tab-icon-overlay[soundplaying][pinned],
+.tab-icon-overlay[muted][pinned]:not([crashed]) {
   border-radius: 8px;
 }
 
 .tab-icon-overlay[soundplaying][pinned]:hover,
-.tab-icon-overlay[muted][pinned]:hover {
+.tab-icon-overlay[muted][pinned]:not([crashed]):hover {
   background-color: white;
 }
 
@@ -124,15 +131,15 @@
   list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-pressed");
 }
 
-.tab-icon-overlay[muted][pinned] {
+.tab-icon-overlay[muted][pinned]:not([crashed]) {
   list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-muted");
 }
 
-.tab-icon-overlay[muted][pinned]:hover {
+.tab-icon-overlay[muted][pinned]:not([crashed]):hover {
   list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-muted-hover");
 }
 
-.tab-icon-overlay[muted][pinned]:hover:active {
+.tab-icon-overlay[muted][pinned]:not([crashed]):hover:active {
   list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-muted-pressed");
 }
 
@@ -148,15 +155,15 @@
   list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-pressed");
 }
 
-#TabsToolbar[brighttext] .tab-icon-overlay[muted][pinned] {
+#TabsToolbar[brighttext] .tab-icon-overlay[muted][pinned]:not([crashed]) {
   list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-muted");
 }
 
-#TabsToolbar[brighttext] .tab-icon-overlay[muted][pinned]:hover {
+#TabsToolbar[brighttext] .tab-icon-overlay[muted][pinned]:not([crashed]):hover {
   list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-muted-hover");
 }
 
-#TabsToolbar[brighttext] .tab-icon-overlay[muted][pinned]:hover:active {
+#TabsToolbar[brighttext] .tab-icon-overlay[muted][pinned]:not([crashed]):hover:active {
   list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-muted-pressed");
 }
 
@@ -257,7 +264,7 @@
   background-image: url(chrome://browser/skin/tabbrowser/tab-overflow-indicator.png);
   background-size: 100% 100%;
   width: 14px;
-  margin-bottom: var(--tab-toolbar-navbar-overlap);
+  margin-bottom: var(--navbar-tab-toolbar-highlight-overlap);
   pointer-events: none;
   position: relative;
   z-index: 3; /* the selected tab's z-index + 1 */
@@ -371,7 +378,7 @@
                     @fgTabTexture@,
                     none;
   background-repeat: repeat-x;
-  background-size: auto 100%;
+  background-size: var(--tab-stroke-background-size), auto 100%;
   /* The padding-top combined with background-clip: content-box (the bottom-most) ensure the
      background-color doesn't extend above the top border. */
   padding-top: 2px;
@@ -385,7 +392,7 @@
                     @fgTabTextureLWT@;/*,
                     lwtHeader;*/
   /* Don't stretch the LWT header images */
-  background-size: auto 100%, auto 100%, auto auto;
+  background-size: var(--tab-stroke-background-size), auto 100%, auto auto;
 }
 
 /* These LWT styles are normally overridden by browser-lightweightTheme.css */
@@ -421,7 +428,7 @@
 .tab-background-middle,
 .tabs-newtab-button,
 .tab-icon-overlay[soundplaying],
-.tab-icon-overlay[muted],
+.tab-icon-overlay[muted]:not([crashed]),
 .tab-icon-sound,
 .tab-close-button {
   pointer-events: auto;

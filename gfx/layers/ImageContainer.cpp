@@ -623,7 +623,7 @@ CairoImage::GetTextureClient(CompositableClient *aClient)
     textureClient =
       recycler->CreateOrRecycleForDrawing(surface->GetFormat(),
                                           surface->GetSize(),
-                                          gfx::BackendType::NONE,
+                                          BackendSelector::Content,
                                           aClient->GetTextureFlags());
   }
 #endif
@@ -633,7 +633,7 @@ CairoImage::GetTextureClient(CompositableClient *aClient)
     // gfx::BackendType::NONE means default to content backend
     textureClient = aClient->CreateTextureClientForDrawing(surface->GetFormat(),
                                                            surface->GetSize(),
-                                                           gfx::BackendType::NONE,
+                                                           BackendSelector::Content,
                                                            TextureFlags::DEFAULT);
   }
   if (!textureClient) {
@@ -646,8 +646,7 @@ CairoImage::GetTextureClient(CompositableClient *aClient)
 
   TextureClientAutoUnlock autoUnlock(textureClient);
 
-  RefPtr<DataSourceSurface> dataSurf = surface->GetDataSurface();
-  textureClient->UpdateFromSurface(dataSurf);
+  textureClient->UpdateFromSurface(surface);
 
   textureClient->SyncWithObject(forwarder->GetSyncObject());
 

@@ -226,6 +226,11 @@ let Memory = exports.Memory = Class({
    *                <timestamp for allocations[1]>,
    *                ...
    *              ],
+   *              allocationSizes: [
+   *                <bytesize for allocations[0]>,
+   *                <bytesize for allocations[1]>,
+   *                ...
+   *              ],
    *              frames: [
    *                {
    *                  line: <line number for this frame>,
@@ -236,12 +241,6 @@ let Memory = exports.Memory = Class({
    *                },
    *                ...
    *              ],
-   *              counts: [
-   *                <number of allocations in frames[0]>,
-   *                <number of allocations in frames[1]>,
-   *                <number of allocations in frames[2]>,
-   *                ...
-   *              ]
    *            }
    *
    *          The timestamps' unit is microseconds since the epoch.
@@ -253,9 +252,6 @@ let Memory = exports.Memory = Class({
    *          unique, persistent id for its frame.
    *
    *          Additionally, the root node (null) is always at index 0.
-   *
-   *          Note that the allocation counts include "self" allocations only,
-   *          and don't account for allocations in child frames.
    *
    *          We use the indices into the "frames" array to avoid repeating the
    *          description of duplicate stack frames both when listing
@@ -283,10 +279,10 @@ let Memory = exports.Memory = Class({
     const allocations = this.dbg.memory.drainAllocationsLog()
     const packet = {
       allocations: [],
-      allocationsTimestamps: []
+      allocationsTimestamps: [],
+      allocationSizes: [],
     };
-
-    for (let { frame: stack, timestamp } of allocations) {
+    for (let { frame: stack, timestamp, size } of allocations) {
       if (stack && Cu.isDeadWrapper(stack)) {
         continue;
       }
@@ -294,7 +290,7 @@ let Memory = exports.Memory = Class({
       // Safe because SavedFrames are frozen/immutable.
       let waived = Cu.waiveXrays(stack);
 
-      // Ensure that we have a form, count, and index for new allocations
+      // Ensure that we have a form, size, and index for new allocations
       // because we potentially haven't seen some or all of them yet. After this
       // loop, we can rely on the fact that every frame we deal with already has
       // its metadata stored.
@@ -302,6 +298,7 @@ let Memory = exports.Memory = Class({
 
       packet.allocations.push(index);
       packet.allocationsTimestamps.push(timestamp);
+      packet.allocationSizes.push(size);
     }
 
     return this._frameCache.updateFramePacket(packet);

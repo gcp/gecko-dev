@@ -93,6 +93,7 @@
 #include "mozilla/layers/CompositorChild.h"
 
 #include "mozilla/dom/StructuredCloneUtils.h"
+#include "mozilla/WebBrowserPersistLocalDocument.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -130,6 +131,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFrameLoader)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsFrameLoader)
   NS_INTERFACE_MAP_ENTRY(nsIFrameLoader)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIFrameLoader)
+  NS_INTERFACE_MAP_ENTRY(nsIWebBrowserPersistable)
 NS_INTERFACE_MAP_END
 
 nsFrameLoader::nsFrameLoader(Element* aOwner, bool aNetworkCreated)
@@ -949,6 +951,60 @@ nsFrameLoader::SwapWithOtherRemoteLoader(nsFrameLoader* aOther,
   return NS_OK;
 }
 
+class MOZ_STACK_CLASS AutoResetInFrameSwap final
+{
+public:
+  AutoResetInFrameSwap(nsFrameLoader* aThisFrameLoader,
+                       nsFrameLoader* aOtherFrameLoader,
+                       nsDocShell* aThisDocShell,
+                       nsDocShell* aOtherDocShell,
+                       EventTarget* aThisEventTarget,
+                       EventTarget* aOtherEventTarget
+                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    : mThisFrameLoader(aThisFrameLoader)
+    , mOtherFrameLoader(aOtherFrameLoader)
+    , mThisDocShell(aThisDocShell)
+    , mOtherDocShell(aOtherDocShell)
+    , mThisEventTarget(aThisEventTarget)
+    , mOtherEventTarget(aOtherEventTarget)
+  {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+
+    mThisFrameLoader->mInSwap = true;
+    mOtherFrameLoader->mInSwap = true;
+    mThisDocShell->SetInFrameSwap(true);
+    mOtherDocShell->SetInFrameSwap(true);
+
+    // Fire pageshow events on still-loading pages, and then fire pagehide
+    // events.  Note that we do NOT fire these in the normal way, but just fire
+    // them on the chrome event handlers.
+    nsContentUtils::FirePageShowEvent(mThisDocShell, mThisEventTarget, false);
+    nsContentUtils::FirePageShowEvent(mOtherDocShell, mOtherEventTarget, false);
+    nsContentUtils::FirePageHideEvent(mThisDocShell, mThisEventTarget);
+    nsContentUtils::FirePageHideEvent(mOtherDocShell, mOtherEventTarget);
+  }
+
+  ~AutoResetInFrameSwap()
+  {
+    nsContentUtils::FirePageShowEvent(mThisDocShell, mThisEventTarget, true);
+    nsContentUtils::FirePageShowEvent(mOtherDocShell, mOtherEventTarget, true);
+
+    mThisFrameLoader->mInSwap = false;
+    mOtherFrameLoader->mInSwap = false;
+    mThisDocShell->SetInFrameSwap(false);
+    mOtherDocShell->SetInFrameSwap(false);
+  }
+
+private:
+  nsRefPtr<nsFrameLoader> mThisFrameLoader;
+  nsRefPtr<nsFrameLoader> mOtherFrameLoader;
+  nsRefPtr<nsDocShell> mThisDocShell;
+  nsRefPtr<nsDocShell> mOtherDocShell;
+  nsCOMPtr<EventTarget> mThisEventTarget;
+  nsCOMPtr<EventTarget> mOtherEventTarget;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
 nsresult
 nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
                                    nsRefPtr<nsFrameLoader>& aFirstToSwap,
@@ -985,8 +1041,8 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
-  nsCOMPtr<nsIDocShell> ourDocshell = GetExistingDocShell();
-  nsCOMPtr<nsIDocShell> otherDocshell = aOther->GetExistingDocShell();
+  nsRefPtr<nsDocShell> ourDocshell = static_cast<nsDocShell*>(GetExistingDocShell());
+  nsRefPtr<nsDocShell> otherDocshell = static_cast<nsDocShell*>(aOther->GetExistingDocShell());
   if (!ourDocshell || !otherDocshell) {
     // How odd
     return NS_ERROR_NOT_IMPLEMENTED;
@@ -1117,39 +1173,23 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
   if (mInSwap || aOther->mInSwap) {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
-  mInSwap = aOther->mInSwap = true;
+  AutoResetInFrameSwap autoFrameSwap(this, aOther, ourDocshell, otherDocshell,
+                                     ourEventTarget, otherEventTarget);
 
-  // Fire pageshow events on still-loading pages, and then fire pagehide
-  // events.  Note that we do NOT fire these in the normal way, but just fire
-  // them on the chrome event handlers.
-  nsContentUtils::FirePageShowEvent(ourDocshell, ourEventTarget, false);
-  nsContentUtils::FirePageShowEvent(otherDocshell, otherEventTarget, false);
-  nsContentUtils::FirePageHideEvent(ourDocshell, ourEventTarget);
-  nsContentUtils::FirePageHideEvent(otherDocshell, otherEventTarget);
-  
   nsIFrame* ourFrame = ourContent->GetPrimaryFrame();
   nsIFrame* otherFrame = otherContent->GetPrimaryFrame();
   if (!ourFrame || !otherFrame) {
-    mInSwap = aOther->mInSwap = false;
-    nsContentUtils::FirePageShowEvent(ourDocshell, ourEventTarget, true);
-    nsContentUtils::FirePageShowEvent(otherDocshell, otherEventTarget, true);
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
   nsSubDocumentFrame* ourFrameFrame = do_QueryFrame(ourFrame);
   if (!ourFrameFrame) {
-    mInSwap = aOther->mInSwap = false;
-    nsContentUtils::FirePageShowEvent(ourDocshell, ourEventTarget, true);
-    nsContentUtils::FirePageShowEvent(otherDocshell, otherEventTarget, true);
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
   // OK.  First begin to swap the docshells in the two nsIFrames
   rv = ourFrameFrame->BeginSwapDocShells(otherFrame);
   if (NS_FAILED(rv)) {
-    mInSwap = aOther->mInSwap = false;
-    nsContentUtils::FirePageShowEvent(ourDocshell, ourEventTarget, true);
-    nsContentUtils::FirePageShowEvent(otherDocshell, otherEventTarget, true);
     return rv;
   }
 
@@ -1252,10 +1292,6 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
   ourParentDocument->FlushPendingNotifications(Flush_Layout);
   otherParentDocument->FlushPendingNotifications(Flush_Layout);
 
-  nsContentUtils::FirePageShowEvent(ourDocshell, ourEventTarget, true);
-  nsContentUtils::FirePageShowEvent(otherDocshell, otherEventTarget, true);
-
-  mInSwap = aOther->mInSwap = false;
   return NS_OK;
 }
 
@@ -2846,4 +2882,21 @@ nsFrameLoader::InitializeBrowserAPI()
       browserFrame->InitializeBrowserAPI();
     }
   }
+}
+
+NS_IMETHODIMP
+nsFrameLoader::StartPersistence(nsIWebBrowserPersistDocumentReceiver* aRecv)
+{
+  if (mRemoteBrowser) {
+    return mRemoteBrowser->StartPersistence(aRecv);
+  }
+  if (mDocShell) {
+    nsCOMPtr<nsIDocument> doc = do_GetInterface(mDocShell);
+    NS_ENSURE_STATE(doc);
+    nsCOMPtr<nsIWebBrowserPersistDocument> pdoc =
+      new mozilla::WebBrowserPersistLocalDocument(doc);
+    aRecv->OnDocumentReady(pdoc);
+    return NS_OK;
+  }
+  return NS_ERROR_NO_CONTENT;
 }

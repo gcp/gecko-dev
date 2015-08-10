@@ -103,6 +103,7 @@ static PRLogModuleInfo* gMediaElementEventsLog;
 
 #include "nsIPermissionManager.h"
 #include "nsContentTypeParser.h"
+#include "nsDocShell.h"
 
 #include "mozilla/EventStateManager.h"
 
@@ -3095,7 +3096,11 @@ void HTMLMediaElement::SetupSrcMediaStreamPlayback(DOMMediaStream* aStream)
   GetSrcMediaStream()->AddAudioOutput(this);
   SetVolumeInternal();
 
+#ifdef MOZ_WIDGET_GONK
   bool bUseOverlayImage = mSrcStream->AsDOMHwMediaStream() != nullptr;
+#else
+  bool bUseOverlayImage = false;
+#endif
   VideoFrameContainer* container;
 
   if (bUseOverlayImage) {
@@ -4009,7 +4014,14 @@ void HTMLMediaElement::NotifyOwnerDocumentActivityChanged()
   if (pauseElement && mAudioChannelAgent) {
     // If the element is being paused since we are navigating away from the
     // document, notify the audio channel agent.
-    NotifyAudioChannelAgent(false);
+    // Be careful to ignore this event during a docshell frame swap.
+    auto docShell = static_cast<nsDocShell*>(OwnerDoc()->GetDocShell());
+    if (!docShell) {
+      return;
+    }
+    if (!docShell->InFrameSwap()) {
+      NotifyAudioChannelAgent(false);
+    }
   }
 }
 
@@ -4518,13 +4530,17 @@ HTMLMediaElement::NotifyAudioChannelAgent(bool aPlaying)
   // this method has some content JS in its stack.
   AutoNoJSAPI nojsapi;
 
+  // Don't notify playback if this element doesn't have any audio tracks.
+  uint32_t notify = HasAudio() ? nsIAudioChannelAgent::AUDIO_AGENT_NOTIFY :
+                                 nsIAudioChannelAgent::AUDIO_AGENT_DONT_NOTIFY;
+
   if (aPlaying) {
     float volume = 0.0;
     bool muted = true;
-    mAudioChannelAgent->NotifyStartedPlaying(&volume, &muted);
+    mAudioChannelAgent->NotifyStartedPlaying(notify, &volume, &muted);
     WindowVolumeChanged(volume, muted);
   } else {
-    mAudioChannelAgent->NotifyStoppedPlaying();
+    mAudioChannelAgent->NotifyStoppedPlaying(notify);
     mAudioChannelAgent = nullptr;
   }
 }

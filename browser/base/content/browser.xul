@@ -147,10 +147,12 @@
 
     <!-- for url bar autocomplete -->
     <panel type="autocomplete-richlistbox" id="PopupAutoCompleteRichResult" noautofocus="true" hidden="true">
+#ifdef NIGHTLY_BUILD
       <hbox id="urlbar-search-footer" flex="1" align="stretch" pack="end">
         <button id="urlbar-search-settings" label="&changeSearchSettings.button;"
                 oncommand="BrowserUITelemetry.countSearchSettingsEvent('urlbar'); openPreferences('paneSearch')"/>
       </hbox>
+#endif
     </panel>
 
     <!-- for select dropdowns. The menupopup is what shows the list of options,
@@ -740,8 +742,6 @@
                 <image id="webapps-notification-icon" class="notification-anchor-icon" role="button"/>
                 <image id="plugins-notification-icon" class="notification-anchor-icon" role="button"/>
                 <image id="web-notifications-notification-icon" class="notification-anchor-icon" role="button"/>
-                <image id="bad-content-blocked-notification-icon" class="notification-anchor-icon" role="button"/>
-                <image id="bad-content-unblocked-notification-icon" class="notification-anchor-icon" role="button"/>
                 <image id="webRTC-shareDevices-notification-icon" class="notification-anchor-icon" role="button"/>
                 <image id="webRTC-sharingDevices-notification-icon" class="notification-anchor-icon" role="button"/>
                 <image id="webRTC-shareMicrophone-notification-icon" class="notification-anchor-icon" role="button"/>
@@ -960,7 +960,7 @@
                    class="chromeclass-toolbar-additional"
                    removable="false">
         <toolbarbutton id="PanelUI-menu-button"
-                       class="toolbarbutton-1"
+                       class="toolbarbutton-1 badged-button"
                        consumeanchor="PanelUI-button"
                        label="&brandShortName;"
                        tooltiptext="&appmenu.tooltip;"/>

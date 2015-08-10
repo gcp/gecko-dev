@@ -271,8 +271,13 @@ pref("browser.urlbar.doubleClickSelectsAll", false);
 pref("browser.urlbar.autoFill", true);
 pref("browser.urlbar.autoFill.typed", true);
 
+#ifdef NIGHTLY_BUILD
 // Use the new unifiedComplete component
 pref("browser.urlbar.unifiedcomplete", true);
+#else
+// Don't use the new unifiedComplete component
+pref("browser.urlbar.unifiedcomplete", false);
+#endif
 
 // 0: Match anywhere (e.g., middle of words)
 // 1: Match on word boundaries and then try matching anywhere
@@ -305,11 +310,8 @@ pref("browser.urlbar.match.url", "@");
 pref("browser.urlbar.suggest.history",              true);
 pref("browser.urlbar.suggest.bookmark",             true);
 pref("browser.urlbar.suggest.openpage",             true);
-#ifdef NIGHTLY_BUILD
-pref("browser.urlbar.suggest.searches",             true);
-#else
 pref("browser.urlbar.suggest.searches",             false);
-#endif
+pref("browser.urlbar.userMadeSearchSuggestionsChoice", false);
 
 // Limit the number of characters sent to the current search engine to fetch
 // suggestions.
@@ -452,11 +454,7 @@ pref("browser.tabs.drawInTitlebar", true);
 // false  return to the adjacent tab (old default)
 pref("browser.tabs.selectOwnerOnClose", true);
 
-#ifdef RELEASE_BUILD
-pref("browser.tabs.showAudioPlayingIcon", false);
-#else
 pref("browser.tabs.showAudioPlayingIcon", true);
-#endif
 
 pref("browser.ctrlTab.previews", false);
 
@@ -1929,6 +1927,10 @@ pref("browser.reader.detectedFirstArticle", false);
 // Don't limit how many nodes we care about on desktop:
 pref("reader.parse-node-limit", 0);
 
+// On desktop, we want the URLs to be included here for ease of debugging,
+// and because (normally) these errors are not persisted anywhere.
+pref("reader.errors.includeURLs", true);
+
 pref("browser.pocket.enabled", true);
 pref("browser.pocket.api", "api.getpocket.com");
 pref("browser.pocket.site", "getpocket.com");
@@ -1938,8 +1940,9 @@ pref("browser.pocket.enabledLocales", "cs de en-GB en-US en-ZA es-ES es-MX fr hu
 
 pref("view_source.tab", true);
 
-// Enable Service Workers for desktop on non-release builds
-#ifndef RELEASE_BUILD
+// Enable ServiceWorkers for Push API consumers.
+// Interception is still disabled.
 pref("dom.serviceWorkers.enabled", true);
-pref("dom.serviceWorkers.interception.enabled", true);
-#endif
+
+// Enable Push API.
+pref("dom.push.enabled", true);

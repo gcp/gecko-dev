@@ -1,7 +1,7 @@
 <!DOCTYPE HTML>
 <html>
 <!--
-Bug 1132764 - Test controlling the maximum allocations log length over the RDP.
+Bug 1192335 - Test getting the byte sizes for allocations.
 -->
 <head>
   <meta charset="utf-8">
@@ -21,55 +21,34 @@ window.onload = function() {
     yield memory.attach();
 
     var allocs = [];
-    var eventsFired = 0;
-    var intervalId = null;
-    function onAlloc () {
-      eventsFired++;
-    }
-    function startAllocating () {
-      intervalId = setInterval(() => {
-        for (var i = 100000; --i;) {
-          allocs.push(new Object());
-        }
-      }, 1);
-    }
-    function stopAllocating () {
-      clearInterval(intervalId);
+    function allocator() {
+      allocs.push(new Object);
     }
 
-    memory.on("allocations", onAlloc);
+    yield memory.startRecordingAllocations();
 
-    yield memory.startRecordingAllocations({
-      drainAllocationsTimeout: 10
-    });
+    allocator();
+    allocator();
+    allocator();
 
-    yield waitUntil(() => eventsFired > 5);
-    ok(eventsFired > 5, "Some allocation events fired without allocating much via auto drain");
+    var response = yield memory.getAllocations();
     yield memory.stopRecordingAllocations();
 
-    // Set a really high auto drain timer so we can test if
-    // it fires on GC
-    eventsFired = 0;
-    var startTime = performance.now();
-    var drainTimer = 1000000;
-    yield memory.startRecordingAllocations({
-      drainAllocationsTimeout: drainTimer
-    });
+    ok(response.allocationSizes, "The response should have bytesizes.");
+    is(response.allocationSizes.length, response.allocations.length,
+       "There should be a bytesize for every allocation.");
+    ok(response.allocationSizes.length >= 3,
+       "There are atleast 3 allocations.");
+    ok(response.allocationSizes.every(isPositiveNumber), "every bytesize is a positive number");
 
-    startAllocating();
-    yield waitUntil(() => {
-      Cu.forceGC();
-      return eventsFired > 1;
-    });
-    stopAllocating();
-    ok(performance.now() - drainTimer < startTime, "Allocation events fired on GC before timer");
-    yield memory.stopRecordingAllocations();
-
-    memory.off("allocations", onAlloc);
     yield memory.detach();
     destroyServerAndFinish(client);
   });
 };
+
+function isPositiveNumber (n) {
+  return typeof n === "number" && n > 0;
+}
 </script>
 </pre>
 </body>

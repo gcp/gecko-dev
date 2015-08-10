@@ -56,9 +56,6 @@ browser.jar:
   skin/classic/browser/Info.png
   skin/classic/browser/magnifier.png                        (../shared/magnifier.png)
   skin/classic/browser/magnifier@2x.png                     (../shared/magnifier@2x.png)
-  skin/classic/browser/mask.png                             (../shared/mask.png)
-  skin/classic/browser/mask@2x.png                          (../shared/mask@2x.png)
-  skin/classic/browser/mask-and-shield.svg                  (../shared/mask-and-shield.svg)
   skin/classic/browser/menuPanel.png
   skin/classic/browser/menuPanel@2x.png
   skin/classic/browser/menuPanel-customize.png
@@ -69,11 +66,6 @@ browser.jar:
   skin/classic/browser/menuPanel-help@2x.png
   skin/classic/browser/menuPanel-small.png
   skin/classic/browser/menuPanel-small@2x.png
-  skin/classic/browser/bad-content-blocked-16.png           (../shared/bad-content-blocked-16.png)
-  skin/classic/browser/bad-content-blocked-16@2x.png        (../shared/bad-content-blocked-16@2x.png)
-  skin/classic/browser/bad-content-blocked-64.png           (../shared/bad-content-blocked-64.png)
-  skin/classic/browser/bad-content-unblocked-16.png         (../shared/bad-content-unblocked-16.png)
-  skin/classic/browser/bad-content-unblocked-64.png         (../shared/bad-content-unblocked-64.png)
   skin/classic/browser/monitor.png
   skin/classic/browser/monitor_16-10.png
   skin/classic/browser/notification-16.png
@@ -96,6 +88,7 @@ browser.jar:
   skin/classic/browser/search-history-icon.svg              (../shared/search/history-icon.svg)
   skin/classic/browser/search-indicator-magnifying-glass.svg   (../shared/search/search-indicator-magnifying-glass.svg)
   skin/classic/browser/search-arrow-go.svg                  (../shared/search/search-arrow-go.svg)
+  skin/classic/browser/info.svg                             (../shared/info.svg)
   skin/classic/browser/Security-broken.png
   skin/classic/browser/setDesktopBackground.css
   skin/classic/browser/slowStartup-16.png
@@ -105,6 +98,7 @@ browser.jar:
   skin/classic/browser/Toolbar-small.png
   skin/classic/browser/undoCloseTab.png                        (../shared/undoCloseTab.png)
   skin/classic/browser/update-badge.svg                        (../shared/update-badge.svg)
+  skin/classic/browser/update-badge-failed.svg                 (../shared/update-badge-failed.svg)
   skin/classic/browser/urlbar-arrow.png                     (../shared/urlbar-arrow.png)
   skin/classic/browser/urlbar-arrow@2x.png                  (../shared/urlbar-arrow@2x.png)
   skin/classic/browser/session-restore.svg                  (../shared/incontent-icons/session-restore.svg)
@@ -165,6 +159,8 @@ browser.jar:
 * skin/classic/browser/customizableui/panelUIOverlay.css (customizableui/panelUIOverlay.css)
   skin/classic/browser/customizableui/subView-arrow-back-inverted.png  (../shared/customizableui/subView-arrow-back-inverted.png)
   skin/classic/browser/customizableui/subView-arrow-back-inverted-rtl.png  (../shared/customizableui/subView-arrow-back-inverted-rtl.png)
+  skin/classic/browser/customizableui/thumburger.png  (customizableui/thumburger.png)
+  skin/classic/browser/customizableui/thumburger-inverted.png  (customizableui/thumburger-inverted.png)
   skin/classic/browser/customizableui/whimsy.png  (../shared/customizableui/whimsy.png)
   skin/classic/browser/customizableui/whimsy@2x.png  (../shared/customizableui/whimsy@2x.png)
   skin/classic/browser/customizableui/whimsy-bw.png  (../shared/customizableui/whimsy-bw.png)
@@ -233,6 +229,13 @@ browser.jar:
   skin/classic/browser/preferences/applications.css   (preferences/applications.css)
   skin/classic/browser/preferences/aboutPermissions.css (preferences/aboutPermissions.css)
   skin/classic/browser/preferences/search.css         (preferences/search.css)
+  skin/classic/browser/privatebrowsing/attention.png          (../shared/privatebrowsing/attention.png)
+  skin/classic/browser/privatebrowsing/attention@2x.png       (../shared/privatebrowsing/attention@2x.png)
+  skin/classic/browser/privatebrowsing/check.png              (../shared/privatebrowsing/check.png)
+  skin/classic/browser/privatebrowsing/check@2x.png           (../shared/privatebrowsing/check@2x.png)
+  skin/classic/browser/privatebrowsing/mask.svg               (../shared/privatebrowsing/mask.svg)
+  skin/classic/browser/privatebrowsing/shield-page.png        (../shared/privatebrowsing/shield-page.png)
+  skin/classic/browser/privatebrowsing/shield-page@2x.png     (../shared/privatebrowsing/shield-page@2x.png)
   skin/classic/browser/social/services-16.png         (social/services-16.png)
   skin/classic/browser/social/services-64.png         (social/services-64.png)
   skin/classic/browser/social/share-button.png        (social/share-button.png)
@@ -387,12 +390,6 @@ browser.jar:
   skin/classic/browser/devtools/debugger-blackbox@2x.png  (../shared/devtools/images/debugger-blackbox@2x.png)
   skin/classic/browser/devtools/debugger-prettyprint.png  (../shared/devtools/images/debugger-prettyprint.png)
   skin/classic/browser/devtools/debugger-prettyprint@2x.png (../shared/devtools/images/debugger-prettyprint@2x.png)
-  skin/classic/browser/devtools/debugger-no-pause-exceptions.png  (../shared/devtools/images/debugger-no-pause-exceptions.png)
-  skin/classic/browser/devtools/debugger-no-pause-exceptions@2x.png (../shared/devtools/images/debugger-no-pause-exceptions@2x.png)
-  skin/classic/browser/devtools/debugger-pause-all-exceptions.png  (../shared/devtools/images/debugger-pause-all-exceptions.png)
-  skin/classic/browser/devtools/debugger-pause-all-exceptions@2x.png (../shared/devtools/images/debugger-pause-all-exceptions@2x.png)
-  skin/classic/browser/devtools/debugger-pause-uncaught-exceptions.png  (../shared/devtools/images/debugger-pause-uncaught-exceptions.png)
-  skin/classic/browser/devtools/debugger-pause-uncaught-exceptions@2x.png (../shared/devtools/images/debugger-pause-uncaught-exceptions@2x.png)
   skin/classic/browser/devtools/debugger-toggleBreakpoints.png (../shared/devtools/images/debugger-toggleBreakpoints.png)
   skin/classic/browser/devtools/debugger-toggleBreakpoints@2x.png (../shared/devtools/images/debugger-toggleBreakpoints@2x.png)
   skin/classic/browser/devtools/tracer-icon.png        (../shared/devtools/images/tracer-icon.png)

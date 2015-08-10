@@ -973,7 +973,7 @@ RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
 #ifdef DEBUG
     // reget frame from content since it may have been regenerated...
     if (changeData->mContent) {
-      if (!css::CommonAnimationManager::ContentOrAncestorHasAnimation(changeData->mContent)) {
+      if (!CommonAnimationManager::ContentOrAncestorHasAnimation(changeData->mContent)) {
         nsIFrame* frame = changeData->mContent->GetPrimaryFrame();
         if (frame) {
           DebugVerifyStyleTree(frame);
@@ -2658,7 +2658,7 @@ ElementRestyler::AddLayerChangesForAnimation()
     RestyleManager::GetMaxAnimationGenerationForFrame(mFrame);
 
   nsChangeHint hint = nsChangeHint(0);
-  const auto& layerInfo = css::CommonAnimationManager::sLayerAnimationInfo;
+  const auto& layerInfo = CommonAnimationManager::sLayerAnimationInfo;
   for (size_t i = 0; i < ArrayLength(layerInfo); i++) {
     Layer* layer =
       FrameLayerBuilder::GetDedicatedLayer(mFrame, layerInfo[i].mLayerType);
@@ -3997,11 +3997,12 @@ ElementRestyler::RestyleUndisplayedNodes(nsRestyleHint    aChildRestyleHint,
     if (MustRestyleSelf(thisChildHint, element)) {
       undisplayedContext =
         styleSet->ResolveStyleFor(element, aParentContext, mTreeMatchContext);
-    } else if (thisChildHint ||
-               styleSet->IsInRuleTreeReconstruct()) {
-      // XXX Should the above condition ignore eRestyle_Force(Descendants)
-      // like the corresponding check in RestyleSelf?
-
+    } else if (CanReparentStyleContext(thisChildHint)) {
+      undisplayedContext =
+        styleSet->ReparentStyleContext(undisplayed->mStyle,
+                                       aParentContext,
+                                       element);
+    } else {
       // Use ResolveStyleWithReplacement either for actual
       // replacements, or as a substitute for ReparentStyleContext
       // that rebuilds the path in the rule tree rather than reusing
@@ -4013,11 +4014,6 @@ ElementRestyler::RestyleUndisplayedNodes(nsRestyleHint    aChildRestyleHint,
                                               aParentContext,
                                               undisplayed->mStyle,
                                               rshint);
-    } else {
-      undisplayedContext =
-        styleSet->ReparentStyleContext(undisplayed->mStyle,
-                                       aParentContext,
-                                       element);
     }
     const nsStyleDisplay* display = undisplayedContext->StyleDisplay();
     if (display->mDisplay != aDisplay) {

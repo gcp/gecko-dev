@@ -138,6 +138,12 @@ protected:
   virtual ~TextureReadbackSink() {}
 };
 
+enum class BackendSelector
+{
+  Content,
+  Canvas
+};
+
 /**
  * TextureClient is a thin abstraction over texture data that need to be shared
  * between the content process and the compositor process. It is the
@@ -174,7 +180,7 @@ public:
   CreateForDrawing(ISurfaceAllocator* aAllocator,
                    gfx::SurfaceFormat aFormat,
                    gfx::IntSize aSize,
-                   gfx::BackendType aMoz2dBackend,
+                   BackendSelector aSelector,
                    TextureFlags aTextureFlags,
                    TextureAllocationFlags flags = ALLOC_DEFAULT);
 
@@ -273,7 +279,7 @@ public:
    * This function can be used to update the contents of the TextureClient
    * off the main thread.
    */
-  virtual void UpdateFromSurface(gfx::DataSourceSurface* aSurface) { MOZ_CRASH(); }
+  virtual void UpdateFromSurface(gfx::SourceSurface* aSurface) { MOZ_CRASH(); }
 
   // TextureClients that can expose a DrawTarget should override this method.
   virtual gfx::SurfaceFormat GetFormat() const
@@ -593,7 +599,7 @@ public:
 
   virtual gfx::DrawTarget* BorrowDrawTarget() override;
 
-  virtual void UpdateFromSurface(gfx::DataSourceSurface* aSurface) override;
+  virtual void UpdateFromSurface(gfx::SourceSurface* aSurface) override;
 
   virtual bool AllocateForSurface(gfx::IntSize aSize,
                                   TextureAllocationFlags aFlags = ALLOC_DEFAULT) override;

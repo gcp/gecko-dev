@@ -103,6 +103,7 @@ nsCocoaWindow::nsCocoaWindow()
 , mDelegate(nil)
 , mSheetWindowParent(nil)
 , mPopupContentView(nil)
+, mFullscreenTransitionAnimation(nil)
 , mShadowStyle(NS_STYLE_WINDOW_SHADOW_DEFAULT)
 , mBackingScaleFactor(0.0)
 , mAnimationType(nsIWidget::eGenericWindowAnimation)
@@ -500,12 +501,21 @@ NS_IMETHODIMP nsCocoaWindow::CreatePopupContentView(const nsIntRect &aRect)
 
 NS_IMETHODIMP nsCocoaWindow::Destroy()
 {
+  if (mOnDestroyCalled)
+    return NS_OK;
+  mOnDestroyCalled = true;
+
   // If we don't hide here we run into problems with panels, this is not ideal.
   // (Bug 891424)
   Show(false);
 
   if (mPopupContentView)
     mPopupContentView->Destroy();
+
+  if (mFullscreenTransitionAnimation) {
+    [mFullscreenTransitionAnimation stopAnimation];
+    ReleaseFullscreenTransitionAnimation();
+  }
 
   nsBaseWidget::Destroy();
   // nsBaseWidget::Destroy() calls GetParent()->RemoveChild(this). But we
@@ -526,7 +536,7 @@ NS_IMETHODIMP nsCocoaWindow::Destroy()
     if (mInNativeFullScreenMode) {
       DestroyNativeWindow();
     } else if (mWindow) {
-      nsCocoaUtils::HideOSChromeOnScreen(false, [mWindow screen]);
+      nsCocoaUtils::HideOSChromeOnScreen(false);
     }
   }
 
@@ -1289,17 +1299,31 @@ NS_IMPL_ISUPPORTS0(FullscreenTransitionData)
 @interface FullscreenTransitionDelegate : NSObject <NSAnimationDelegate>
 {
 @public
+  nsCocoaWindow* mWindow;
   nsIRunnable* mCallback;
 }
 @end
 
 @implementation FullscreenTransitionDelegate
-- (void)animationDidEnd:(NSAnimation *)animation
+- (void)cleanupAndDispatch:(NSAnimation* )animation
 {
   [animation setDelegate:nil];
   [self autorelease];
   // The caller should have added ref for us.
   NS_DispatchToMainThread(already_AddRefed<nsIRunnable>(mCallback));
+}
+
+- (void)animationDidEnd:(NSAnimation *)animation
+{
+  MOZ_ASSERT(animation == mWindow->FullscreenTransitionAnimation(),
+             "Should be handling the only animation on the window");
+  mWindow->ReleaseFullscreenTransitionAnimation();
+  [self cleanupAndDispatch:animation];
+}
+
+- (void)animationDidStop:(NSAnimation *)animation
+{
+  [self cleanupAndDispatch:animation];
 }
 @end
 
@@ -1336,19 +1360,25 @@ nsCocoaWindow::PerformFullscreenTransition(FullscreenTransitionStage aStage,
   auto data = static_cast<FullscreenTransitionData*>(aData);
   FullscreenTransitionDelegate* delegate =
     [[FullscreenTransitionDelegate alloc] init];
+  delegate->mWindow = this;
   // Storing already_AddRefed directly could cause static checking fail.
   delegate->mCallback = nsCOMPtr<nsIRunnable>(aCallback).forget().take();
+
+  if (mFullscreenTransitionAnimation) {
+    [mFullscreenTransitionAnimation stopAnimation];
+    ReleaseFullscreenTransitionAnimation();
+  }
 
   NSDictionary* dict = @{
     NSViewAnimationTargetKey: data->mTransitionWindow,
     NSViewAnimationEffectKey: aStage == eBeforeFullscreenToggle ?
       NSViewAnimationFadeInEffect : NSViewAnimationFadeOutEffect
   };
-  NSAnimation* animation =
-    [[[NSViewAnimation alloc] initWithViewAnimations:@[dict]] autorelease];
-  [animation setDelegate:delegate];
-  [animation setDuration:aDuration / 1000.0];
-  [animation startAnimation];
+  mFullscreenTransitionAnimation =
+    [[NSViewAnimation alloc] initWithViewAnimations:@[dict]];
+  [mFullscreenTransitionAnimation setDelegate:delegate];
+  [mFullscreenTransitionAnimation setDuration:aDuration / 1000.0];
+  [mFullscreenTransitionAnimation startAnimation];
 }
 
 void nsCocoaWindow::EnteredFullScreen(bool aFullScreen, bool aNativeMode)
@@ -1438,7 +1468,7 @@ nsCocoaWindow::DoMakeFullScreen(bool aFullScreen, bool aUseSystemTransition)
     // The order here matters. When we exit full screen mode, we need to show the
     // Dock first, otherwise the newly-created window won't have its minimize
     // button enabled. See bug 526282.
-    nsCocoaUtils::HideOSChromeOnScreen(aFullScreen, [mWindow screen]);
+    nsCocoaUtils::HideOSChromeOnScreen(aFullScreen);
     nsresult rv = nsBaseWidget::MakeFullScreen(aFullScreen);
     NSEnableScreenUpdates();
     NS_ENSURE_SUCCESS(rv, rv);

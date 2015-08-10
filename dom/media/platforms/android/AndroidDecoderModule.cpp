@@ -255,11 +255,21 @@ public:
 
 bool AndroidDecoderModule::SupportsMimeType(const nsACString& aMimeType)
 {
+  if (!AndroidBridge::Bridge() || (AndroidBridge::Bridge()->GetAPIVersion() < 16)) {
+    return false;
+  }
+
   if (aMimeType.EqualsLiteral("video/mp4") ||
       aMimeType.EqualsLiteral("video/avc")) {
     return true;
   }
-  return static_cast<bool>(mozilla::CreateDecoder(aMimeType));
+
+  MediaCodec::LocalRef ref = mozilla::CreateDecoder(aMimeType);
+  if (!ref) {
+    return false;
+  }
+  ref->Release();
+  return true;
 }
 
 already_AddRefed<MediaDataDecoder>
@@ -473,7 +483,7 @@ void MediaCodecDataDecoder::DecoderLoop()
 
         void* directBuffer = frame.GetEnv()->GetDirectBufferAddress(buffer.Get());
 
-        MOZ_ASSERT(frame.GetEnv()->GetDirectBufferCapacity(buffer.Get()) >= sample->mSize,
+        MOZ_ASSERT(frame.GetEnv()->GetDirectBufferCapacity(buffer.Get()) >= sample->Size(),
           "Decoder buffer is not large enough for sample");
 
         {
@@ -482,9 +492,9 @@ void MediaCodecDataDecoder::DecoderLoop()
           mQueue.pop();
         }
 
-        PodCopy((uint8_t*)directBuffer, sample->mData, sample->mSize);
+        PodCopy((uint8_t*)directBuffer, sample->Data(), sample->Size());
 
-        res = mDecoder->QueueInputBuffer(inputIndex, 0, sample->mSize,
+        res = mDecoder->QueueInputBuffer(inputIndex, 0, sample->Size(),
                                          sample->mTime, 0);
         HANDLE_DECODER_ERROR();
 

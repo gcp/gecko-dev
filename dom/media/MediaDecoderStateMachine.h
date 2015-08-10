@@ -91,6 +91,7 @@ hardware (via AudioStream).
 #include "MediaDecoder.h"
 #include "MediaDecoderReader.h"
 #include "MediaDecoderOwner.h"
+#include "MediaEventSource.h"
 #include "MediaMetadataManager.h"
 #include "MediaTimer.h"
 #include "DecodedStream.h"
@@ -399,8 +400,8 @@ protected:
   void PushFront(AudioData* aSample);
   void PushFront(VideoData* aSample);
 
-  void OnAudioPopped(const AudioData* aSample);
-  void OnVideoPopped(const VideoData* aSample);
+  void OnAudioPopped(const MediaData* aSample);
+  void OnVideoPopped(const MediaData* aSample);
 
   void VolumeChanged();
   void LogicalPlaybackRateChanged();
@@ -1288,6 +1289,9 @@ private:
 
   MozPromiseRequestHolder<GenericPromise> mAudioSinkPromise;
 
+  MediaEventListener mAudioQueueListener;
+  MediaEventListener mVideoQueueListener;
+
 private:
   // The buffered range. Mirrored from the decoder thread.
   Mirror<media::TimeIntervals> mBuffered;
@@ -1313,6 +1317,10 @@ private:
 
   // Pitch preservation for the playback rate.
   Mirror<bool> mPreservesPitch;
+
+  // True if the media is same-origin with the element. Data can only be
+  // passed to MediaStreams when this is true.
+  Mirror<bool> mSameOriginMedia;
 
   // Duration of the media. This is guaranteed to be non-null after we finish
   // decoding the first frame.
