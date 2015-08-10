@@ -626,7 +626,7 @@ CamerasChild::Shutdown()
   if (CamerasSingleton::Thread()) {
     LOG(("Dispatching actor deletion"));
     // Delete the parent actor.
-    nsCOMPtr<nsIRunnable> deleteRunnable =
+    nsRefPtr<nsRunnable> deleteRunnable =
       // CamerasChild (this) will remain alive and is only deleted by the
       // IPC layer when SendAllDone returns.
       media::NewRunnableFrom([this]() -> nsresult {
