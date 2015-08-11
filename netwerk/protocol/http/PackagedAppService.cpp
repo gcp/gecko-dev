@@ -15,6 +15,7 @@
 #include "nsStreamUtils.h"
 #include "mozilla/Logging.h"
 #include "mozilla/DebugOnly.h"
+#include "nsIHttpHeaderVisitor.h"
 
 namespace mozilla {
 namespace net {
@@ -89,9 +90,89 @@ PackagedAppService::CacheEntryWriter::CopySecurityInfo(nsIChannel *aChannel)
   return NS_OK;
 }
 
+namespace { // anon
+
+class HeaderCopier final : public nsIHttpHeaderVisitor
+{
+public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIHTTPHEADERVISITOR
+
+  explicit HeaderCopier(nsHttpResponseHead* aHead)
+    : mHead(aHead)
+  {
+  }
+
+private:
+  ~HeaderCopier() {}
+  bool ShouldCopy(const nsACString& aHeader) const;
+
+  nsHttpResponseHead* mHead;
+};
+
+NS_IMPL_ISUPPORTS(HeaderCopier, nsIHttpHeaderVisitor)
+
+NS_IMETHODIMP
+HeaderCopier::VisitHeader(const nsACString& aHeader, const nsACString& aValue)
+{
+  if (!ShouldCopy(aHeader)) {
+    return NS_OK;
+  }
+
+  return mHead->SetHeader(nsHttp::ResolveAtom(aHeader), aValue);
+}
+
+bool
+HeaderCopier::ShouldCopy(const nsACString &aHeader) const
+{
+  nsHttpAtom header = nsHttp::ResolveAtom(aHeader);
+
+  // Don't overwrite the existing headers.
+  if (mHead->PeekHeader(header)) {
+    return false;
+  }
+
+  // A black list of headers we shouldn't copy.
+  static const nsHttpAtom kHeadersCopyBlacklist[] = {
+    nsHttp::Authentication,
+    nsHttp::Cache_Control,
+    nsHttp::Connection,
+    nsHttp::Content_Disposition,
+    nsHttp::Content_Encoding,
+    nsHttp::Content_Language,
+    nsHttp::Content_Length,
+    nsHttp::Content_Location,
+    nsHttp::Content_MD5,
+    nsHttp::Content_Range,
+    nsHttp::Content_Type,
+    nsHttp::ETag,
+    nsHttp::Last_Modified,
+    nsHttp::Proxy_Authenticate,
+    nsHttp::Proxy_Connection,
+    nsHttp::Set_Cookie,
+    nsHttp::Set_Cookie2,
+    nsHttp::TE,
+    nsHttp::Trailer,
+    nsHttp::Transfer_Encoding,
+    nsHttp::Vary,
+    nsHttp::WWW_Authenticate,
+  };
+
+  // Loop through the black list to check if we should copy this header.
+  for (uint32_t i = 0; i < mozilla::ArrayLength(kHeadersCopyBlacklist); i++) {
+    if (header == kHeadersCopyBlacklist[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+} // anon
+
 /* static */ nsresult
 PackagedAppService::CacheEntryWriter::CopyHeadersFromChannel(nsIChannel *aChannel,
-                                                  nsHttpResponseHead *aHead)
+                                                             nsHttpResponseHead *aHead)
 {
   if (!aChannel || !aHead) {
     return NS_ERROR_INVALID_ARG;
@@ -102,11 +183,8 @@ PackagedAppService::CacheEntryWriter::CopyHeadersFromChannel(nsIChannel *aChanne
     return NS_ERROR_FAILURE;
   }
 
-  nsAutoCString value;
-  httpChan->GetResponseHeader(NS_LITERAL_CSTRING("Content-Security-Policy"), value);
-  aHead->SetHeader(nsHttp::ResolveAtom("Content-Security-Policy"), value);
-
-  return NS_OK;
+  nsRefPtr<HeaderCopier> headerCopier = new HeaderCopier(aHead);
+  return httpChan->VisitResponseHeaders(headerCopier);
 }
 
 NS_METHOD
@@ -605,23 +683,30 @@ PackagedAppService::GetPackageURI(nsIURI *aURI, nsIURI **aPackageURI)
 }
 
 NS_IMETHODIMP
-PackagedAppService::RequestURI(nsIURI *aURI,
-                               nsILoadContextInfo *aInfo,
-                               nsICacheEntryOpenCallback *aCallback)
+PackagedAppService::GetResource(nsIPrincipal *aPrincipal,
+                                uint32_t aLoadFlags,
+                                nsILoadContextInfo *aInfo,
+                                nsICacheEntryOpenCallback *aCallback)
 {
   // Check arguments are not null
-  if (!aURI || !aCallback || !aInfo) {
+  if (!aPrincipal || !aCallback || !aInfo) {
     return NS_ERROR_INVALID_ARG;
   }
 
-
   nsresult rv;
-  LogURI("PackagedAppService::RequestURI", this, aURI, aInfo);
+
+  nsCOMPtr<nsIURI> uri;
+  rv = aPrincipal->GetURI(getter_AddRefs(uri));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  LogURI("PackagedAppService::GetResource", this, uri, aInfo);
 
   MOZ_RELEASE_ASSERT(NS_IsMainThread(), "mDownloadingPackages hashtable is not thread safe");
 
   nsCOMPtr<nsIURI> packageURI;
-  rv = GetPackageURI(aURI, getter_AddRefs(packageURI));
+  rv = GetPackageURI(uri, getter_AddRefs(packageURI));
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -643,22 +728,15 @@ PackagedAppService::RequestURI(nsIURI *aURI,
     // downloaded, we will add the callback to the package's queue, and it will
     // be called once the file is processed and saved in the cache.
 
-    downloader->AddCallback(aURI, aCallback);
+    downloader->AddCallback(uri, aCallback);
     return NS_OK;
-  }
-
-  // We need to set this flag, because the package metadata
-  // needs to have a separate entry for anonymous channels.
-  uint32_t extra_flags = 0;
-  if (aInfo->IsAnonymous()) {
-    extra_flags = nsIRequest::LOAD_ANONYMOUS;
   }
 
   nsCOMPtr<nsIChannel> channel;
   rv = NS_NewChannel(
-    getter_AddRefs(channel), packageURI, nsContentUtils::GetSystemPrincipal(),
+    getter_AddRefs(channel), packageURI, aPrincipal,
     nsILoadInfo::SEC_NORMAL, nsIContentPolicy::TYPE_OTHER, nullptr, nullptr,
-    nsIRequest::LOAD_NORMAL | extra_flags);
+    aLoadFlags);
 
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -678,7 +756,7 @@ PackagedAppService::RequestURI(nsIURI *aURI,
     return rv;
   }
 
-  downloader->AddCallback(aURI, aCallback);
+  downloader->AddCallback(uri, aCallback);
 
   nsCOMPtr<nsIStreamConverterService> streamconv =
     do_GetService("@mozilla.org/streamConverters;1", &rv);
