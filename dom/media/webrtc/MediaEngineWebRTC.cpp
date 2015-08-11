@@ -359,6 +359,13 @@ MediaEngineWebRTC::Shutdown()
   mVideoSources.Clear();
   mAudioSources.Clear();
 
+  if (mVoiceEngine) {
+    mVoiceEngine->SetTraceCallback(nullptr);
+    webrtc::VoiceEngine::Delete(mVoiceEngine);
+  }
+
+  mVoiceEngine = nullptr;
+
   mozilla::camera::Shutdown();
 
   if (mThread) {

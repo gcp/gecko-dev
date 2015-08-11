@@ -78,7 +78,10 @@ public:
   virtual const dom::MediaSourceEnum GetMediaSource() override {
     return mMediaSource;
   }
+
   void Refresh(int aIndex);
+
+  virtual void Shutdown() override;
 
 protected:
   ~MediaEngineRemoteVideoSource() { Shutdown(); }
@@ -86,7 +89,6 @@ protected:
 private:
   // Initialize the needed Video engine interfaces.
   void Init();
-  void Shutdown() override;
   size_t NumCapabilities() override;
   void GetCapability(size_t aIndex, webrtc::CaptureCapability& aOut) override;
 
