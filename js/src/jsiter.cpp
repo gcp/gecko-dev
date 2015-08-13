@@ -286,24 +286,20 @@ Snapshot(JSContext* cx, HandleObject pobj_, unsigned flags, AutoIdVector* props)
 
     do {
         if (JSNewEnumerateOp enumerate = pobj->getOps()->enumerate) {
-            // This hook has the full control over what gets enumerated.
             AutoIdVector properties(cx);
-            if (!enumerate(cx, pobj, properties))
+            bool enumerableOnly = !(flags & JSITER_HIDDEN);
+            if (!enumerate(cx, pobj, properties, enumerableOnly))
                  return false;
 
             RootedId id(cx);
             for (size_t n = 0; n < properties.length(); n++) {
                 id = properties[n];
-                bool enumerable = true;
 
                 // The enumerate hook does not indicate whether the properties
-                // it returns are enumerable or not. There is no non-effectful
-                // way to determine this from the object, so carve out
-                // exceptions here for places where the property is not
-                // enumerable.
-                if (pobj->is<UnboxedArrayObject>() && id == NameToId(cx->names().length))
-                    enumerable = false;
-
+                // it returns are enumerable or not. Since we already passed
+                // `enumerableOnly` to the hook to filter out non-enumerable
+                // properties, it doesn't really matter what we pass here.
+                bool enumerable = true;
                 if (!Enumerate(cx, pobj, id, enumerable, flags, ht, props))
                     return false;
             }
@@ -396,25 +392,6 @@ Snapshot(JSContext* cx, HandleObject pobj_, unsigned flags, AutoIdVector* props)
 
 #endif /* JS_MORE_DETERMINISTIC */
 
-    return true;
-}
-
-bool
-js::VectorToIdArray(JSContext* cx, AutoIdVector& props, JSIdArray** idap)
-{
-    JS_STATIC_ASSERT(sizeof(JSIdArray) > sizeof(jsid));
-    size_t len = props.length();
-    size_t idsz = len * sizeof(jsid);
-    size_t sz = (sizeof(JSIdArray) - sizeof(jsid)) + idsz;
-    JSIdArray* ida = reinterpret_cast<JSIdArray*>(cx->zone()->pod_malloc<uint8_t>(sz));
-    if (!ida)
-        return false;
-
-    ida->length = static_cast<int>(len);
-    jsid* v = props.begin();
-    for (int i = 0; i < ida->length; i++)
-        ida->vector[i].init(v[i]);
-    *idap = ida;
     return true;
 }
 
