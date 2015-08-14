@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 /* globals gDevTools, DOMHelpers, toolboxStrings, InspectorFront, Selection,
    CommandUtils, DevToolsUtils, Hosts, osString, showDoorhanger,
-   getHighlighterUtils, getPerformanceFront */
+   getHighlighterUtils, createPerformanceFront */
 
 "use strict";
 
@@ -59,8 +59,8 @@ loader.lazyRequireGetter(this, "DevToolsUtils",
   "devtools/toolkit/DevToolsUtils");
 loader.lazyRequireGetter(this, "showDoorhanger",
   "devtools/shared/doorhanger", true);
-loader.lazyRequireGetter(this, "getPerformanceFront",
-  "devtools/performance/front", true);
+loader.lazyRequireGetter(this, "createPerformanceFront",
+  "devtools/server/actors/performance", true);
 loader.lazyRequireGetter(this, "system",
   "devtools/toolkit/shared/system");
 loader.lazyGetter(this, "osString", () => {
@@ -135,6 +135,7 @@ function Toolbox(target, selectedTool, hostType, hostOptions) {
   this._onBottomHostMinimized = this._onBottomHostMinimized.bind(this);
   this._onBottomHostMaximized = this._onBottomHostMaximized.bind(this);
   this._onToolSelectWhileMinimized = this._onToolSelectWhileMinimized.bind(this);
+  this._onPerformanceFrontEvent = this._onPerformanceFrontEvent.bind(this);
   this._onBottomHostWillChange = this._onBottomHostWillChange.bind(this);
   this._toggleMinimizeMode = this._toggleMinimizeMode.bind(this);
 
@@ -411,15 +412,13 @@ Toolbox.prototype = {
 
       // Lazily connect to the profiler here and don't wait for it to complete,
       // used to intercept console.profile calls before the performance tools are open.
-      let profilerReady = this.initPerformance();
+      let performanceFrontConnection = this.initPerformance();
 
-      // However, while testing, we must wait for the performance connection to
-      // finish, as most tests shut down without waiting for a toolbox
-      // destruction event, resulting in the shared profiler connection being
-      // opened and closed outside of the test that originally opened the
-      // toolbox.
+      // If in testing environment, wait for performance connection to finish,
+      // so we don't have to explicitly wait for this in tests; ideally, all tests
+      // will handle this on their own, but each have their own tear down function.
       if (DevToolsUtils.testing) {
-        yield profilerReady;
+        yield performanceFrontConnection;
       }
 
       this.emit("ready");
@@ -1986,17 +1985,20 @@ Toolbox.prototype = {
       return;
     }
 
-    if (this.performance) {
-      yield this.performance.open();
-      return this.performance;
+    if (this._performanceFrontConnection) {
+      return this._performanceFrontConnection.promise;
     }
 
-    this._performance = getPerformanceFront(this.target);
-    yield this.performance.open();
+    this._performanceFrontConnection = promise.defer();
+    this._performance = createPerformanceFront(this._target);
+    yield this.performance.connect();
+
     // Emit an event when connected, but don't wait on startup for this.
     this.emit("profiler-connected");
 
-    return this.performance;
+    this.performance.on("*", this._onPerformanceFrontEvent);
+    this._performanceFrontConnection.resolve(this.performance);
+    return this._performanceFrontConnection.promise;
   }),
 
   /**
@@ -2008,8 +2010,49 @@ Toolbox.prototype = {
     if (!this.performance) {
       return;
     }
+    // If still connecting to performance actor, allow the
+    // actor to resolve its connection before attempting to destroy.
+    if (this._performanceFrontConnection) {
+      yield this._performanceFrontConnection.promise;
+    }
+    this.performance.off("*", this._onPerformanceFrontEvent);
     yield this.performance.destroy();
     this._performance = null;
+  }),
+
+  /**
+   * Called when any event comes from the PerformanceFront. If the performance tool is already
+   * loaded when the first event comes in, immediately unbind this handler, as this is
+   * only used to queue up observed recordings before the performance tool can handle them,
+   * which will only occur when `console.profile()` recordings are started before the tool loads.
+   */
+  _onPerformanceFrontEvent: Task.async(function*(eventName, recording) {
+    if (this.getPanel("performance")) {
+      this.performance.off("*", this._onPerformanceFrontEvent);
+      return;
+    }
+
+    let recordings = this._performanceQueuedRecordings = this._performanceQueuedRecordings || [];
+
+    // Before any console recordings, we'll get a `console-profile-start` event
+    // warning us that a recording will come later (via `recording-started`), so
+    // start to boot up the tool and populate the tool with any other recordings
+    // observed during that time.
+    if (eventName === "console-profile-start" && !this._performanceToolOpenedViaConsole) {
+      this._performanceToolOpenedViaConsole = this.loadTool("performance");
+      let panel = yield this._performanceToolOpenedViaConsole;
+      yield panel.open();
+
+      panel.panelWin.PerformanceController.populateWithRecordings(recordings);
+      this.performance.off("*", this._onPerformanceFrontEvent);
+    }
+
+    // Otherwise, if it's a recording-started event, we've already started loading
+    // the tool, so just store this recording in our array to be later populated
+    // once the tool loads.
+    if (eventName === "recording-started") {
+      recordings.push(recording);
+    }
   }),
 
   /**
