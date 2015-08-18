@@ -104,6 +104,22 @@
   background-color: ThreeDShadow;
 }
 
+@media (-moz-windows-default-theme) {
+  @media (-moz-os-version: windows-vista),
+         (-moz-os-version: windows-win7) {
+    #navigator-toolbox:not(:-moz-lwtheme)::after {
+      background-color: #aabccf;
+    }
+  }
+
+  @media (-moz-os-version: windows-win8),
+         (-moz-os-version: windows-win10) {
+    #navigator-toolbox:not(:-moz-lwtheme)::after {
+      background-color: #c2c2c2;
+    }
+  }
+}
+
 #navigator-toolbox > toolbar {
   -moz-appearance: none;
   border-style: none;
@@ -1252,6 +1268,8 @@ toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-ba
       border-color: hsl(0,0%,90%);
       padding: 1px;
       -moz-padding-end: 3px;
+      transition-property: border-color, box-shadow;
+      transition-duration: .1s;
     }
 
     #urlbar:not(:-moz-lwtheme):hover,
@@ -1283,8 +1301,6 @@ toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-ba
   .searchbar-textbox {
     font-size: 1.15em;
     min-height: 28px;
-    transition-property: border-color, box-shadow;
-    transition-duration: .1s;
   }
 
   :root {
@@ -1436,16 +1452,6 @@ html|*.urlbar-input:-moz-lwtheme::-moz-placeholder,
 }
 
 /* identity box */
-
-#identity-box:-moz-locale-dir(ltr) {
-  border-top-left-radius: 1.5px;
-  border-bottom-left-radius: 1.5px;
-}
-
-#identity-box:-moz-locale-dir(rtl) {
-  border-top-right-radius: 1.5px;
-  border-bottom-right-radius: 1.5px;
-}
 
 #identity-box.verifiedIdentity:not(:-moz-lwtheme):not(:hover):not([open=true]) {
   background-color: var(--identity-box-verified-background-color);
@@ -1860,11 +1866,7 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
 
 /* bookmarks menu-button */
 
-#bookmarks-menu-button.bookmark-item > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
-  -moz-margin-start: 5px;
-}
-
-#bookmarks-menu-button[cui-areatype="toolbar"]:not(.bookmark-item):not([overflowedItem=true]) > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
+#nav-bar #bookmarks-menu-button[cui-areatype="toolbar"]:not([overflowedItem=true]) > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
   padding-top: var(--toolbarbutton-vertical-inner-padding);
   padding-bottom: var(--toolbarbutton-vertical-inner-padding);
 }

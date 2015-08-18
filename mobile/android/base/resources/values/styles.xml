@@ -88,6 +88,7 @@
         <item name="android:padding">8dip</item>
         <item name="android:background">@drawable/action_bar_button</item>
         <item name="android:scaleType">fitCenter</item>
+        <item name="drawableTintList">@color/action_bar_menu_item_colors</item>"
     </style>
 
     <style name="Widget.MenuItemSecondaryActionBarBase">
@@ -221,7 +222,7 @@
     </style>
 
     <style name="Widget.HomeListView" parent="Widget.ListView">
-        <item name="android:divider">#E7ECF0</item>
+        <item name="android:divider">@color/divider_light</item>
     </style>
 
     <style name="Widget.TopSitesListView" parent="Widget.BookmarksListView"/>
@@ -559,7 +560,7 @@
     </style>
 
     <style name="Widget.RemoteTabsListView" parent="Widget.HomeListView">
-        <item name="android:childDivider">#E7ECF0</item>
+        <item name="android:childDivider">@color/divider_light</item>
         <item name="android:drawSelectorOnTop">true</item>
     </style>
 

@@ -46,6 +46,7 @@ EXPORTS += [
     'IProgressObserver.h',
     'Orientation.h',
     'SurfaceCache.h',
+    'SurfaceFlags.h',
 ]
 
 UNIFIED_SOURCES += [
@@ -59,7 +60,6 @@ UNIFIED_SOURCES += [
     'Image.cpp',
     'ImageCacheKey.cpp',
     'ImageFactory.cpp',
-    'ImageMetadata.cpp',
     'ImageOps.cpp',
     'ImageWrapper.cpp',
     'imgFrame.cpp',

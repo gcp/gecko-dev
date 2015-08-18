@@ -360,10 +360,8 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
     if (mIsPNG) {
       mContainedDecoder = new nsPNGDecoder(mImage);
       mContainedDecoder->SetMetadataDecode(IsMetadataDecode());
-      mContainedDecoder->SetSendPartialInvalidations(mSendPartialInvalidations);
-      if (mFirstFrameDecode) {
-        mContainedDecoder->SetIsFirstFrameDecode();
-      }
+      mContainedDecoder->SetDecoderFlags(GetDecoderFlags());
+      mContainedDecoder->SetSurfaceFlags(GetSurfaceFlags());
       mContainedDecoder->Init();
       if (!WriteToContainedDecoder(mSignature, PNGSIGNATURESIZE)) {
         return;
@@ -378,8 +376,8 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
     }
 
     if (!HasSize() && mContainedDecoder->HasSize()) {
-      PostSize(mContainedDecoder->GetImageMetadata().GetWidth(),
-               mContainedDecoder->GetImageMetadata().GetHeight());
+      nsIntSize size = mContainedDecoder->GetSize();
+      PostSize(size.width, size.height);
     }
 
     mPos += aCount;
@@ -440,10 +438,8 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
     mContainedDecoder = bmpDecoder;
     bmpDecoder->SetUseAlphaData(true);
     mContainedDecoder->SetMetadataDecode(IsMetadataDecode());
-    mContainedDecoder->SetSendPartialInvalidations(mSendPartialInvalidations);
-    if (mFirstFrameDecode) {
-      mContainedDecoder->SetIsFirstFrameDecode();
-    }
+    mContainedDecoder->SetDecoderFlags(GetDecoderFlags());
+    mContainedDecoder->SetSurfaceFlags(GetSurfaceFlags());
     mContainedDecoder->Init();
 
     // The ICO format when containing a BMP does not include the 14 byte
@@ -479,8 +475,8 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
       return;
     }
 
-    PostSize(mContainedDecoder->GetImageMetadata().GetWidth(),
-             mContainedDecoder->GetImageMetadata().GetHeight());
+    nsIntSize size = mContainedDecoder->GetSize();
+    PostSize(size.width, size.height);
 
     // We have the size. If we're doing a metadata decode, we're done.
     if (IsMetadataDecode()) {

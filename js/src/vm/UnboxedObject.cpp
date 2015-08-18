@@ -13,6 +13,7 @@
 #include "jsobjinlines.h"
 
 #include "gc/Nursery-inl.h"
+#include "jit/MacroAssembler-inl.h"
 #include "vm/Shape-inl.h"
 
 using mozilla::ArrayLength;
@@ -160,7 +161,7 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
     masm.PushRegsInMask(liveVolatileRegisters);
 
     masm.mov(ImmPtr(cx->runtime()), scratch1);
-    masm.setupUnalignedABICall(2, scratch2);
+    masm.setupUnalignedABICall(scratch2);
     masm.passABIArg(scratch1);
     masm.passABIArg(object);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, PostWriteBarrier));
@@ -818,7 +819,7 @@ UnboxedPlainObject::obj_setProperty(JSContext* cx, HandleObject obj, HandleId id
             return SetProperty(cx, obj, id, v, receiver, result);
         }
 
-        return SetPropertyByDefining(cx, obj, id, v, receiver, false, result);
+        return SetPropertyByDefining(cx, obj, id, v, receiver, result);
     }
 
     if (UnboxedExpandoObject* expando = obj->as<UnboxedPlainObject>().maybeExpando()) {
@@ -1485,7 +1486,7 @@ UnboxedArrayObject::obj_setProperty(JSContext* cx, HandleObject obj, HandleId id
             return SetProperty(cx, obj, id, v, receiver, result);
         }
 
-        return SetPropertyByDefining(cx, obj, id, v, receiver, false, result);
+        return SetPropertyByDefining(cx, obj, id, v, receiver, result);
     }
 
     return SetPropertyOnProto(cx, obj, id, v, receiver, result);
