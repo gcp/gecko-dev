@@ -9,6 +9,7 @@
 
 #include "nsThreadUtils.h"
 #include "nsCOMPtr.h"
+#include "mozilla/UniquePtr.h"
 
 #include "base/thread.h"
 
@@ -22,7 +23,7 @@ class ThreadDestructor : public nsRunnable
   DISALLOW_COPY_AND_ASSIGN(ThreadDestructor);
 
 public:
-  explicit ThreadDestructor(nsCOMPtr<nsIThread> aThread)
+  explicit ThreadDestructor(nsIThread* aThread)
     : mThread(aThread) {}
 
   NS_IMETHOD Run() override
@@ -41,7 +42,7 @@ private:
 class RunnableTask : public Task
 {
 public:
-  explicit RunnableTask(nsRefPtr<nsRunnable> aRunnable)
+  explicit RunnableTask(nsRunnable* aRunnable)
     : mRunnable(aRunnable) {}
 
   void Run() override {

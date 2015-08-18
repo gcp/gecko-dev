@@ -33,7 +33,8 @@ MediaEngineRemoteVideoSource::MediaEngineRemoteVideoSource(
 }
 
 void
-MediaEngineRemoteVideoSource::Init() {
+MediaEngineRemoteVideoSource::Init()
+{
   LOG((__PRETTY_FUNCTION__));
   char deviceName[kMaxDeviceNameLength];
   char uniqueId[kMaxUniqueIdLength];
@@ -54,7 +55,8 @@ MediaEngineRemoteVideoSource::Init() {
 }
 
 void
-MediaEngineRemoteVideoSource::Shutdown() {
+MediaEngineRemoteVideoSource::Shutdown()
+{
   LOG((__PRETTY_FUNCTION__));
   if (!mInitDone) {
     return;
