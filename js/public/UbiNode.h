@@ -363,6 +363,10 @@ class StackFrame : public JS::Traceable {
     // terminated. Returns how many characters were written into the buffer.
     size_t functionDisplayName(RangedPtr<char16_t> destination, size_t length) const;
 
+    // Get the size of the respective strings. 0 is returned for null strings.
+    size_t sourceLength();
+    size_t functionDisplayNameLength();
+
     // JS::Traceable implementation just forwards to our virtual trace method.
     static void trace(StackFrame* frame, JSTracer* trc) {
         if (frame)
@@ -426,6 +430,9 @@ class ConcreteStackFrame<void> : public BaseStackFrame {
     bool isSystem() const override { MOZ_CRASH("null JS::ubi::StackFrame"); }
     bool isSelfHosted() const override { MOZ_CRASH("null JS::ubi::StackFrame"); }
 };
+
+bool ConstructSavedFrameStackSlow(JSContext* cx, JS::ubi::StackFrame& frame,
+                                  MutableHandleObject outSavedFrameStack);
 
 
 /*** ubi::Node ************************************************************************************/

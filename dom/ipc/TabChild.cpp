@@ -554,6 +554,7 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mRemoteFrame(nullptr)
   , mManager(aManager)
   , mChromeFlags(aChromeFlags)
+  , mActiveSuppressDisplayport(0)
   , mLayersId(0)
   , mActivePointerId(-1)
   , mAppPackageFileDescriptorRecved(false)
@@ -1561,23 +1562,15 @@ TabChild::MaybeRequestPreinitCamera()
       return;
     }
 
-    nsString manifestUrl = EmptyString();
-    appsService->GetManifestURLByLocalId(OwnAppId(), manifestUrl);
-    nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
-    if (NS_WARN_IF(!secMan)) {
-      return;
-    }
-
-    nsCOMPtr<nsIURI> uri;
-    nsresult rv = NS_NewURI(getter_AddRefs(uri), manifestUrl);
+    nsCOMPtr<mozIApplication> app;
+    nsresult rv = appsService->GetAppByLocalId(OwnAppId(), getter_AddRefs(app));
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return;
     }
 
     nsCOMPtr<nsIPrincipal> principal;
-    rv = secMan->GetAppCodebasePrincipal(uri, OwnAppId(), false,
-                                         getter_AddRefs(principal));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
+    app->GetPrincipal(getter_AddRefs(principal));
+    if (NS_WARN_IF(!principal)) {
       return;
     }
 
@@ -1654,7 +1647,7 @@ TabChild::RecvShow(const ScreenIntSize& aSize,
 
 bool
 TabChild::RecvUpdateDimensions(const CSSRect& rect, const CSSSize& size,
-                               const ScreenOrientation& orientation,
+                               const ScreenOrientationInternal& orientation,
                                const LayoutDeviceIntPoint& chromeDisp)
 {
     if (!mRemoteFrame) {
@@ -1691,6 +1684,20 @@ bool
 TabChild::RecvUpdateFrame(const FrameMetrics& aFrameMetrics)
 {
   return TabChildBase::UpdateFrameHandler(aFrameMetrics);
+}
+
+bool
+TabChild::RecvSuppressDisplayport(const bool& aEnabled)
+{
+  if (aEnabled) {
+    mActiveSuppressDisplayport++;
+  } else {
+    mActiveSuppressDisplayport--;
+  }
+
+  MOZ_ASSERT(mActiveSuppressDisplayport >= 0);
+  APZCCallbackHelper::SuppressDisplayport(aEnabled);
+  return true;
 }
 
 bool
@@ -1914,7 +1921,7 @@ TabChild::UpdateTapState(const WidgetTouchEvent& aEvent, nsEventStatus aStatus)
   }
 
   bool currentlyTrackingTouch = (mActivePointerId >= 0);
-  if (aEvent.message == NS_TOUCH_START) {
+  if (aEvent.mMessage == NS_TOUCH_START) {
     if (currentlyTrackingTouch || aEvent.touches.Length() > 1) {
       // We're tracking a possible tap for another point, or we saw a
       // touchstart for a later pointer after we canceled tracking of
@@ -1954,7 +1961,7 @@ TabChild::UpdateTapState(const WidgetTouchEvent& aEvent, nsEventStatus aStatus)
 
   LayoutDevicePoint currentPoint = LayoutDevicePoint(trackedTouch->mRefPoint.x, trackedTouch->mRefPoint.y);
   int64_t time = aEvent.time;
-  switch (aEvent.message) {
+  switch (aEvent.mMessage) {
   case NS_TOUCH_MOVE:
     if (std::abs(currentPoint.x - mGestureDownPoint.x) > sDragThreshold.width ||
         std::abs(currentPoint.y - mGestureDownPoint.y) > sDragThreshold.height) {
@@ -2031,7 +2038,7 @@ TabChild::RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
                              const uint64_t& aInputBlockId,
                              const nsEventStatus& aApzResponse)
 {
-  TABC_LOG("Receiving touch event of type %d\n", aEvent.message);
+  TABC_LOG("Receiving touch event of type %d\n", aEvent.mMessage);
 
   WidgetTouchEvent localEvent(aEvent);
   localEvent.widget = mPuppetWidget;
@@ -2039,7 +2046,7 @@ TabChild::RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
   APZCCallbackHelper::ApplyCallbackTransform(localEvent, aGuid,
       mPuppetWidget->GetDefaultScale());
 
-  if (localEvent.message == NS_TOUCH_START && AsyncPanZoomEnabled()) {
+  if (localEvent.mMessage == NS_TOUCH_START && AsyncPanZoomEnabled()) {
     if (gfxPrefs::TouchActionEnabled()) {
       APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(mPuppetWidget,
           localEvent, aInputBlockId, mSetAllowedTouchBehaviorCallback);
@@ -2088,13 +2095,13 @@ TabChild::RecvRealDragEvent(const WidgetDragEvent& aEvent,
     }
   }
 
-  if (aEvent.message == NS_DRAGDROP_DROP) {
+  if (aEvent.mMessage == NS_DRAGDROP_DROP) {
     bool canDrop = true;
     if (!dragSession || NS_FAILED(dragSession->GetCanDrop(&canDrop)) ||
         !canDrop) {
-      localEvent.message = NS_DRAGDROP_EXIT;
+      localEvent.mMessage = NS_DRAGDROP_EXIT;
     }
-  } else if (aEvent.message == NS_DRAGDROP_OVER) {
+  } else if (aEvent.mMessage == NS_DRAGDROP_OVER) {
     nsCOMPtr<nsIDragService> dragService =
       do_GetService("@mozilla.org/widget/dragservice;1");
     if (dragService) {
@@ -2141,7 +2148,7 @@ TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event,
 {
   AutoCacheNativeKeyCommands autoCache(mPuppetWidget);
 
-  if (event.message == NS_KEY_PRESS) {
+  if (event.mMessage == NS_KEY_PRESS) {
     // If content code called preventDefault() on a keydown event, then we don't
     // want to process any following keypress events.
     if (mIgnoreKeyPressEvent) {
@@ -2161,7 +2168,7 @@ TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event,
   localEvent.widget = mPuppetWidget;
   nsEventStatus status = APZCCallbackHelper::DispatchWidgetEvent(localEvent);
 
-  if (event.message == NS_KEY_DOWN) {
+  if (event.mMessage == NS_KEY_DOWN) {
     mIgnoreKeyPressEvent = status == nsEventStatus_eConsumeNoDefault;
   }
 
@@ -2195,7 +2202,7 @@ TabChild::RecvCompositionEvent(const WidgetCompositionEvent& event)
   WidgetCompositionEvent localEvent(event);
   localEvent.widget = mPuppetWidget;
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
-  unused << SendOnEventNeedingAckHandled(event.message);
+  unused << SendOnEventNeedingAckHandled(event.mMessage);
   return true;
 }
 
@@ -2205,7 +2212,7 @@ TabChild::RecvSelectionEvent(const WidgetSelectionEvent& event)
   WidgetSelectionEvent localEvent(event);
   localEvent.widget = mPuppetWidget;
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
-  unused << SendOnEventNeedingAckHandled(event.message);
+  unused << SendOnEventNeedingAckHandled(event.mMessage);
   return true;
 }
 
@@ -2412,6 +2419,11 @@ TabChild::RecvDestroy()
 {
   MOZ_ASSERT(mDestroyed == false);
   mDestroyed = true;
+
+  while (mActiveSuppressDisplayport > 0) {
+    APZCCallbackHelper::SuppressDisplayport(false);
+    mActiveSuppressDisplayport--;
+  }
 
   if (mTabChildGlobal) {
     // Message handlers are called from the event loop, so it better be safe to
@@ -2850,7 +2862,9 @@ TabChild::GetFrom(uint64_t aLayersId)
 }
 
 void
-TabChild::DidComposite(uint64_t aTransactionId)
+TabChild::DidComposite(uint64_t aTransactionId,
+                       const TimeStamp& aCompositeStart,
+                       const TimeStamp& aCompositeEnd)
 {
   MOZ_ASSERT(mPuppetWidget);
   MOZ_ASSERT(mPuppetWidget->GetLayerManager());
@@ -2859,7 +2873,8 @@ TabChild::DidComposite(uint64_t aTransactionId)
 
   ClientLayerManager *manager =
     static_cast<ClientLayerManager*>(mPuppetWidget->GetLayerManager());
-  manager->DidComposite(aTransactionId);
+
+  manager->DidComposite(aTransactionId, aCompositeStart, aCompositeEnd);
 }
 
 void

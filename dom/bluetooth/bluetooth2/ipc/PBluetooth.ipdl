@@ -171,6 +171,23 @@ struct IsScoConnectedRequest
 {
 };
 
+struct ReplyTovCardPullingRequest
+{
+  PBlob blob;
+};
+
+struct ReplyToPhonebookPullingRequest
+{
+  PBlob blob;
+  uint16_t phonebookSize;
+};
+
+struct ReplyTovCardListingRequest
+{
+  PBlob blob;
+  uint16_t phonebookSize;
+};
+
 struct AnswerWaitingCallRequest
 {
 };
@@ -275,6 +292,23 @@ struct GattClientWriteDescriptorValueRequest
   uint8_t[] value;
 };
 
+struct GattServerConnectPeripheralRequest
+{
+  nsString appUuid;
+  nsString address;
+};
+
+struct GattServerDisconnectPeripheralRequest
+{
+  nsString appUuid;
+  nsString address;
+};
+
+struct UnregisterGattServerRequest
+{
+  int serverIf;
+};
+
 union Request
 {
   GetAdaptersRequest;
@@ -306,6 +340,9 @@ union Request
   ConnectScoRequest;
   DisconnectScoRequest;
   IsScoConnectedRequest;
+  ReplyTovCardPullingRequest;
+  ReplyToPhonebookPullingRequest;
+  ReplyTovCardListingRequest;
   AnswerWaitingCallRequest;
   IgnoreWaitingCallRequest;
   ToggleCallsRequest;
@@ -322,6 +359,9 @@ union Request
   GattClientWriteCharacteristicValueRequest;
   GattClientReadDescriptorValueRequest;
   GattClientWriteDescriptorValueRequest;
+  GattServerConnectPeripheralRequest;
+  GattServerDisconnectPeripheralRequest;
+  UnregisterGattServerRequest;
 };
 
 protocol PBluetooth

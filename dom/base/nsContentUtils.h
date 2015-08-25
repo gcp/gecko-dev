@@ -1978,6 +1978,11 @@ public:
   }
 
   /*
+   * Returns true if the frame timing APIs are enabled.
+   */
+  static bool IsFrameTimingEnabled();
+
+  /*
    * Returns true if URL setters should percent encode the Hash/Ref segment
    * and getters should return the percent decoded value of the segment
    */
@@ -2106,6 +2111,11 @@ public:
    * Checks if internal PDF viewer is enabled.
    */
   static bool IsPDFJSEnabled();
+
+  /**
+   * Checks if internal SWF player is enabled.
+   */
+  static bool IsSWFPlayerEnabled();
 
   enum ContentViewerType
   {
@@ -2569,6 +2579,7 @@ private:
   static bool sIsPerformanceTimingEnabled;
   static bool sIsResourceTimingEnabled;
   static bool sIsUserTimingLoggingEnabled;
+  static bool sIsFrameTimingPrefEnabled;
   static bool sIsExperimentalAutocompleteEnabled;
   static bool sEncodeDecodeURLHash;
   static bool sGettersDecodeURLHash;

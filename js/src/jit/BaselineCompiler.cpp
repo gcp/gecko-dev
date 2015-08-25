@@ -1612,7 +1612,7 @@ BaselineCompiler::emitBinaryArith()
     frame.popRegsAndSync(2);
 
     // Call IC
-    ICBinaryArith_Fallback::Compiler stubCompiler(cx);
+    ICBinaryArith_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
@@ -1628,7 +1628,7 @@ BaselineCompiler::emitUnaryArith()
     frame.popRegsAndSync(1);
 
     // Call IC
-    ICUnaryArith_Fallback::Compiler stubCompiler(cx);
+    ICUnaryArith_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 

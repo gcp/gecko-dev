@@ -1280,8 +1280,8 @@ or run without that action (ie: --no-{action})"
         if os.path.exists(mach_properties_path):
             with self.opened(mach_properties_path, error_level=error_level) as (fh, err):
                 build_props = json.load(fh)
-                if not build_props or err:
-                    self.log("%s exists but there was an error finding any "
+                if err:
+                    self.log("%s exists but there was an error reading the "
                              "properties. props: `%s` - error: "
                              "`%s`" % (mach_properties_path,
                                        build_props or 'None',
@@ -1405,10 +1405,11 @@ or run without that action (ie: --no-{action})"
                     templates.extend(contents['l10n'])
             else:
                 templates = contents['routes']
+        index = self.config.get('taskcluster_index', 'index.garbage.staging')
         routes = []
         for template in templates:
             fmt = {
-                'index': 'index.garbage.staging.mshal-testing', # TODO
+                'index': index,
                 'project': self.buildbot_config['properties']['branch'],
                 'head_rev': self.query_revision(),
                 'build_product': self.config['stage_product'],
@@ -1427,7 +1428,6 @@ or run without that action (ie: --no-{action})"
                          self.log_obj,
                          )
 
-        index = self.config.get('taskcluster_index', 'index.garbage.staging')
         # TODO: Bug 1165980 - these should be in tree
         routes.extend([
             "%s.buildbot.branches.%s.%s" % (index, self.branch, self.stage_platform),

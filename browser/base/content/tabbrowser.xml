@@ -1208,7 +1208,7 @@
                 if (prompts.length) {
                   // NB: This code assumes that the beforeunload prompt
                   //     is the top-most prompt on the tab.
-                  promptBox.removePrompt(prompts[prompts.length - 1]);
+                  prompts[prompts.length - 1].abortPrompt();
                 }
               }
 
@@ -2567,6 +2567,9 @@
               remoteBrowser._outerWindowIDBrowserMap.delete(aOtherBrowser.outerWindowID);
             }
 
+            aOtherBrowser.docShellIsActive = (ourBrowser == this.selectedBrowser &&
+                                              window.windowState != window.STATE_MINIMIZED);
+
             // Swap the docshells
             ourBrowser.swapDocShells(aOtherBrowser);
 
@@ -3074,6 +3077,11 @@
             // Map from tabs to STATE_* (below).
             tabState: new Map(),
 
+            // Keep an exact list of content processes (tabParent) in which
+            // we're actively suppressing the display port. This gives a robust
+            // way to make sure we don't forget to un-suppress.
+            activeSuppressDisplayport: new Set(),
+
             // Set of tabs that might be visible right now. We maintain
             // this set because we can't be sure when a tab is actually
             // drawn. A tab is added to this set when we ask to make it
@@ -3085,6 +3093,9 @@
             STATE_LOADING: 1,
             STATE_LOADED: 2,
             STATE_UNLOADING: 3,
+
+            // re-entrancy guard:
+            _processing: false,
 
             getTabState: function(tab) {
               let state = this.tabState.get(tab);
@@ -3134,6 +3145,11 @@
               window.removeEventListener("TabRemotenessChange", this);
 
               this.tabbrowser._switcher = null;
+
+              this.activeSuppressDisplayport.forEach(function(tabParent) {
+                tabParent.suppressDisplayport(false);
+              });
+              this.activeSuppressDisplayport.clear();
             },
 
             finish: function() {
@@ -3228,7 +3244,6 @@
               }
 
               this.lastVisibleTab = this.visibleTab;
-
             },
 
             assert: function(cond) {
@@ -3433,6 +3448,13 @@
 
               this.requestedTab = tab;
 
+              let browser = this.requestedTab.linkedBrowser;
+              let fl = browser.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader;
+              if (fl && fl.tabParent && !this.activeSuppressDisplayport.has(fl.tabParent)) {
+                fl.tabParent.suppressDisplayport(true);
+                this.activeSuppressDisplayport.add(fl.tabParent);
+              }
+
               this.preActions();
 
               clearTimeout(this.unloadTimer);
@@ -3441,7 +3463,17 @@
               this.postActions();
             },
 
-            handleEvent: function(event) {
+            handleEvent: function(event, delayed = false) {
+              if (this._processing) {
+                setTimeout(() => this.handleEvent(event, true), 0);
+                return;
+              }
+              if (delayed && this.tabbrowser._switcher != this) {
+                // if we delayed processing this event, we might be out of date, in which
+                // case we drop the delayed events
+                return;
+              }
+              this._processing = true;
               this.preActions();
 
               if (event.type == "MozLayerTreeReady") {
@@ -3455,6 +3487,7 @@
               }
 
               this.postActions();
+              this._processing = false;
             },
 
             /*

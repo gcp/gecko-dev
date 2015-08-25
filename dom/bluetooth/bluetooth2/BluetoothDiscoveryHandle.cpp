@@ -23,7 +23,6 @@ NS_IMPL_RELEASE_INHERITED(BluetoothDiscoveryHandle, DOMEventTargetHelper)
 
 BluetoothDiscoveryHandle::BluetoothDiscoveryHandle(nsPIDOMWindow* aWindow)
   : DOMEventTargetHelper(aWindow)
-  , mLeScanUuid(EmptyString())
 {
   MOZ_ASSERT(aWindow);
 }
@@ -95,7 +94,7 @@ BluetoothDiscoveryHandle::DispatchLeDeviceEvent(BluetoothDevice* aLeDevice,
 
   bool hasUuidsFilter = !mServiceUuids.IsEmpty();
   bool noAdvertisingUuid  = remoteUuids.IsEmpty();
-  // If a LE device doesn't advertise its service UUIDs, it can't possibly pass
+  // If an LE device doesn't advertise its service UUIDs, it can't possibly pass
   // the UUIDs filter.
   if (hasUuidsFilter && noAdvertisingUuid) {
     return;
@@ -104,7 +103,7 @@ BluetoothDiscoveryHandle::DispatchLeDeviceEvent(BluetoothDevice* aLeDevice,
   // The web API startLeScan() makes the device's adapter start seeking for
   // remote LE devices advertising given service UUIDs.
   // Since current Bluetooth stack can't filter the results of LeScan by UUIDs,
-  // gecko has to filter the results and dispach what API asked for.
+  // gecko has to filter the results and dispatch what API asked for.
   bool matched = false;
   for (size_t index = 0; index < remoteUuids.Length(); ++index) {
     if (mServiceUuids.Contains(remoteUuids[index])) {
@@ -113,8 +112,8 @@ BluetoothDiscoveryHandle::DispatchLeDeviceEvent(BluetoothDevice* aLeDevice,
     }
   }
 
-  // Dispach 'devicefound 'event only if
-  //  - the service UUIDs in the scan record matchs the given UUIDs.
+  // Dispatch 'devicefound' event only if
+  //  - the service UUID in the scan record matches one of the given UUIDs.
   //  - the given UUIDs is empty.
   if (matched || mServiceUuids.IsEmpty()) {
     nsRefPtr<BluetoothLeDeviceEvent> event =

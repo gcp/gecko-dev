@@ -73,6 +73,7 @@ MediaFormatReader::MediaFormatReader(AbstractMediaDecoder* aDecoder,
   , mSeekable(false)
   , mIsEncrypted(false)
   , mTrackDemuxersMayBlock(false)
+  , mHardwareAccelerationDisabled(false)
 {
   MOZ_ASSERT(aDemuxer);
   MOZ_COUNT_CTOR(MediaFormatReader);
@@ -280,7 +281,12 @@ MediaFormatReader::AsyncReadMetadata()
       return p;
     }
     MOZ_ASSERT(!mDecodersInitRequest.Exists());
-    EnsureDecodersInitialized();
+    if (EnsureDecodersInitialized()) {
+      nsRefPtr<MetadataHolder> metadata = new MetadataHolder();
+      metadata->mInfo = mInfo;
+      metadata->mTags = nullptr;
+      mMetadataPromise.Resolve(metadata, __func__);
+    }
     return p;
   }
 
@@ -462,8 +468,11 @@ MediaFormatReader::EnsureDecodersCreated()
                    false);
 
     mVideo.mDecoderInitialized = false;
+    // If we've disabled hardware acceleration for this reader, then we can't use
+    // the shared decoder.
     if (mSharedDecoderManager &&
-        mPlatform->SupportsSharedDecoders(mInfo.mVideo)) {
+        mPlatform->SupportsSharedDecoders(mInfo.mVideo) &&
+        !mHardwareAccelerationDisabled) {
       mVideo.mDecoder =
         mSharedDecoderManager->CreateVideoDecoder(mPlatform,
                                                   mVideo.mInfo ?
@@ -474,13 +483,16 @@ MediaFormatReader::EnsureDecodersCreated()
                                                   mVideo.mTaskQueue,
                                                   mVideo.mCallback);
     } else {
+      // Decoders use the layers backend to decide if they can use hardware decoding,
+      // so specify LAYERS_NONE if we want to forcibly disable it.
       mVideo.mDecoder =
         mPlatform->CreateDecoder(mVideo.mInfo ?
                                    *mVideo.mInfo->GetAsVideoInfo() :
                                    mInfo.mVideo,
                                  mVideo.mTaskQueue,
                                  mVideo.mCallback,
-                                 mLayersBackendType,
+                                 mHardwareAccelerationDisabled ? LayersBackend::LAYERS_NONE :
+                                                                 mLayersBackendType,
                                  mDecoder->GetImageContainer());
     }
     NS_ENSURE_TRUE(mVideo.mDecoder != nullptr, false);
@@ -585,8 +597,8 @@ void
 MediaFormatReader::DisableHardwareAcceleration()
 {
   MOZ_ASSERT(OnTaskQueue());
-  if (HasVideo()) {
-    mPlatform->DisableHardwareAcceleration();
+  if (HasVideo() && !mHardwareAccelerationDisabled) {
+    mHardwareAccelerationDisabled = true;
     Flush(TrackInfo::kVideoTrack);
     mVideo.mDecoder->Shutdown();
     mVideo.mDecoder = nullptr;
@@ -771,6 +783,7 @@ MediaFormatReader::NotifyNewOutput(TrackType aTrack, MediaData* aSample)
   }
   decoder.mOutput.AppendElement(aSample);
   decoder.mNumSamplesOutput++;
+  decoder.mNumSamplesOutputTotal++;
   ScheduleUpdate(aTrack);
 }
 
@@ -1108,9 +1121,9 @@ MediaFormatReader::Update(TrackType aTrack)
 
   if (aTrack == TrackInfo::kVideoTrack) {
     uint64_t delta =
-      decoder.mNumSamplesOutput - mLastReportedNumDecodedFrames;
+      decoder.mNumSamplesOutputTotal - mLastReportedNumDecodedFrames;
     a.mDecoded = static_cast<uint32_t>(delta);
-    mLastReportedNumDecodedFrames = decoder.mNumSamplesOutput;
+    mLastReportedNumDecodedFrames = decoder.mNumSamplesOutputTotal;
   }
 
   if (decoder.HasPromise()) {

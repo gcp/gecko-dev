@@ -12,6 +12,7 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/BluetoothAdapterBinding.h"
 #include "mozilla/dom/BluetoothDeviceEvent.h"
+#include "mozilla/dom/BluetoothPbapParametersBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "nsCOMPtr.h"
 
@@ -89,6 +90,9 @@ public:
   IMPL_EVENT_HANDLER(pairingaborted);
   IMPL_EVENT_HANDLER(a2dpstatuschanged);
   IMPL_EVENT_HANDLER(hfpstatuschanged);
+  IMPL_EVENT_HANDLER(pullphonebookreq);
+  IMPL_EVENT_HANDLER(pullvcardentryreq);
+  IMPL_EVENT_HANDLER(pullvcardlistingreq);
   IMPL_EVENT_HANDLER(requestmediaplaystatus);
   IMPL_EVENT_HANDLER(scostatuschanged);
 
@@ -287,6 +291,73 @@ private:
   void HandleLeDeviceFound(const BluetoothValue& aValue);
 
   /**
+   * Handle PULL_PHONEBOOK_REQ_ID bluetooth signal.
+   *
+   * @param aValue [in] Properties array of the PBAP request.
+   *                    The array should contain few properties:
+   *                    - nsString   'name'
+   *                    - bool       'format'
+   *                    - uint32_t[] 'propSelector'
+   *                    - uint32_t   'maxListCount'
+   *                    - uint32_t   'listStartOffset'
+   *                    - uint32_t[] 'vCardSelector_AND'
+   *                    - uint32_t[] 'vCardSelector_AND'
+   */
+  void HandlePullPhonebookReq(const BluetoothValue& aValue);
+
+  /**
+   * Handle PULL_VCARD_ENTRY_REQ_ID bluetooth signal.
+   *
+   * @param aValue [in] Properties array of the PBAP request.
+   *                    The array should contain few properties:
+   *                    - nsString   'name'
+   *                    - bool       'format'
+   *                    - uint32_t[] 'propSelector'
+   */
+  void HandlePullVCardEntryReq(const BluetoothValue& aValue);
+
+  /**
+   * Handle PULL_VCARD_LISTING_REQ_ID bluetooth signal.
+   *
+   * @param aValue [in] Properties array of the PBAP request.
+   *                    The array should contain few properties:
+   *                    - nsString   'name'
+   *                    - nsString   'order'
+   *                    - nsString   'searchText'
+   *                    - nsString   'searchKey'
+   *                    - uint32_t   'maxListCount'
+   *                    - uint32_t   'listStartOffset'
+   *                    - uint32_t[] 'vCardSelector_AND'
+   *                    - uint32_t[] 'vCardSelector_AND'
+   */
+  void HandlePullVCardListingReq(const BluetoothValue& aValue);
+
+  /**
+   * Get a Sequence of vCard properies from a BluetoothValue. The name of
+   * BluetoothValue must be propSelector, vCardSelector_OR or vCardSelector_AND.
+   *
+   * @param aValue [in] a BluetoothValue with 'TArrayOfuint32_t' type
+   *                    The name of BluetoothValue must be 'propSelector',
+   *                    'vCardSelector_OR' or 'vCardSelector_AND'.
+   */
+  Sequence<vCardProperties> getVCardProperties(const BluetoothValue &aValue);
+
+  /**
+   * Convert string to vCardOrderType.
+   *
+   * @param aString [in] String to convert
+   */
+  vCardOrderType ConvertStringToVCardOrderType(const nsAString& aString);
+
+  /**
+   * Convert string to vCardSearchKeyType.
+   *
+   * @param aString [in] String to convert
+   */
+  vCardSearchKeyType ConvertStringToVCardSearchKeyType(
+    const nsAString& aString);
+
+  /**
    * Fire BluetoothAttributeEvent to trigger onattributechanged event handler.
    *
    * @param aTypes [in] Array of changed attributes. Must be non-empty.
@@ -314,6 +385,8 @@ private:
    * Convert string to BluetoothAdapterAttribute.
    *
    * @param aString [in] String to convert
+   *
+   * @return the adapter attribute converted from |aString|
    */
   BluetoothAdapterAttribute
     ConvertStringToAdapterAttribute(const nsAString& aString);
@@ -323,14 +396,16 @@ private:
    *
    * @param aType  [in] Adapter property to check
    * @param aValue [in] New value of the adapter property
+   *
+   * @return true if the adapter property has changed; false otherwise
    */
   bool IsAdapterAttributeChanged(BluetoothAdapterAttribute aType,
                                  const BluetoothValue& aValue);
 
   /**
-   * Check whether this adapter is owned by Bluetooth certified app.
+   * Check whether this adapter belongs to Bluetooth certified app.
    *
-   * @return a boolean value to indicate whether it's owned by Bluetooth app.
+   * @return true if this adapter belongs to Bluetooth app; false otherwise
    */
   bool IsBluetoothCertifiedApp();
 

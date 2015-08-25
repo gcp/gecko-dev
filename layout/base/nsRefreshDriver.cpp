@@ -365,6 +365,7 @@ private:
         aVsyncTimestamp = mRecentVsync;
         mProcessedVsync = true;
       }
+      MOZ_ASSERT(aVsyncTimestamp <= TimeStamp::Now());
 
       // We might have a problem that we call ~VsyncRefreshDriverTimer() before
       // the scheduled TickRefreshDriver() runs. Check mVsyncRefreshDriverTimer
@@ -735,7 +736,6 @@ CreateVsyncRefreshTimer()
   gfxPrefs::GetSingleton();
 
   if (!gfxPrefs::VsyncAlignedRefreshDriver()
-        || !gfxPrefs::HardwareVsyncEnabled()
         || gfxPlatform::IsInLayoutAsapMode()) {
     return;
   }

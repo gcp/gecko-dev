@@ -482,7 +482,7 @@ protected:
 
     nsIntRect mRect;
     ScreenIntSize mDimensions;
-    ScreenOrientation mOrientation;
+    ScreenOrientationInternal mOrientation;
     float mDPI;
     CSSToLayoutDeviceScale mDefaultScale;
     bool mUpdatedDimensions;
@@ -609,6 +609,8 @@ private:
     nsRefPtr<nsIPresShell> mPresShellWithRefreshListener;
 
     bool mHasContentOpener;
+
+    DebugOnly<int32_t> mActiveSupressDisplayportCount;
 private:
     // This is used when APZ needs to find the TabParent associated with a layer
     // to dispatch events.

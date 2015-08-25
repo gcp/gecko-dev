@@ -212,6 +212,15 @@ protected:
   bool
   DoRequest(const IsScoConnectedRequest& aRequest);
 
+  bool
+  DoRequest(const ReplyTovCardPullingRequest& aRequest);
+
+  bool
+  DoRequest(const ReplyToPhonebookPullingRequest& aRequest);
+
+  bool
+  DoRequest(const ReplyTovCardListingRequest& aRequest);
+
 #ifdef MOZ_B2G_RIL
   bool
   DoRequest(const AnswerWaitingCallRequest& aRequest);
@@ -261,6 +270,15 @@ protected:
 
   bool
   DoRequest(const GattClientWriteDescriptorValueRequest& aRequest);
+
+  bool
+  DoRequest(const GattServerConnectPeripheralRequest& aRequest);
+
+  bool
+  DoRequest(const GattServerDisconnectPeripheralRequest& aRequest);
+
+  bool
+  DoRequest(const UnregisterGattServerRequest& aRequest);
 };
 
 END_BLUETOOTH_NAMESPACE

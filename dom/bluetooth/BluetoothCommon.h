@@ -17,25 +17,6 @@ extern bool gBluetoothDebugFlag;
 
 #define SWITCH_BT_DEBUG(V) (gBluetoothDebugFlag = V)
 
-#if MOZ_IS_GCC
-# if MOZ_GCC_VERSION_AT_LEAST(4, 7, 0)
-/* use designated array initializers if supported */
-# define INIT_ARRAY_AT(in_, out_) \
-    [in_] = out_
-# else
-/* otherwise init array element by position */
-# define INIT_ARRAY_AT(in_, out_) \
-    out_
-# endif
-#else
-/* otherwise init array element by position */
-#define INIT_ARRAY_AT(in_, out_) \
-  out_
-#endif
-
-#define CONVERT(in_, out_) \
-  INIT_ARRAY_AT(in_, out_)
-
 #undef BT_LOG
 #if defined(MOZ_WIDGET_GONK)
 #include <android/log.h>
@@ -212,6 +193,13 @@ extern bool gBluetoothDebugFlag;
  * dispatch an event.
  */
 #define REQUEST_MEDIA_PLAYSTATUS_ID          "requestmediaplaystatus"
+
+/**
+ * When receiving a PBAP request from a remote device, we'll dispatch an event.
+ */
+#define PULL_PHONEBOOK_REQ_ID                "pullphonebookreq"
+#define PULL_VCARD_ENTRY_REQ_ID              "pullvcardentryreq"
+#define PULL_VCARD_LISTING_REQ_ID            "pullvcardlistingreq"
 
 /**
  * When the value of a characteristic of a remote BLE device changes, we'll

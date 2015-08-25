@@ -158,6 +158,37 @@ public:
   virtual void
   IsScoConnected(BluetoothReplyRunnable* aRunnable) override;
 
+  virtual void
+  ReplyTovCardPulling(BlobParent* aBlobParent,
+                      BlobChild* aBlobChild,
+                      BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  ReplyTovCardPulling(Blob* aBlob,
+                      BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  ReplyToPhonebookPulling(BlobParent* aBlobParent,
+                          BlobChild* aBlobChild,
+                          uint16_t aPhonebookSize,
+                          BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  ReplyToPhonebookPulling(Blob* aBlob,
+                          uint16_t aPhonebookSize,
+                          BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  ReplyTovCardListing(BlobParent* aBlobParent,
+                      BlobChild* aBlobChild,
+                      uint16_t aPhonebookSize,
+                      BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  ReplyTovCardListing(Blob* aBlob,
+                      uint16_t aPhonebookSize,
+                      BluetoothReplyRunnable* aRunnable) override;
+
 #ifdef MOZ_B2G_RIL
   virtual void
   AnswerWaitingCall(BluetoothReplyRunnable* aRunnable) override;
@@ -266,6 +297,22 @@ public:
     const BluetoothGattId& aDescriptorId,
     const nsTArray<uint8_t>& aValue,
     BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  GattServerConnectPeripheralInternal(
+    const nsAString& aAppUuid,
+    const nsAString& aAddress,
+    BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  GattServerDisconnectPeripheralInternal(
+    const nsAString& aAppUuid,
+    const nsAString& aAddress,
+    BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  UnregisterGattServerInternal(int aServerIf,
+                               BluetoothReplyRunnable* aRunnable) override;
 
 protected:
   BluetoothServiceChildProcess();

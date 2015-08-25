@@ -18,6 +18,7 @@
 #include "jsopcode.h"
 #include "jstypes.h"
 
+#include "builtin/ModuleObject.h"
 #include "gc/Barrier.h"
 #include "gc/Rooting.h"
 #include "jit/IonCode.h"
@@ -46,15 +47,16 @@ class BreakpointSite;
 class BindingIter;
 class Debugger;
 class LazyScript;
+class NestedScopeObject;
 class RegExpObject;
 struct SourceCompressionTask;
 class Shape;
-class NestedScopeObject;
 
 namespace frontend {
     struct BytecodeEmitter;
     class UpvarCookie;
     class FunctionBox;
+    class ModuleBox;
 } // namespace frontend
 
 namespace detail {
@@ -272,7 +274,8 @@ class Bindings : public JS::Traceable
                                          uint32_t numBlockScoped,
                                          uint32_t numUnaliasedVars,
                                          uint32_t numUnaliasedBodyLevelLexicals,
-                                         const Binding* bindingArray);
+                                         const Binding* bindingArray,
+                                         bool isModule = false);
 
     // Initialize a trivial Bindings with no slots and an empty callObjShape.
     bool initTrivial(ExclusiveContext* cx);
@@ -349,7 +352,7 @@ class Bindings : public JS::Traceable
 template <class Outer>
 class BindingsOperations
 {
-    const Bindings& bindings() const { return static_cast<const Outer*>(this)->extract(); }
+    const Bindings& bindings() const { return static_cast<const Outer*>(this)->get(); }
 
   public:
     // Direct data access to the underlying bindings.
@@ -413,7 +416,7 @@ class BindingsOperations
 template <class Outer>
 class MutableBindingsOperations : public BindingsOperations<Outer>
 {
-    Bindings& bindings() { return static_cast<Outer*>(this)->extractMutable(); }
+    Bindings& bindings() { return static_cast<Outer*>(this)->get(); }
 
   public:
     void setCallObjShape(HandleShape shape) { bindings().callObjShape_ = shape; }
@@ -438,27 +441,12 @@ class MutableBindingsOperations : public BindingsOperations<Outer>
 
 template <>
 class HandleBase<Bindings> : public BindingsOperations<JS::Handle<Bindings>>
-{
-    friend class BindingsOperations<JS::Handle<Bindings>>;
-    const Bindings& extract() const {
-        return static_cast<const JS::Handle<Bindings>*>(this)->get();
-    }
-};
+{};
 
 template <>
 class MutableHandleBase<Bindings>
   : public MutableBindingsOperations<JS::MutableHandle<Bindings>>
-{
-    friend class BindingsOperations<JS::MutableHandle<Bindings>>;
-    const Bindings& extract() const {
-        return static_cast<const JS::MutableHandle<Bindings>*>(this)->get();
-    }
-
-    friend class MutableBindingsOperations<JS::MutableHandle<Bindings>>;
-    Bindings& extractMutable() {
-        return static_cast<JS::MutableHandle<Bindings>*>(this)->get();
-    }
-};
+{};
 
 class ScriptCounts
 {
@@ -964,6 +952,7 @@ class JSScript : public js::gc::TenuredCell
     js::HeapPtrObject sourceObject_;
 
     js::HeapPtrFunction function_;
+    js::HeapPtr<js::ModuleObject*> module_;
     js::HeapPtrObject   enclosingStaticScope_;
 
     /*
@@ -1098,9 +1087,6 @@ class JSScript : public js::gc::TenuredCell
     // Script came from eval(), and is in eval cache.
     bool isCachedEval_:1;
 
-    // Set for functions defined at the top level within an 'eval' script.
-    bool directlyInsideEval_:1;
-
     // 'this', 'arguments' and f.apply() are used. This is likely to be a wrapper.
     bool usesArgumentsApplyAndThis_:1;
 
@@ -1157,7 +1143,7 @@ class JSScript : public js::gc::TenuredCell
     // instead of private to suppress -Wunused-private-field compiler warnings.
   protected:
 #if JS_BITS_PER_WORD == 32
-    uint32_t padding;
+    // No padding currently required.
 #endif
 
     //
@@ -1185,6 +1171,8 @@ class JSScript : public js::gc::TenuredCell
                                      js::frontend::BytecodeEmitter* bce);
     static void linkToFunctionFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
                                           js::frontend::FunctionBox* funbox);
+    static void linkToModuleFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
+                                        js::frontend::ModuleBox* funbox);
     // Initialize a no-op script.
     static bool fullyInitTrivial(js::ExclusiveContext* cx, JS::Handle<JSScript*> script);
 
@@ -1334,7 +1322,6 @@ class JSScript : public js::gc::TenuredCell
 
     bool isActiveEval() const { return isActiveEval_; }
     bool isCachedEval() const { return isCachedEval_; }
-    bool directlyInsideEval() const { return directlyInsideEval_; }
 
     void cacheForEval() {
         MOZ_ASSERT(isActiveEval() && !isCachedEval());
@@ -1353,7 +1340,6 @@ class JSScript : public js::gc::TenuredCell
     }
 
     void setActiveEval() { isActiveEval_ = true; }
-    void setDirectlyInsideEval() { directlyInsideEval_ = true; }
 
     bool usesArgumentsApplyAndThis() const {
         return usesArgumentsApplyAndThis_;
@@ -1566,6 +1552,11 @@ class JSScript : public js::gc::TenuredCell
      * that expects the function to be non-lazy.
      */
     inline void ensureNonLazyCanonicalFunction(JSContext* cx);
+
+    js::ModuleObject* module() const {
+        return module_;
+    }
+    inline void setModule(js::ModuleObject* module);
 
     JSFlatString* sourceData(JSContext* cx);
 
@@ -2064,7 +2055,6 @@ class LazyScript : public gc::TenuredCell
         uint32_t bindingsAccessedDynamically : 1;
         uint32_t hasDebuggerStatement : 1;
         uint32_t hasDirectEval : 1;
-        uint32_t directlyInsideEval : 1;
         uint32_t usesArgumentsApplyAndThis : 1;
         uint32_t hasBeenCloned : 1;
         uint32_t treatAsRunOnce : 1;
@@ -2210,13 +2200,6 @@ class LazyScript : public gc::TenuredCell
     }
     void setHasDirectEval() {
         p_.hasDirectEval = true;
-    }
-
-    bool directlyInsideEval() const {
-        return p_.directlyInsideEval;
-    }
-    void setDirectlyInsideEval() {
-        p_.directlyInsideEval = true;
     }
 
     bool usesArgumentsApplyAndThis() const {

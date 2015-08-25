@@ -1097,11 +1097,6 @@ static bool IsAutoplayEnabled()
   return Preferences::GetBool("media.autoplay.enabled");
 }
 
-static bool UseAudioChannelService()
-{
-  return Preferences::GetBool("media.useAudioChannelService");
-}
-
 static bool UseAudioChannelAPI()
 {
   return Preferences::GetBool("media.useAudioChannelAPI");
@@ -2411,10 +2406,6 @@ bool HTMLMediaElement::ParseAttribute(int32_t aNamespaceID,
 
 bool HTMLMediaElement::CheckAudioChannelPermissions(const nsAString& aString)
 {
-  if (!UseAudioChannelService()) {
-    return true;
-  }
-
   // Only normal channel doesn't need permission.
   if (aString.EqualsASCII("normal")) {
     return true;
@@ -4015,7 +4006,15 @@ bool HTMLMediaElement::IsBeingDestroyed()
 void HTMLMediaElement::NotifyOwnerDocumentActivityChanged()
 {
   bool pauseElement = NotifyOwnerDocumentActivityChangedInternal();
-  if (pauseElement && mAudioChannelAgent) {
+  if (pauseElement && mAudioChannelAgent
+#ifdef PAUSE_MEDIA_ELEMENT_FROM_AUDIOCHANNEL
+      // On B2G, NotifyOwnerDocumentActivityChangedInternal may return true for
+      // two reasons: the document no longer being active, or the element being
+      // paused by the audio channel.  However we are only interested in the
+      // first case here, so we need to filter out the second case.
+      && !ComputedMuted()
+#endif
+      ) {
     // If the element is being paused since we are navigating away from the
     // document, notify the audio channel agent.
     // Be careful to ignore this event during a docshell frame swap.
@@ -4457,10 +4456,6 @@ ImageContainer* HTMLMediaElement::GetImageContainer()
 
 nsresult HTMLMediaElement::UpdateChannelMuteState(float aVolume, bool aMuted)
 {
-  if (!UseAudioChannelService()) {
-    return NS_OK;
-  }
-
   if (mAudioChannelVolume != aVolume) {
     mAudioChannelVolume = aVolume;
     SetVolumeInternal();
@@ -4487,10 +4482,6 @@ nsresult HTMLMediaElement::UpdateChannelMuteState(float aVolume, bool aMuted)
 
 void HTMLMediaElement::UpdateAudioChannelPlayingState()
 {
-  if (!UseAudioChannelService()) {
-    return;
-  }
-
   bool playingThroughTheAudioChannel =
      (!mPaused &&
       !Muted() &&
@@ -4551,7 +4542,7 @@ HTMLMediaElement::NotifyAudioChannelAgent(bool aPlaying)
 
 NS_IMETHODIMP HTMLMediaElement::WindowVolumeChanged(float aVolume, bool aMuted)
 {
-  NS_ENSURE_TRUE(nsContentUtils::IsCallerChrome(), NS_ERROR_NOT_AVAILABLE);
+  MOZ_ASSERT(NS_IsMainThread());
 
   UpdateChannelMuteState(aVolume, aMuted);
 

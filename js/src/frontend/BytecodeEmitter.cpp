@@ -13,6 +13,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/UniquePtr.h"
 
@@ -48,6 +49,8 @@ using namespace js;
 using namespace js::gc;
 using namespace js::frontend;
 
+using mozilla::Maybe;
+using mozilla::Some;
 using mozilla::DebugOnly;
 using mozilla::NumberIsInt32;
 using mozilla::PodCopy;
@@ -106,16 +109,6 @@ struct frontend::LoopStmtInfo : public StmtInfoBCE
         return static_cast<LoopStmtInfo*>(stmt);
     }
 };
-
-void
-FunctionBox::switchStaticScopeToFunction()
-{
-    if (staticScope_->is<StaticFunctionBoxScopeObject>()) {
-        MOZ_ASSERT(staticScope_->as<StaticFunctionBoxScopeObject>().functionBox() == this);
-        staticScope_ = function();
-    }
-    MOZ_ASSERT(staticScope_ == function());
-}
 
 BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
                                  Parser<FullParseHandler>* parser, SharedContext* sc,
@@ -822,7 +815,7 @@ BytecodeEmitter::computeAliasedSlots(Handle<StaticBlockObject*> blockObj)
 void
 BytecodeEmitter::computeLocalOffset(Handle<StaticBlockObject*> blockObj)
 {
-    unsigned nbodyfixed = sc->isFunctionBox()
+    unsigned nbodyfixed = !sc->isGlobalContext()
                           ? script->bindings.numUnaliasedBodyLevelLocals()
                           : 0;
     unsigned localOffset = nbodyfixed;
@@ -1434,7 +1427,9 @@ BytecodeEmitter::computeDefinitionIsAliased(BytecodeEmitter* bceOfDef, Definitio
         // object. Aliased block bindings do not need adjusting; see
         // computeAliasedSlots.
         uint32_t slot = dn->pn_scopecoord.slot();
-        if (blockScopeOfDef(dn)->is<JSFunction>()) {
+        if (blockScopeOfDef(dn)->is<JSFunction>() ||
+            blockScopeOfDef(dn)->is<ModuleObject>())
+        {
             MOZ_ASSERT(IsArgOp(*op) || slot < bceOfDef->script->bindings.numBodyLevelLocals());
             MOZ_ALWAYS_TRUE(bceOfDef->lookupAliasedName(bceOfDef->script, dn->name(), &slot));
         }
@@ -1512,57 +1507,65 @@ BytecodeEmitter::tryConvertFreeName(ParseNode* pn)
                 return true;
         }
 
-        size_t hops = 0;
+        // Walk the static scope chain and look for an aliased binding with
+        // the name pn->pn_atom.
+        uint32_t hops = 0;
+        Maybe<uint32_t> slot;
         FunctionBox* funbox = sc->asFunctionBox();
-        if (funbox->hasExtensibleScope())
-            return false;
-        if (funbox->function()->isNamedLambda() && funbox->function()->atom() == pn->pn_atom)
-            return false;
-        if (funbox->isHeavyweight()) {
-            hops++;
-            if (funbox->function()->isNamedLambda())
-                hops++;
-        }
-        if (script->directlyInsideEval())
-            return false;
-        RootedObject outerScope(cx, script->enclosingStaticScope());
-        for (StaticScopeIter<CanGC> ssi(cx, outerScope); !ssi.done(); ssi++) {
-            if (ssi.type() != StaticScopeIter<CanGC>::Function) {
-                if (ssi.type() == StaticScopeIter<CanGC>::Block) {
-                    // Use generic ops if a catch block is encountered.
-                    return false;
-                }
-                if (ssi.hasSyntacticDynamicScopeObject())
-                    hops++;
+        PropertyName* name = pn->pn_atom->asPropertyName();
+        for (StaticScopeIter<NoGC> ssi(funbox->staticScope()); !ssi.done(); ssi++) {
+            // Don't optimize names through eval.
+            if (ssi.type() == StaticScopeIter<NoGC>::Eval)
+                return false;
+
+            if (!ssi.hasSyntacticDynamicScopeObject())
                 continue;
-            }
-            RootedScript script(cx, ssi.funScript());
-            if (script->functionNonDelazifying()->atom() == pn->pn_atom)
-                return false;
-            if (ssi.hasSyntacticDynamicScopeObject()) {
-                uint32_t slot;
-                if (lookupAliasedName(script, pn->pn_atom->asPropertyName(), &slot, pn)) {
-                    JSOp op;
-                    switch (pn->getOp()) {
-                      case JSOP_GETNAME: op = JSOP_GETALIASEDVAR; break;
-                      case JSOP_SETNAME: op = JSOP_SETALIASEDVAR; break;
-                      default: return false;
+
+            // Look up for name in function and block scopes.
+            if (ssi.type() == StaticScopeIter<NoGC>::Function) {
+                RootedScript funScript(cx, ssi.funScript());
+                if (funScript->funHasExtensibleScope() || ssi.fun().atom() == pn->pn_atom)
+                    return false;
+
+                // Skip the current function, since we're trying to convert a
+                // free name.
+                if (script != funScript) {
+                    uint32_t slot_;
+                    if (lookupAliasedName(funScript, name, &slot_, pn)) {
+                        slot = Some(slot_);
+                        break;
                     }
-
-                    pn->setOp(op);
-                    MOZ_ALWAYS_TRUE(pn->pn_scopecoord.set(parser->tokenStream, hops, slot));
-                    return true;
                 }
-                hops++;
+            } else if (ssi.type() == StaticScopeIter<NoGC>::Block) {
+                RootedShape shape(cx, ssi.block().lookupAliasedName(name));
+                if (shape) {
+                    // Don't optimize setting a 'const' binding. Let the slow
+                    // path do the error checking.
+                    if (!shape->writable() && pn->getOp() == JSOP_SETNAME)
+                        return false;
+                    slot = Some(shape->slot());
+                    pn->pn_dflags |= PND_LEXICAL;
+                    break;
+                }
+            } else {
+                MOZ_ASSERT(ssi.type() != StaticScopeIter<NoGC>::With);
             }
 
-            // If this walk up and check for directlyInsideEval is ever removed,
-            // we'll need to adjust CompileLazyFunction to better communicate
-            // whether we're inside eval to the BytecodeEmitter.  For now, this
-            // walk is why CompileLazyFunction can claim that it's never inside
-            // eval.
-            if (script->funHasExtensibleScope() || script->directlyInsideEval())
-                return false;
+            hops++;
+        }
+
+        // If we found a scope binding name, convert the name op to an aliased
+        // var op.
+        if (slot.isSome()) {
+            JSOp op;
+            switch (pn->getOp()) {
+              case JSOP_GETNAME: op = JSOP_GETALIASEDVAR; break;
+              case JSOP_SETNAME: op = JSOP_SETALIASEDVAR; break;
+              default: return false;
+            }
+            pn->setOp(op);
+            MOZ_ALWAYS_TRUE(pn->pn_scopecoord.set(parser->tokenStream, hops, *slot));
+            return true;
         }
     }
 
@@ -2208,6 +2211,10 @@ BytecodeEmitter::checkSideEffects(ParseNode* pn, bool* answer)
          * (the object and binding can be detected and hijacked or captured).
          * This is a bug fix to ES3; it is fixed in ES3.1 drafts.
          */
+        *answer = false;
+        return true;
+
+      case PNK_MODULE:
         *answer = false;
         return true;
 
@@ -3500,6 +3507,56 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
 }
 
 bool
+BytecodeEmitter::emitModuleScript(ParseNode* body)
+{
+    if (!updateLocalsToFrameSlots())
+        return false;
+
+    /*
+     * IonBuilder has assumptions about what may occur immediately after
+     * script->main (e.g., in the case of destructuring params). Thus, put the
+     * following ops into the range [script->code, script->main). Note:
+     * execution starts from script->code, so this has no semantic effect.
+     */
+
+    ModuleBox* modulebox = sc->asModuleBox();
+    MOZ_ASSERT(modulebox);
+
+    // Link the module and the script to each other, so that StaticScopeIter
+    // may walk the scope chain of currently compiling scripts.
+    JSScript::linkToModuleFromEmitter(cx, script, modulebox);
+
+    if (!emitTree(body))
+        return false;
+
+    // Always end the script with a JSOP_RETRVAL. Some other parts of the codebase
+    // depend on this opcode, e.g. InterpreterRegs::setToEndOfScript.
+    if (!emit1(JSOP_RETRVAL))
+        return false;
+
+    // If all locals are aliased, the frame's block slots won't be used, so we
+    // can set numBlockScoped = 0. This is nice for generators as it ensures
+    // nfixed == 0, so we don't have to initialize any local slots when resuming
+    // a generator.
+    if (sc->allLocalsAliased())
+        script->bindings.setAllLocalsAliased();
+
+    if (!JSScript::fullyInitFromEmitter(cx, script, this))
+        return false;
+
+    /*
+     * Since modules are only run once. Mark the script so that initializers
+     * created within it may be given more precise types.
+     */
+    script->setTreatAsRunOnce();
+    MOZ_ASSERT(!script->hasRunOnce());
+
+    tellDebuggerAboutCompiledScript(cx);
+
+    return true;
+}
+
+bool
 BytecodeEmitter::maybeEmitVarDecl(JSOp prologueOp, ParseNode* pn, jsatomid* result)
 {
     jsatomid atomIndex;
@@ -4573,7 +4630,7 @@ BytecodeEmitter::emitAssignment(ParseNode* lhs, JSOp op, ParseNode* rhs)
 
 bool
 ParseNode::getConstantValue(ExclusiveContext* cx, AllowConstantObjects allowObjects, MutableHandleValue vp,
-                            NewObjectKind newKind)
+                            Value* compare, size_t ncompare, NewObjectKind newKind)
 {
     MOZ_ASSERT(newKind == TenuredObject || newKind == SingletonObject);
 
@@ -4624,7 +4681,7 @@ ParseNode::getConstantValue(ExclusiveContext* cx, AllowConstantObjects allowObje
             return false;
         size_t idx;
         for (idx = 0; pn; idx++, pn = pn->pn_next) {
-            if (!pn->getConstantValue(cx, allowObjects, values[idx]))
+            if (!pn->getConstantValue(cx, allowObjects, values[idx], values.begin(), idx))
                 return false;
             if (values[idx].isMagic(JS_GENERIC_MAGIC)) {
                 vp.setMagic(JS_GENERIC_MAGIC);
@@ -4636,6 +4693,9 @@ ParseNode::getConstantValue(ExclusiveContext* cx, AllowConstantObjects allowObje
         JSObject* obj = ObjectGroup::newArrayObject(cx, values.begin(), values.length(),
                                                     newKind, arrayKind);
         if (!obj)
+            return false;
+
+        if (!CombineArrayElementTypes(cx, obj, compare, ncompare))
             return false;
 
         vp.setObject(*obj);
@@ -4684,6 +4744,9 @@ ParseNode::getConstantValue(ExclusiveContext* cx, AllowConstantObjects allowObje
         if (!obj)
             return false;
 
+        if (!CombinePlainObjectPropertyTypes(cx, obj, compare, ncompare))
+            return false;
+
         vp.setObject(*obj);
         return true;
       }
@@ -4699,7 +4762,7 @@ BytecodeEmitter::emitSingletonInitialiser(ParseNode* pn)
     NewObjectKind newKind = (pn->getKind() == PNK_OBJECT) ? SingletonObject : TenuredObject;
 
     RootedValue value(cx);
-    if (!pn->getConstantValue(cx, ParseNode::AllowObjects, &value, newKind))
+    if (!pn->getConstantValue(cx, ParseNode::AllowObjects, &value, nullptr, 0, newKind))
         return false;
 
     MOZ_ASSERT_IF(newKind == SingletonObject, value.toObject().isSingleton());
@@ -5820,10 +5883,10 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
      * invocation of the emitter and calls to emitTree for function
      * definitions can be scheduled before generating the rest of code.
      */
-    if (!sc->isFunctionBox()) {
+    if (sc->isGlobalContext()) {
         MOZ_ASSERT(pn->pn_scopecoord.isFree());
         MOZ_ASSERT(pn->getOp() == JSOP_NOP);
-        MOZ_ASSERT(!innermostStmt());
+        MOZ_ASSERT(!innermostStmt() || sc->isModuleBox());
         switchToPrologue();
         if (!emitIndex32(JSOP_DEFFUN, index))
             return false;
@@ -7007,8 +7070,11 @@ BytecodeEmitter::emitPropertyList(ParseNode* pn, MutableHandlePlainObject objp, 
             isIndex = true;
         } else if (key->isKind(PNK_OBJECT_PROPERTY_NAME) || key->isKind(PNK_STRING)) {
             // EmitClass took care of constructor already.
-            if (type == ClassBody && key->pn_atom == cx->names().constructor)
+            if (type == ClassBody && key->pn_atom == cx->names().constructor &&
+                !propdef->as<ClassMethod>().isStatic())
+            {
                 continue;
+            }
 
             // The parser already checked for atoms representing indexes and
             // used PNK_NUMBER instead, but also watch for ids which TI treats
@@ -7851,12 +7917,36 @@ BytecodeEmitter::emitTree(ParseNode* pn)
         break;
 
       case PNK_IMPORT:
+        if (!checkIsModule())
+            return false;
+        ok = true;
+        break;
+
       case PNK_EXPORT:
+        if (!checkIsModule())
+            return false;
+        if (pn->pn_kid->getKind() != PNK_EXPORT_SPEC_LIST)
+            ok = emitTree(pn->pn_kid);
+        else
+            ok = true;
+        break;
+
       case PNK_EXPORT_DEFAULT:
+        if (!checkIsModule())
+            return false;
+        if (pn->pn_kid->isDefn()) {
+            ok = emitTree(pn->pn_kid);
+        } else {
+            // TODO: Emit a definition of *default* from child expression.
+            ok = true;
+        }
+        break;
+
       case PNK_EXPORT_FROM:
-       // TODO: Implement emitter support for modules
-       reportError(nullptr, JSMSG_MODULES_NOT_IMPLEMENTED);
-       return false;
+        if (!checkIsModule())
+            return false;
+        ok = true;
+        break;
 
       case PNK_ARRAYPUSH: {
         /*
@@ -7987,6 +8077,16 @@ BytecodeEmitter::emitTree(ParseNode* pn)
     }
 
     return ok;
+}
+
+bool
+BytecodeEmitter::checkIsModule()
+{
+    if (!sc->isModuleBox()) {
+        reportError(nullptr, JSMSG_INVALID_OUTSIDE_MODULE);
+        return false;
+    }
+    return true;
 }
 
 static bool

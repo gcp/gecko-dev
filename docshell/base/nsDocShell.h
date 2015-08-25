@@ -62,6 +62,7 @@
 namespace mozilla {
 namespace dom {
 class EventTarget;
+typedef uint32_t ScreenOrientationInternal;
 } // namespace dom
 } // namespace mozilla
 
@@ -277,9 +278,11 @@ private:
   friend void mozilla::TimelineConsumers::AddConsumer(nsDocShell* aDocShell);
   friend void mozilla::TimelineConsumers::RemoveConsumer(nsDocShell* aDocShell);
   friend void mozilla::TimelineConsumers::AddMarkerForDocShell(
-    nsDocShell* aDocShell, UniquePtr<TimelineMarker>&& aMarker);
-  friend void mozilla::TimelineConsumers::AddMarkerForDocShell(
     nsDocShell* aDocShell, const char* aName, TracingMetadata aMetaData);
+  friend void mozilla::TimelineConsumers::AddMarkerForDocShell(
+    nsDocShell* aDocShell, const char* aName, const TimeStamp& aTime, TracingMetadata aMetaData);
+  friend void mozilla::TimelineConsumers::AddMarkerForDocShell(
+    nsDocShell* aDocShell, UniquePtr<TimelineMarker>&& aMarker);
 
 public:
   // Tell the favicon service that aNewURI has the same favicon as aOldURI.
@@ -874,6 +877,10 @@ protected:
     PARENT_PROHIBITS
   };
   FullscreenAllowedState mFullscreenAllowed;
+
+  // The orientation lock as described by
+  // https://w3c.github.io/screen-orientation/
+  mozilla::dom::ScreenOrientationInternal mOrientationLock;
 
   // Cached value of the "browser.xul.error_pages.enabled" preference.
   static bool sUseErrorPages;

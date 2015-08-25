@@ -105,7 +105,8 @@ UpdateStreamBlocking(MediaStream* aStream, bool aBlocking)
  */
 class DecodedStreamData {
 public:
-  DecodedStreamData(SourceMediaStream* aStream, bool aPlaying);
+  DecodedStreamData(SourceMediaStream* aStream, bool aPlaying,
+                    MozPromiseHolder<GenericPromise>&& aPromise);
   ~DecodedStreamData();
   bool IsFinished() const;
   int64_t GetPosition() const;
@@ -139,11 +140,10 @@ public:
   // True if we need to send a compensation video frame to ensure the
   // StreamTime going forward.
   bool mEOSVideoCompensation;
-  // This promise will be resolved when the SourceMediaStream is finished.
-  nsRefPtr<GenericPromise> mFinishPromise;
 };
 
-DecodedStreamData::DecodedStreamData(SourceMediaStream* aStream, bool aPlaying)
+DecodedStreamData::DecodedStreamData(SourceMediaStream* aStream, bool aPlaying,
+                                     MozPromiseHolder<GenericPromise>&& aPromise)
   : mAudioFramesWritten(0)
   , mNextVideoTime(-1)
   , mNextAudioTime(-1)
@@ -155,10 +155,8 @@ DecodedStreamData::DecodedStreamData(SourceMediaStream* aStream, bool aPlaying)
   , mPlaying(aPlaying)
   , mEOSVideoCompensation(false)
 {
-  MozPromiseHolder<GenericPromise> promise;
-  mFinishPromise = promise.Ensure(__func__);
   // DecodedStreamGraphListener will resolve this promise.
-  mListener = new DecodedStreamGraphListener(mStream, Move(promise));
+  mListener = new DecodedStreamGraphListener(mStream, Move(aPromise));
   mStream->AddListener(mListener);
 
   // Block the stream if we are not playing.
@@ -197,8 +195,7 @@ DecodedStreamData::SetPlaying(bool aPlaying)
 class OutputStreamListener : public MediaStreamListener {
   typedef MediaStreamListener::MediaStreamGraphEvent MediaStreamGraphEvent;
 public:
-  OutputStreamListener(DecodedStream* aDecodedStream, MediaStream* aStream)
-    : mDecodedStream(aDecodedStream), mStream(aStream) {}
+  explicit OutputStreamListener(OutputStreamData* aOwner) : mOwner(aOwner) {}
 
   void NotifyEvent(MediaStreamGraph* aGraph, MediaStreamGraphEvent event) override
   {
@@ -212,40 +209,156 @@ public:
   void Forget()
   {
     MOZ_ASSERT(NS_IsMainThread());
-    mDecodedStream = nullptr;
+    mOwner = nullptr;
   }
 
 private:
   void DoNotifyFinished()
   {
     MOZ_ASSERT(NS_IsMainThread());
-    if (mDecodedStream) {
+    if (mOwner) {
       // Remove the finished stream so it won't block the decoded stream.
-      mDecodedStream->Remove(mStream);
+      mOwner->Remove();
     }
   }
 
   // Main thread only
-  DecodedStream* mDecodedStream;
-  nsRefPtr<MediaStream> mStream;
+  OutputStreamData* mOwner;
 };
 
 OutputStreamData::~OutputStreamData()
 {
+  MOZ_ASSERT(NS_IsMainThread());
   mListener->Forget();
+  // Break the connection to the input stream if necessary.
+  if (mPort) {
+    mPort->Destroy();
+  }
 }
 
 void
-OutputStreamData::Init(DecodedStream* aDecodedStream, ProcessedMediaStream* aStream)
+OutputStreamData::Init(OutputStreamManager* aOwner, ProcessedMediaStream* aStream)
 {
+  mOwner = aOwner;
   mStream = aStream;
-  mListener = new OutputStreamListener(aDecodedStream, aStream);
+  mListener = new OutputStreamListener(this);
   aStream->AddListener(mListener);
 }
 
-DecodedStream::DecodedStream(MediaQueue<MediaData>& aAudioQueue,
+void
+OutputStreamData::Connect(MediaStream* aStream)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mPort, "Already connected?");
+  MOZ_ASSERT(!mStream->IsDestroyed(), "Can't connect a destroyed stream.");
+
+  // The output stream must stay in sync with the input stream, so if
+  // either stream is blocked, we block the other.
+  mPort = mStream->AllocateInputPort(aStream,
+    MediaInputPort::FLAG_BLOCK_INPUT | MediaInputPort::FLAG_BLOCK_OUTPUT);
+  // Unblock the output stream now. The input stream is responsible for
+  // controlling blocking from now on.
+  mStream->ChangeExplicitBlockerCount(-1);
+}
+
+bool
+OutputStreamData::Disconnect()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // During cycle collection, DOMMediaStream can be destroyed and send
+  // its Destroy message before this decoder is destroyed. So we have to
+  // be careful not to send any messages after the Destroy().
+  if (mStream->IsDestroyed()) {
+    return false;
+  }
+
+  // Disconnect the existing port if necessary.
+  if (mPort) {
+    mPort->Destroy();
+    mPort = nullptr;
+  }
+  // Block the stream again. It will be unlocked when connecting
+  // to the input stream.
+  mStream->ChangeExplicitBlockerCount(1);
+  return true;
+}
+
+void
+OutputStreamData::Remove()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mOwner->Remove(mStream);
+}
+
+MediaStreamGraph*
+OutputStreamData::Graph() const
+{
+  return mStream->Graph();
+}
+
+void
+OutputStreamManager::Add(ProcessedMediaStream* aStream, bool aFinishWhenEnded)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  // All streams must belong to the same graph.
+  MOZ_ASSERT(!Graph() || Graph() == aStream->Graph());
+
+  // Ensure that aStream finishes the moment mDecodedStream does.
+  if (aFinishWhenEnded) {
+    aStream->SetAutofinish(true);
+  }
+
+  OutputStreamData* p = mStreams.AppendElement();
+  p->Init(this, aStream);
+
+  // Connect to the input stream if we have one. Otherwise the output stream
+  // will be connected in Connect().
+  if (mInputStream) {
+    p->Connect(mInputStream);
+  }
+}
+
+void
+OutputStreamManager::Remove(MediaStream* aStream)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  for (int32_t i = mStreams.Length() - 1; i >= 0; --i) {
+    if (mStreams[i].Equals(aStream)) {
+      mStreams.RemoveElementAt(i);
+      break;
+    }
+  }
+}
+
+void
+OutputStreamManager::Connect(MediaStream* aStream)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mInputStream = aStream;
+  for (auto&& os : mStreams) {
+    os.Connect(aStream);
+  }
+}
+
+void
+OutputStreamManager::Disconnect()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mInputStream = nullptr;
+  for (int32_t i = mStreams.Length() - 1; i >= 0; --i) {
+    if (!mStreams[i].Disconnect()) {
+      // Probably the DOMMediaStream was GCed. Clean up.
+      mStreams.RemoveElementAt(i);
+    }
+  }
+}
+
+DecodedStream::DecodedStream(AbstractThread* aOwnerThread,
+                             MediaQueue<MediaData>& aAudioQueue,
                              MediaQueue<MediaData>& aVideoQueue)
-  : mMonitor("DecodedStream::mMonitor")
+  : mOwnerThread(aOwnerThread)
+  , mMonitor("DecodedStream::mMonitor")
   , mPlaying(false)
   , mVolume(1.0)
   , mAudioQueue(aAudioQueue)
@@ -255,114 +368,115 @@ DecodedStream::DecodedStream(MediaQueue<MediaData>& aAudioQueue,
 
 DecodedStream::~DecodedStream()
 {
+  MOZ_ASSERT(mStartTime.isNothing(), "playback should've ended.");
 }
 
 nsRefPtr<GenericPromise>
 DecodedStream::StartPlayback(int64_t aStartTime, const MediaInfo& aInfo)
 {
+  AssertOwnerThread();
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   MOZ_ASSERT(mStartTime.isNothing(), "playback already started.");
+
   mStartTime.emplace(aStartTime);
   mInfo = aInfo;
+  ConnectListener();
 
-  // TODO: Unfortunately, current call flow of MDSM guarantees mData is non-null
-  // when StartPlayback() is called which imposes an obscure dependency on MDSM.
-  // We will align the life cycle of mData with {Start,Stop}Playback so that
-  // DecodedStream doesn't need to make assumptions about mData's life cycle.
-  return mData->mFinishPromise;
+  class R : public nsRunnable {
+    typedef MozPromiseHolder<GenericPromise> Promise;
+    typedef void(DecodedStream::*Method)(Promise&&);
+  public:
+    R(DecodedStream* aThis, Method aMethod, Promise&& aPromise)
+      : mThis(aThis), mMethod(aMethod)
+    {
+      mPromise = Move(aPromise);
+    }
+    NS_IMETHOD Run() override
+    {
+      (mThis->*mMethod)(Move(mPromise));
+      return NS_OK;
+    }
+  private:
+    nsRefPtr<DecodedStream> mThis;
+    Method mMethod;
+    Promise mPromise;
+  };
+
+  MozPromiseHolder<GenericPromise> promise;
+  nsRefPtr<GenericPromise> rv = promise.Ensure(__func__);
+  nsCOMPtr<nsIRunnable> r = new R(this, &DecodedStream::CreateData, Move(promise));
+  AbstractThread::MainThread()->Dispatch(r.forget());
+
+  return rv.forget();
 }
 
 void DecodedStream::StopPlayback()
 {
+  AssertOwnerThread();
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  mStartTime.reset();
-}
-
-void
-DecodedStream::DestroyData()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-
-  // Avoid the redundant blocking to output stream.
-  if (!mData) {
+  // Playback didn't even start at all.
+  if (mStartTime.isNothing()) {
     return;
   }
 
-  // All streams are having their SourceMediaStream disconnected, so they
-  // need to be explicitly blocked again.
-  auto& outputStreams = OutputStreams();
-  for (int32_t i = outputStreams.Length() - 1; i >= 0; --i) {
-    OutputStreamData& os = outputStreams[i];
-    // Explicitly remove all existing ports.
-    // This is not strictly necessary but it's good form.
-    MOZ_ASSERT(os.mPort, "Double-delete of the ports!");
-    os.mPort->Destroy();
-    os.mPort = nullptr;
-    // During cycle collection, nsDOMMediaStream can be destroyed and send
-    // its Destroy message before this decoder is destroyed. So we have to
-    // be careful not to send any messages after the Destroy().
-    if (os.mStream->IsDestroyed()) {
-      // Probably the DOM MediaStream was GCed. Clean up.
-      outputStreams.RemoveElementAt(i);
-    } else {
-      os.mStream->ChangeExplicitBlockerCount(1);
-    }
+  mStartTime.reset();
+  DisconnectListener();
+
+  // Clear mData immediately when this playback session ends so we won't
+  // send data to the wrong stream in SendData() in next playback session.
+  DecodedStreamData* data = mData.release();
+  // mData is not yet created on the main thread.
+  if (!data) {
+    return;
   }
 
-  mData = nullptr;
-}
-
-void
-DecodedStream::RecreateData()
-{
   nsRefPtr<DecodedStream> self = this;
-  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([self] () -> void {
-    self->RecreateData(nullptr);
+  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([=] () {
+    self->mOutputStreamManager.Disconnect();
+    delete data;
   });
   AbstractThread::MainThread()->Dispatch(r.forget());
 }
 
 void
-DecodedStream::RecreateData(MediaStreamGraph* aGraph)
+DecodedStream::CreateData(MozPromiseHolder<GenericPromise>&& aPromise)
 {
   MOZ_ASSERT(NS_IsMainThread());
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  MOZ_ASSERT((aGraph && !mData && OutputStreams().IsEmpty()) || // first time
-             (!aGraph && mData)); // 2nd time and later
+  MOZ_ASSERT(!mData, "Already created.");
 
-  if (!aGraph) {
-    aGraph = mData->mStream->Graph();
+  // No need to create a source stream when there are no output streams. This
+  // happens when RemoveOutput() is called immediately after StartPlayback().
+  // We also bail out when the playback session has ended. This happens when
+  // StopPlayback() is called immediately after StartPlayback().
+  if (!mOutputStreamManager.Graph() || mStartTime.isNothing()) {
+    // Resolve the promise to indicate the end of playback.
+    aPromise.Resolve(true, __func__);
+    return;
   }
-  auto source = aGraph->CreateSourceStream(nullptr);
-  DestroyData();
-  mData.reset(new DecodedStreamData(source, mPlaying));
 
-  // Note that the delay between removing ports in DestroyDecodedStream
-  // and adding new ones won't cause a glitch since all graph operations
-  // between main-thread stable states take effect atomically.
-  auto& outputStreams = OutputStreams();
-  for (int32_t i = outputStreams.Length() - 1; i >= 0; --i) {
-    OutputStreamData& os = outputStreams[i];
-    MOZ_ASSERT(!os.mStream->IsDestroyed(), "Should've been removed in DestroyData()");
-    Connect(&os);
-  }
-}
+  auto source = mOutputStreamManager.Graph()->CreateSourceStream(nullptr);
+  mData.reset(new DecodedStreamData(source, mPlaying, Move(aPromise)));
+  mOutputStreamManager.Connect(mData->mStream);
 
-nsTArray<OutputStreamData>&
-DecodedStream::OutputStreams()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  GetReentrantMonitor().AssertCurrentThreadIn();
-  return mOutputStreams;
+  // Start to send data to the stream immediately
+  nsRefPtr<DecodedStream> self = this;
+  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([=] () {
+    ReentrantMonitorAutoEnter mon(self->GetReentrantMonitor());
+    // Don't send data if playback has ended.
+    if (self->mStartTime.isSome()) {
+      self->SendData();
+    }
+  });
+  // Don't assert success because the owner thread might have begun shutdown
+  // while we are still dealing with jobs on the main thread.
+  mOwnerThread->Dispatch(r.forget(), AbstractThread::DontAssertDispatchSuccess);
 }
 
 bool
 DecodedStream::HasConsumers() const
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  return mOutputStreams.IsEmpty();
+  return !mOutputStreamManager.IsEmpty();
 }
 
 ReentrantMonitor&
@@ -372,64 +486,21 @@ DecodedStream::GetReentrantMonitor() const
 }
 
 void
-DecodedStream::Connect(OutputStreamData* aStream)
+DecodedStream::AddOutput(ProcessedMediaStream* aStream, bool aFinishWhenEnded)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  GetReentrantMonitor().AssertCurrentThreadIn();
-  NS_ASSERTION(!aStream->mPort, "Already connected?");
-
-  // The output stream must stay in sync with the decoded stream, so if
-  // either stream is blocked, we block the other.
-  aStream->mPort = aStream->mStream->AllocateInputPort(mData->mStream,
-      MediaInputPort::FLAG_BLOCK_INPUT | MediaInputPort::FLAG_BLOCK_OUTPUT);
-  // Unblock the output stream now. While it's connected to DecodedStream,
-  // DecodedStream is responsible for controlling blocking.
-  aStream->mStream->ChangeExplicitBlockerCount(-1);
+  mOutputStreamManager.Add(aStream, aFinishWhenEnded);
 }
 
 void
-DecodedStream::Connect(ProcessedMediaStream* aStream, bool aFinishWhenEnded)
+DecodedStream::RemoveOutput(MediaStream* aStream)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-
-  if (!mData) {
-    RecreateData(aStream->Graph());
-  }
-
-  OutputStreamData* os = OutputStreams().AppendElement();
-  os->Init(this, aStream);
-  Connect(os);
-  if (aFinishWhenEnded) {
-    // Ensure that aStream finishes the moment mDecodedStream does.
-    aStream->SetAutofinish(true);
-  }
-}
-
-void
-DecodedStream::Remove(MediaStream* aStream)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-
-  auto& streams = OutputStreams();
-  for (int32_t i = streams.Length() - 1; i >= 0; --i) {
-    auto& os = streams[i];
-    MediaStream* p = os.mStream.get();
-    if (p == aStream) {
-      if (os.mPort) {
-        os.mPort->Destroy();
-        os.mPort = nullptr;
-      }
-      streams.RemoveElementAt(i);
-      break;
-    }
-  }
+  mOutputStreamManager.Remove(aStream);
 }
 
 void
 DecodedStream::SetPlaying(bool aPlaying)
 {
+  AssertOwnerThread();
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   mPlaying = aPlaying;
   if (mData) {
@@ -440,6 +511,7 @@ DecodedStream::SetPlaying(bool aPlaying)
 void
 DecodedStream::SetVolume(double aVolume)
 {
+  AssertOwnerThread();
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   mVolume = aVolume;
 }
@@ -447,6 +519,7 @@ DecodedStream::SetVolume(double aVolume)
 void
 DecodedStream::SetSameOrigin(bool aSameOrigin)
 {
+  AssertOwnerThread();
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   mSameOrigin = aSameOrigin;
 }
@@ -454,6 +527,7 @@ DecodedStream::SetSameOrigin(bool aSameOrigin)
 void
 DecodedStream::InitTracks()
 {
+  AssertOwnerThread();
   GetReentrantMonitor().AssertCurrentThreadIn();
 
   if (mData->mStreamInitialized) {
@@ -534,6 +608,7 @@ SendStreamAudio(DecodedStreamData* aStream, int64_t aStartTime,
 void
 DecodedStream::SendAudio(double aVolume, bool aIsSameOrigin)
 {
+  AssertOwnerThread();
   GetReentrantMonitor().AssertCurrentThreadIn();
 
   if (!mInfo.HasAudio()) {
@@ -599,6 +674,7 @@ ZeroDurationAtLastChunk(VideoSegment& aInput)
 void
 DecodedStream::SendVideo(bool aIsSameOrigin)
 {
+  AssertOwnerThread();
   GetReentrantMonitor().AssertCurrentThreadIn();
 
   if (!mInfo.HasVideo()) {
@@ -677,6 +753,7 @@ DecodedStream::SendVideo(bool aIsSameOrigin)
 void
 DecodedStream::AdvanceTracks()
 {
+  AssertOwnerThread();
   GetReentrantMonitor().AssertCurrentThreadIn();
 
   StreamTime endPosition = 0;
@@ -701,8 +778,14 @@ DecodedStream::AdvanceTracks()
 void
 DecodedStream::SendData()
 {
+  AssertOwnerThread();
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   MOZ_ASSERT(mStartTime.isSome(), "Must be called after StartPlayback()");
+
+  // Not yet created on the main thread. MDSM will try again later.
+  if (!mData) {
+    return;
+  }
 
   // Nothing to do when the stream is finished.
   if (mData->mHaveSentFinish) {
@@ -726,8 +809,9 @@ DecodedStream::SendData()
 int64_t
 DecodedStream::AudioEndTime() const
 {
+  AssertOwnerThread();
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  if (mStartTime.isSome() && mInfo.HasAudio()) {
+  if (mStartTime.isSome() && mInfo.HasAudio() && mData) {
     CheckedInt64 t = mStartTime.ref() +
       FramesToUsecs(mData->mAudioFramesWritten, mInfo.mAudio.mRate);
     if (t.isValid()) {
@@ -740,18 +824,48 @@ DecodedStream::AudioEndTime() const
 int64_t
 DecodedStream::GetPosition() const
 {
+  AssertOwnerThread();
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   // This is only called after MDSM starts playback. So mStartTime is
   // guaranteed to be something.
   MOZ_ASSERT(mStartTime.isSome());
-  return mStartTime.ref() + mData->GetPosition();
+  return mStartTime.ref() + (mData ? mData->GetPosition() : 0);
 }
 
 bool
 DecodedStream::IsFinished() const
 {
+  AssertOwnerThread();
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  return mData->IsFinished();
+  return mData && mData->IsFinished();
+}
+
+void
+DecodedStream::ConnectListener()
+{
+  AssertOwnerThread();
+  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
+
+  mAudioPushListener = mAudioQueue.PushEvent().Connect(
+    mOwnerThread, this, &DecodedStream::SendData);
+  mAudioFinishListener = mAudioQueue.FinishEvent().Connect(
+    mOwnerThread, this, &DecodedStream::SendData);
+  mVideoPushListener = mVideoQueue.PushEvent().Connect(
+    mOwnerThread, this, &DecodedStream::SendData);
+  mVideoFinishListener = mVideoQueue.FinishEvent().Connect(
+    mOwnerThread, this, &DecodedStream::SendData);
+}
+
+void
+DecodedStream::DisconnectListener()
+{
+  AssertOwnerThread();
+  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
+
+  mAudioPushListener.Disconnect();
+  mVideoPushListener.Disconnect();
+  mAudioFinishListener.Disconnect();
+  mVideoFinishListener.Disconnect();
 }
 
 } // namespace mozilla

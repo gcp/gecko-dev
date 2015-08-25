@@ -79,6 +79,7 @@ GK_ATOM(allowevents, "allowevents")
 GK_ATOM(allownegativeassertions, "allownegativeassertions")
 GK_ATOM(allowforms,"allow-forms")
 GK_ATOM(allowfullscreen, "allowfullscreen")
+GK_ATOM(alloworientationlock,"allow-orientation-lock")
 GK_ATOM(allowpointerlock,"allow-pointer-lock")
 GK_ATOM(allowpopups,"allow-popups")
 GK_ATOM(allowsameorigin,"allow-same-origin")
@@ -851,6 +852,9 @@ GK_ATOM(onpopuphiding, "onpopuphiding")
 GK_ATOM(onpopupshowing, "onpopupshowing")
 GK_ATOM(onpopupshown, "onpopupshown")
 GK_ATOM(onpreviewstatechange, "onpreviewstatechange")
+GK_ATOM(onpullphonebookreq, "onpullphonebookreq")
+GK_ATOM(onpullvcardentryreq, "onpullvcardentryreq")
+GK_ATOM(onpullvcardlistingreq, "onpullvcardlistingreq")
 GK_ATOM(onpush, "onpush")
 GK_ATOM(onpushsubscriptionchange, "onpushsubscriptionchange")
 GK_ATOM(onpschange, "onpschange")
@@ -1899,7 +1903,7 @@ GK_ATOM(ondevicelight, "ondevicelight")
 
 // Audio channel events
 GK_ATOM(onmozinterruptbegin, "onmozinterruptbegin")
-GK_ATOM(onmozinterruptend, "onmozinterruptbegin")
+GK_ATOM(onmozinterruptend, "onmozinterruptend")
 
 //---------------------------------------------------------------------------
 // Special atoms

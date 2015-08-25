@@ -29,6 +29,7 @@
 #include "jstypes.h"
 
 #include "asmjs/AsmJSValidate.h"
+#include "builtin/ModuleObject.h"
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/FoldConstants.h"
 #include "frontend/ParseMaps.h"
@@ -47,6 +48,22 @@ using namespace js::gc;
 using mozilla::Maybe;
 
 using JS::AutoGCRooter;
+
+JSFunction::AutoParseUsingFunctionBox::AutoParseUsingFunctionBox(ExclusiveContext* cx,
+                                                                 frontend::FunctionBox* funbox)
+  : fun_(cx, funbox->function()),
+    oldEnv_(cx, fun_->environment())
+{
+    fun_->setFunctionBox(funbox);
+    funbox->computeAllowSyntax(fun_);
+    funbox->computeInWith(fun_);
+}
+
+JSFunction::AutoParseUsingFunctionBox::~AutoParseUsingFunctionBox()
+{
+    fun_->unsetFunctionBox();
+    fun_->setEnvironment(oldEnv_);
+}
 
 namespace js {
 namespace frontend {
@@ -225,7 +242,7 @@ ParseContext<FullParseHandler>::define(TokenStream& ts,
 
       case Definition::GLOBALCONST:
       case Definition::VAR:
-        if (sc->isFunctionBox()) {
+        if (!sc->isGlobalContext()) {
             dn->setOp((js_CodeSpec[dn->getOp()].format & JOF_SET) ? JSOP_SETLOCAL : JSOP_GETLOCAL);
             dn->pn_blockid = bodyid;
             dn->pn_dflags |= PND_BOUND;
@@ -236,6 +253,8 @@ ParseContext<FullParseHandler>::define(TokenStream& ts,
             if (!checkLocalsOverflow(ts))
                 return false;
         }
+        if (atModuleScope())
+            dn->pn_dflags |= PND_CLOSED;
         if (!decls_.addUnique(name, dn))
             return false;
         break;
@@ -244,6 +263,8 @@ ParseContext<FullParseHandler>::define(TokenStream& ts,
       case Definition::CONST:
         dn->setOp(JSOP_INITLEXICAL);
         dn->pn_dflags |= (PND_LEXICAL | PND_BOUND);
+        if (atModuleLevel())
+            dn->pn_dflags |= PND_CLOSED;
         if (atBodyLevel()) {
             if (!bodyLevelLexicals_.append(dn))
                 return false;
@@ -393,12 +414,11 @@ AppendPackedBindings(const ParseContext<ParseHandler>* pc, const DeclVector& vec
 
 template <typename ParseHandler>
 bool
-ParseContext<ParseHandler>::generateFunctionBindings(ExclusiveContext* cx, TokenStream& ts,
-                                                     LifoAlloc& alloc,
-                                                     MutableHandle<Bindings> bindings) const
+ParseContext<ParseHandler>::generateBindings(ExclusiveContext* cx, TokenStream& ts, LifoAlloc& alloc,
+                                             MutableHandle<Bindings> bindings) const
 {
-    MOZ_ASSERT(sc->isFunctionBox());
-    MOZ_ASSERT(args_.length() < ARGNO_LIMIT);
+    MOZ_ASSERT_IF(sc->isFunctionBox(), args_.length() < ARGNO_LIMIT);
+    MOZ_ASSERT_IF(sc->isModuleBox(), args_.length() == 0);
     MOZ_ASSERT(vars_.length() + bodyLevelLexicals_.length() < LOCALNO_LIMIT);
 
     /*
@@ -434,7 +454,7 @@ ParseContext<ParseHandler>::generateFunctionBindings(ExclusiveContext* cx, Token
     return Bindings::initWithTemporaryStorage(cx, bindings, args_.length(), vars_.length(),
                                               bodyLevelLexicals_.length(), blockScopeDepth,
                                               numUnaliasedVars, numUnaliasedBodyLevelLexicals,
-                                              packedBindings);
+                                              packedBindings, sc->isModuleBox());
 }
 
 template <typename ParseHandler>
@@ -613,12 +633,12 @@ Parser<ParseHandler>::newObjectBox(JSObject* obj)
 
 template <typename ParseHandler>
 FunctionBox::FunctionBox(ExclusiveContext* cx, ObjectBox* traceListHead, JSFunction* fun,
-                         JSObject* staticScope, ParseContext<ParseHandler>* outerpc,
+                         JSObject* enclosingStaticScope, ParseContext<ParseHandler>* outerpc,
                          Directives directives, bool extraWarnings, GeneratorKind generatorKind)
   : ObjectBox(fun, traceListHead),
     SharedContext(cx, directives, extraWarnings),
     bindings(),
-    staticScope_(staticScope),
+    enclosingStaticScope_(enclosingStaticScope),
     bufStart(0),
     bufEnd(0),
     length(0),
@@ -636,22 +656,17 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, ObjectBox* traceListHead, JSFunct
     // baked into JIT code, so they must be allocated tenured. They are held by
     // the JSScript so cannot be collected during a minor GC anyway.
     MOZ_ASSERT(fun->isTenured());
-
-    if (staticScope->is<StaticFunctionBoxScopeObject>())
-        staticScope->as<StaticFunctionBoxScopeObject>().setFunctionBox(this);
-
-    computeAllowSyntax(staticScope);
-    computeInWith(staticScope);
 }
 
 template <typename ParseHandler>
 FunctionBox*
-Parser<ParseHandler>::newFunctionBoxWithScope(Node fn, JSFunction* fun,
-                                              ParseContext<ParseHandler>* outerpc,
-                                              Directives inheritedDirectives,
-                                              GeneratorKind generatorKind,
-                                              JSObject* staticScope)
+Parser<ParseHandler>::newFunctionBox(Node fn, JSFunction* fun,
+                                     ParseContext<ParseHandler>* outerpc,
+                                     Directives inheritedDirectives,
+                                     GeneratorKind generatorKind,
+                                     JSObject* enclosingStaticScope)
 {
+    MOZ_ASSERT_IF(outerpc, enclosingStaticScope == outerpc->innermostStaticScope());
     MOZ_ASSERT(fun);
 
     /*
@@ -662,9 +677,8 @@ Parser<ParseHandler>::newFunctionBoxWithScope(Node fn, JSFunction* fun,
      * function.
      */
     FunctionBox* funbox =
-        alloc.new_<FunctionBox>(context, traceListHead, fun, staticScope, outerpc,
-                                inheritedDirectives,
-                                options().extraWarningsOption,
+        alloc.new_<FunctionBox>(context, traceListHead, fun, enclosingStaticScope, outerpc,
+                                inheritedDirectives, options().extraWarningsOption,
                                 generatorKind);
     if (!funbox) {
         ReportOutOfMemory(context);
@@ -679,26 +693,46 @@ Parser<ParseHandler>::newFunctionBoxWithScope(Node fn, JSFunction* fun,
 }
 
 template <typename ParseHandler>
-FunctionBox*
-Parser<ParseHandler>::newFunctionBox(Node fn, HandleFunction fun,
-                                     ParseContext<ParseHandler>* outerpc,
-                                     Directives inheritedDirectives,
-                                     GeneratorKind generatorKind,
-                                     HandleObject enclosingStaticScope)
+ModuleBox::ModuleBox(ExclusiveContext* cx, ObjectBox* traceListHead, ModuleObject* module,
+                     ParseContext<ParseHandler>* outerpc)
+  : ObjectBox(module, traceListHead),
+    SharedContext(cx, Directives(true), false),
+    bindings()
+{}
+
+template <typename ParseHandler>
+ModuleBox*
+Parser<ParseHandler>::newModuleBox(Node pn, HandleModuleObject module)
 {
-    MOZ_ASSERT_IF(outerpc, enclosingStaticScope == outerpc->innermostStaticScope());
+    MOZ_ASSERT(module);
 
-    StaticFunctionBoxScopeObject* scope =
-        StaticFunctionBoxScopeObject::create(context, enclosingStaticScope);
-    if (!scope)
+    /*
+     * We use JSContext.tempLifoAlloc to allocate parsed objects and place them
+     * on a list in this Parser to ensure GC safety. Thus the tempLifoAlloc
+     * arenas containing the entries must be alive until we are done with
+     * scanning, parsing and code generation for the whole module.
+     */
+    ParseContext<ParseHandler>* outerpc = nullptr;
+    ModuleBox* modbox =
+        alloc.new_<ModuleBox>(context, traceListHead, module, outerpc);
+    if (!modbox) {
+        ReportOutOfMemory(context);
         return nullptr;
+    }
 
-    FunctionBox* funbox = newFunctionBoxWithScope(fn, fun, outerpc, inheritedDirectives,
-                                                  generatorKind, scope);
-    if (!funbox)
-        return nullptr;
+    traceListHead = modbox;
+    if (pn)
+        handler.setModuleBox(pn, modbox);
 
-    return funbox;
+    return modbox;
+}
+
+template <>
+ModuleBox*
+Parser<SyntaxParseHandler>::newModuleBox(Node pn, HandleModuleObject module)
+{
+    MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
+    return nullptr;
 }
 
 template <typename ParseHandler>
@@ -798,6 +832,59 @@ Parser<ParseHandler>::checkStrictBinding(PropertyName* name, Node pn)
     return true;
 }
 
+template <typename ParseHandler>
+typename ParseHandler::Node
+Parser<ParseHandler>::standaloneModule(HandleModuleObject module)
+{
+    MOZ_ASSERT(checkOptionsCalled);
+
+    Node mn = handler.newModule();
+    if (!mn)
+        return null();
+
+    ModuleBox* modulebox = newModuleBox(mn, module);
+    if (!modulebox)
+        return null();
+    handler.setModuleBox(mn, modulebox);
+
+    ParseContext<FullParseHandler> modulepc(this, pc, mn, modulebox, nullptr, 0);
+    if (!modulepc.init(*this))
+        return null();
+
+    ParseNode* pn = statements(YieldIsKeyword);
+    if (!pn)
+        return null();
+
+    pn->pn_blockid = modulepc.blockid();
+
+    MOZ_ASSERT(pn->isKind(PNK_STATEMENTLIST));
+    mn->pn_body = pn;
+
+    TokenKind tt;
+    if (!tokenStream.getToken(&tt, TokenStream::Operand))
+        return null();
+    MOZ_ASSERT(tt == TOK_EOF);
+
+    if (!FoldConstants(context, &pn, this))
+        return null();
+
+    Rooted<Bindings> bindings(context, modulebox->bindings);
+    if (!modulepc.generateBindings(context, tokenStream, alloc, &bindings))
+        return null();
+    modulebox->bindings = bindings;
+
+    MOZ_ASSERT(mn->pn_modulebox == modulebox);
+    return mn;
+}
+
+template <>
+SyntaxParseHandler::Node
+Parser<SyntaxParseHandler>::standaloneModule(HandleModuleObject module)
+{
+    MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
+    return SyntaxParseHandler::NodeFailure;
+}
+
 template <>
 ParseNode*
 Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun,
@@ -872,7 +959,7 @@ Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun,
     }
 
     Rooted<Bindings> bindings(context, funbox->bindings);
-    if (!funpc.generateFunctionBindings(context, tokenStream, alloc, &bindings))
+    if (!funpc.generateBindings(context, tokenStream, alloc, &bindings))
         return null();
     funbox->bindings = bindings;
 
@@ -956,14 +1043,8 @@ Parser<FullParseHandler>::checkFunctionArguments()
         FunctionBox* funbox = pc->sc->asFunctionBox();
         funbox->setArgumentsHasLocalBinding();
 
-        /*
-         * If a script has both explicit mentions of 'arguments' and dynamic
-         * name lookups which could access the arguments, an arguments object
-         * must be created eagerly. The SSA analysis used for lazy arguments
-         * cannot cope with dynamic name accesses, so any 'arguments' accessed
-         * via a NAME opcode must force construction of the arguments object.
-         */
-        if (pc->sc->bindingsAccessedDynamically() && maybeArgDef)
+        /* Dynamic scope access destroys all hope of optimization. */
+        if (pc->sc->bindingsAccessedDynamically())
             funbox->setDefinitelyNeedsArgsObj();
 
         /*
@@ -991,9 +1072,6 @@ Parser<FullParseHandler>::checkFunctionArguments()
                         funbox->setDefinitelyNeedsArgsObj();
                 }
             }
-            /* Watch for mutation of arguments through e.g. eval(). */
-            if (pc->sc->bindingsAccessedDynamically())
-                funbox->setDefinitelyNeedsArgsObj();
         }
     }
 
@@ -1314,10 +1392,9 @@ Parser<ParseHandler>::newFunction(HandleAtom atom, FunctionSyntaxKind kind,
         break;
       case Method:
         MOZ_ASSERT(generatorKind == NotGenerator || generatorKind == StarGenerator);
-        if (generatorKind == NotGenerator)
-            flags = JSFunction::INTERPRETED_METHOD;
-        else
-            flags = JSFunction::INTERPRETED_METHOD_GENERATOR;
+        flags = (generatorKind == NotGenerator
+                 ? JSFunction::INTERPRETED_METHOD
+                 : JSFunction::INTERPRETED_METHOD_GENERATOR);
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
       case ClassConstructor:
@@ -1334,8 +1411,9 @@ Parser<ParseHandler>::newFunction(HandleAtom atom, FunctionSyntaxKind kind,
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
       default:
-        flags = JSFunction::INTERPRETED_NORMAL;
-        break;
+        flags = (generatorKind == NotGenerator
+                 ? JSFunction::INTERPRETED_NORMAL
+                 : JSFunction::INTERPRETED_GENERATOR);
     }
 
     fun = NewFunctionWithProto(context, nullptr, 0, flags, nullptr, atom, proto,
@@ -1437,7 +1515,7 @@ ConvertDefinitionToNamedLambdaUse(TokenStream& ts, ParseContext<FullParseHandler
      * Since 'dn' is a placeholder, it has not been defined in the
      * ParseContext and hence we must manually flag a closed-over
      * callee name as needing a dynamic scope (this is done for all
-     * definitions in the ParseContext by generateFunctionBindings).
+     * definitions in the ParseContext by generateBindings).
      *
      * If 'dn' has been assigned to, then we also flag the function
      * scope has needing a dynamic scope so that dynamic scope
@@ -1598,7 +1676,7 @@ Parser<FullParseHandler>::leaveFunction(ParseNode* fn, ParseContext<FullParseHan
     }
 
     Rooted<Bindings> bindings(context, funbox->bindings);
-    if (!pc->generateFunctionBindings(context, tokenStream, alloc, &bindings))
+    if (!pc->generateBindings(context, tokenStream, alloc, &bindings))
         return false;
     funbox->bindings = bindings;
 
@@ -2021,8 +2099,7 @@ Parser<FullParseHandler>::checkFunctionDefinition(HandlePropertyName funName,
 
         if (bodyLevel) {
             MOZ_ASSERT(pn->functionIsHoisted());
-            MOZ_ASSERT_IF(pc->sc->isFunctionBox(), !pn->pn_scopecoord.isFree());
-            MOZ_ASSERT_IF(!pc->sc->isFunctionBox(), pn->pn_scopecoord.isFree());
+            MOZ_ASSERT(pc->sc->isGlobalContext() == pn->pn_scopecoord.isFree());
         } else {
             /*
              * As a SpiderMonkey-specific extension, non-body-level function
@@ -2624,7 +2701,7 @@ Parser<FullParseHandler>::standaloneLazyFunction(HandleFunction fun, bool strict
     }
 
     Rooted<Bindings> bindings(context, funbox->bindings);
-    if (!pc->generateFunctionBindings(context, tokenStream, alloc, &bindings))
+    if (!pc->generateBindings(context, tokenStream, alloc, &bindings))
         return null();
     funbox->bindings = bindings;
 
@@ -3139,7 +3216,7 @@ Parser<FullParseHandler>::bindLexical(BindData<FullParseHandler>* data,
     // script->nfixed and body-level lets.
     //
     // For body-level lets, the index is bogus at this point and is adjusted
-    // when creating Bindings. See ParseContext::generateFunctionBindings and
+    // when creating Bindings. See ParseContext::generateBindings and
     // AppendPackedBindings.
     if (!pn->pn_scopecoord.setSlot(parser->tokenStream, index))
         return false;

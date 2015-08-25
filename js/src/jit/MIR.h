@@ -4051,34 +4051,6 @@ class MGetDynamicName
     }
 };
 
-// Bailout if the input string contains 'arguments' or 'eval'.
-class MFilterArgumentsOrEval
-  : public MAryInstruction<1>,
-    public BoxExceptPolicy<0, MIRType_String>::Data
-{
-  protected:
-    explicit MFilterArgumentsOrEval(MDefinition* string)
-    {
-        initOperand(0, string);
-        setGuard();
-        setResultType(MIRType_None);
-    }
-
-  public:
-    INSTRUCTION_HEADER(FilterArgumentsOrEval)
-
-    static MFilterArgumentsOrEval* New(TempAllocator& alloc, MDefinition* string) {
-        return new(alloc) MFilterArgumentsOrEval(string);
-    }
-
-    MDefinition* getString() const {
-        return getOperand(0);
-    }
-    bool possiblyCalls() const override {
-        return true;
-    }
-};
-
 class MCallDirectEval
   : public MAryInstruction<4>,
     public Mix4Policy<ObjectPolicy<0>,
@@ -4378,7 +4350,7 @@ class MUnbox final : public MUnaryInstruction, public BoxInputsPolicy::Data
     Mode mode_;
     BailoutKind bailoutKind_;
 
-    MUnbox(MDefinition* ins, MIRType type, Mode mode, BailoutKind kind)
+    MUnbox(MDefinition* ins, MIRType type, Mode mode, BailoutKind kind, TempAllocator& alloc)
       : MUnaryInstruction(ins),
         mode_(mode)
     {
@@ -4394,8 +4366,12 @@ class MUnbox final : public MUnaryInstruction, public BoxInputsPolicy::Data
                    type == MIRType_Symbol  ||
                    type == MIRType_Object);
 
+        TemporaryTypeSet* resultSet = ins->resultTypeSet();
+        if (resultSet && type == MIRType_Object)
+            resultSet = resultSet->cloneObjectsOnly(alloc.lifoAlloc());
+
         setResultType(type);
-        setResultTypeSet(ins->resultTypeSet());
+        setResultTypeSet(resultSet);
         setMovable();
 
         if (mode_ == TypeBarrier || mode_ == Fallible)
@@ -4433,13 +4409,13 @@ class MUnbox final : public MUnaryInstruction, public BoxInputsPolicy::Data
             MOZ_CRASH("Given MIRType cannot be unboxed.");
         }
 
-        return new(alloc) MUnbox(ins, type, mode, kind);
+        return new(alloc) MUnbox(ins, type, mode, kind, alloc);
     }
 
     static MUnbox* New(TempAllocator& alloc, MDefinition* ins, MIRType type, Mode mode,
                        BailoutKind kind)
     {
-        return new(alloc) MUnbox(ins, type, mode, kind);
+        return new(alloc) MUnbox(ins, type, mode, kind, alloc);
     }
 
     Mode mode() const {
@@ -5239,6 +5215,7 @@ class MBitNot
     explicit MBitNot(MDefinition* input)
       : MUnaryInstruction(input)
     {
+        specialization_ = MIRType_None;
         setResultType(MIRType_Int32);
         setMovable();
     }
@@ -5249,7 +5226,10 @@ class MBitNot
     static MBitNot* NewAsmJS(TempAllocator& alloc, MDefinition* input);
 
     MDefinition* foldsTo(TempAllocator& alloc) override;
-    void infer();
+    void setSpecialization(MIRType type) {
+        specialization_ = type;
+        setResultType(type);
+    }
 
     bool congruentTo(const MDefinition* ins) const override {
         return congruentIfOperandsEqual(ins);
@@ -7087,6 +7067,45 @@ class MOsrReturnValue
 
     MOsrEntry* entry() {
         return getOperand(0)->toOsrEntry();
+    }
+};
+
+class MBinarySharedStub
+  : public MBinaryInstruction,
+    public MixPolicy<BoxPolicy<0>, BoxPolicy<1> >::Data
+{
+    explicit MBinarySharedStub(MDefinition* left, MDefinition* right)
+      : MBinaryInstruction(left, right)
+    {
+        setResultType(MIRType_Value);
+    }
+
+  public:
+    INSTRUCTION_HEADER(BinarySharedStub)
+
+    static MBinarySharedStub* New(TempAllocator& alloc, MDefinition* left, MDefinition* right)
+    {
+        return new(alloc) MBinarySharedStub(left, right);
+    }
+
+};
+
+class MUnarySharedStub
+  : public MUnaryInstruction,
+    public BoxPolicy<0>::Data
+{
+    explicit MUnarySharedStub(MDefinition* input)
+      : MUnaryInstruction(input)
+    {
+        setResultType(MIRType_Value);
+    }
+
+  public:
+    INSTRUCTION_HEADER(UnarySharedStub)
+
+    static MUnarySharedStub* New(TempAllocator& alloc, MDefinition* input)
+    {
+        return new(alloc) MUnarySharedStub(input);
     }
 };
 
@@ -9198,14 +9217,16 @@ class MArrayConcat
 {
     CompilerObject templateObj_;
     gc::InitialHeap initialHeap_;
-    JSValueType unboxedType_;
+    bool unboxedThis_, unboxedArg_;
 
     MArrayConcat(CompilerConstraintList* constraints, MDefinition* lhs, MDefinition* rhs,
-                 JSObject* templateObj, gc::InitialHeap initialHeap, JSValueType unboxedType)
+                 JSObject* templateObj, gc::InitialHeap initialHeap,
+                 bool unboxedThis, bool unboxedArg)
       : MBinaryInstruction(lhs, rhs),
         templateObj_(templateObj),
         initialHeap_(initialHeap),
-        unboxedType_(unboxedType)
+        unboxedThis_(unboxedThis),
+        unboxedArg_(unboxedArg)
     {
         setResultType(MIRType_Object);
         setResultTypeSet(MakeSingletonTypeSet(constraints, templateObj));
@@ -9217,10 +9238,10 @@ class MArrayConcat
     static MArrayConcat* New(TempAllocator& alloc, CompilerConstraintList* constraints,
                              MDefinition* lhs, MDefinition* rhs,
                              JSObject* templateObj, gc::InitialHeap initialHeap,
-                             JSValueType unboxedType)
+                             bool unboxedThis, bool unboxedArg)
     {
         return new(alloc) MArrayConcat(constraints, lhs, rhs, templateObj,
-                                       initialHeap, unboxedType);
+                                       initialHeap, unboxedThis, unboxedArg);
     }
 
     JSObject* templateObj() const {
@@ -9231,12 +9252,17 @@ class MArrayConcat
         return initialHeap_;
     }
 
-    JSValueType unboxedType() const {
-        return unboxedType_;
+    bool unboxedThis() const {
+        return unboxedThis_;
+    }
+
+    bool unboxedArg() const {
+        return unboxedArg_;
     }
 
     AliasSet getAliasSet() const override {
-        return AliasSet::Store(AliasSet::BoxedOrUnboxedElements(unboxedType()) |
+        return AliasSet::Store(AliasSet::BoxedOrUnboxedElements(unboxedThis() ? JSVAL_TYPE_INT32 : JSVAL_TYPE_MAGIC) |
+                               AliasSet::BoxedOrUnboxedElements(unboxedArg() ? JSVAL_TYPE_INT32 : JSVAL_TYPE_MAGIC) |
                                AliasSet::ObjectFields);
     }
     bool possiblyCalls() const override {

@@ -14,8 +14,7 @@ loop.panel = (function(_, mozL10n) {
   var Button = sharedViews.Button;
   var ButtonGroup = sharedViews.ButtonGroup;
   var Checkbox = sharedViews.Checkbox;
-  var ContactsList = loop.contacts.ContactsList;
-  var ContactDetailsForm = loop.contacts.ContactDetailsForm;
+  var ContactsControllerView = loop.contacts.ContactsControllerView;
 
   var TabView = React.createClass({displayName: "TabView",
     propTypes: {
@@ -188,6 +187,10 @@ loop.panel = (function(_, mozL10n) {
   var GettingStartedView = React.createClass({displayName: "GettingStartedView",
     mixins: [sharedMixins.WindowCloseMixin],
 
+    propTypes: {
+      mozLoop: React.PropTypes.object.isRequired
+    },
+
     handleButtonClick: function() {
       navigator.mozLoop.openGettingStartedTour("getting-started");
       navigator.mozLoop.setLoopPref("gettingStarted.seen", true);
@@ -197,17 +200,19 @@ loop.panel = (function(_, mozL10n) {
     },
 
     render: function() {
-      if (navigator.mozLoop.getLoopPref("gettingStarted.seen")) {
+      if (this.props.mozLoop.getLoopPref("gettingStarted.seen")) {
         return null;
       }
       return (
-        React.createElement("div", {id: "fte-getstarted"}, 
-          React.createElement("header", {id: "fte-title"}, 
-            mozL10n.get("first_time_experience_title", {
-              "clientShortname": mozL10n.get("clientShortname2")
-            })
+        React.createElement("div", {className: "fte-get-started-content"}, 
+          React.createElement("header", {className: "fte-title"}, 
+            React.createElement("img", {src: "loop/shared/img/hello_logo.svg"}), 
+            React.createElement("div", {className: "fte-subheader"}, 
+              mozL10n.get("first_time_experience_subheading")
+            )
           ), 
-          React.createElement(Button, {caption: mozL10n.get("first_time_experience_button_label"), 
+          React.createElement(Button, {additionalClass: "fte-get-started-button", 
+                  caption: mozL10n.get("first_time_experience_button_label"), 
                   htmlId: "fte-button", 
                   onClick: this.handleButtonClick})
         )
@@ -268,20 +273,24 @@ loop.panel = (function(_, mozL10n) {
   var ToSView = React.createClass({displayName: "ToSView",
     mixins: [sharedMixins.WindowCloseMixin],
 
+    propTypes: {
+      mozLoop: React.PropTypes.object.isRequired
+    },
+
     handleLinkClick: function(event) {
       if (!event.target || !event.target.href) {
         return;
       }
 
       event.preventDefault();
-      navigator.mozLoop.openURL(event.target.href);
+      this.props.mozLoop.openURL(event.target.href);
       this.closeWindow();
     },
 
     render: function() {
       var locale = mozL10n.getLanguage();
-      var terms_of_use_url = navigator.mozLoop.getLoopPref("legal.ToS_url");
-      var privacy_notice_url = navigator.mozLoop.getLoopPref("legal.privacy_url");
+      var terms_of_use_url = this.props.mozLoop.getLoopPref("legal.ToS_url");
+      var privacy_notice_url = this.props.mozLoop.getLoopPref("legal.privacy_url");
       var tosHTML = mozL10n.get("legal_text_and_links3", {
         "clientShortname": mozL10n.get("clientShortname2"),
         "terms_of_use": React.renderToStaticMarkup(
@@ -295,11 +304,12 @@ loop.panel = (function(_, mozL10n) {
           )
         )
       });
+
       return (
         React.createElement("div", {id: "powered-by-wrapper"}, 
           React.createElement("p", {className: "powered-by", id: "powered-by"}, 
             mozL10n.get("powered_by_beforeLogo"), 
-            React.createElement("img", {className: locale, id: "powered-by-logo"}), 
+            React.createElement("span", {className: locale, id: "powered-by-logo"}), 
             mozL10n.get("powered_by_afterLogo")
           ), 
           React.createElement("p", {className: "terms-service", 
@@ -827,6 +837,7 @@ loop.panel = (function(_, mozL10n) {
   var PanelView = React.createClass({displayName: "PanelView",
     propTypes: {
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
+      initialSelectedTabComponent: React.PropTypes.string,
       mozLoop: React.PropTypes.object.isRequired,
       notifications: React.PropTypes.object.isRequired,
       roomStore:
@@ -905,11 +916,6 @@ loop.panel = (function(_, mozL10n) {
       }
     },
 
-    startForm: function(name, contact) {
-      this.refs[name].initForm(contact);
-      this.selectTab(name);
-    },
-
     selectTab: function(name) {
       // The tab view might not be created yet (e.g. getting started or fxa
       // re-sign in.
@@ -939,12 +945,12 @@ loop.panel = (function(_, mozL10n) {
 
       if (!this.state.gettingStartedSeen) {
         return (
-          React.createElement("div", null, 
+          React.createElement("div", {className: "fte-get-started-container"}, 
             React.createElement(NotificationListView, {
               clearOnDocumentHidden: true, 
               notifications: this.props.notifications}), 
-            React.createElement(GettingStartedView, null), 
-            React.createElement(ToSView, null)
+            React.createElement(GettingStartedView, {mozLoop: this.props.mozLoop}), 
+            React.createElement(ToSView, {mozLoop: this.props.mozLoop})
           )
         );
       }
@@ -976,28 +982,10 @@ loop.panel = (function(_, mozL10n) {
                         userProfile: this.state.userProfile})
             ), 
             React.createElement(Tab, {name: "contacts"}, 
-              React.createElement(ContactsList, {mozLoop: this.props.mozLoop, 
-                            notifications: this.props.notifications, 
-                            selectTab: this.selectTab, 
-                            startForm: this.startForm})
-            ), 
-            React.createElement(Tab, {hidden: true, name: "contacts_add"}, 
-              React.createElement(ContactDetailsForm, {
-                mode: "add", 
-                ref: "contacts_add", 
-                selectTab: this.selectTab})
-            ), 
-            React.createElement(Tab, {hidden: true, name: "contacts_edit"}, 
-              React.createElement(ContactDetailsForm, {
-                mode: "edit", 
-                ref: "contacts_edit", 
-                selectTab: this.selectTab})
-            ), 
-            React.createElement(Tab, {hidden: true, name: "contacts_import"}, 
-              React.createElement(ContactDetailsForm, {
-                mode: "import", 
-                ref: "contacts_import", 
-                selectTab: this.selectTab})
+              React.createElement(ContactsControllerView, {initialSelectedTabComponent: this.props.initialSelectedTabComponent, 
+                                      mozLoop: this.props.mozLoop, 
+                                      notifications: this.props.notifications, 
+                                      ref: "contactControllerView"})
             )
           ), 
           React.createElement("div", {className: "footer"}, 

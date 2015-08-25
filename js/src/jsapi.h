@@ -39,6 +39,9 @@
 
 namespace JS {
 
+extern JS_PUBLIC_API(void)
+ResetTimeZone();
+
 class TwoByteChars;
 
 #ifdef JS_DEBUG
@@ -2437,20 +2440,20 @@ namespace JS {
 template <typename Outer>
 class PropertyDescriptorOperations
 {
-    const JSPropertyDescriptor* desc() const { return static_cast<const Outer*>(this)->extract(); }
+    const JSPropertyDescriptor& desc() const { return static_cast<const Outer*>(this)->get(); }
 
     bool has(unsigned bit) const {
         MOZ_ASSERT(bit != 0);
         MOZ_ASSERT((bit & (bit - 1)) == 0);  // only a single bit
-        return (desc()->attrs & bit) != 0;
+        return (desc().attrs & bit) != 0;
     }
 
     bool hasAny(unsigned bits) const {
-        return (desc()->attrs & bits) != 0;
+        return (desc().attrs & bits) != 0;
     }
 
     bool hasAll(unsigned bits) const {
-        return (desc()->attrs & bits) == bits;
+        return (desc().attrs & bits) == bits;
     }
 
     // Non-API attributes bit used internally for arguments objects.
@@ -2461,7 +2464,7 @@ class PropertyDescriptorOperations
     // descriptors. It's complicated.
     bool isAccessorDescriptor() const { return hasAny(JSPROP_GETTER | JSPROP_SETTER); }
     bool isGenericDescriptor() const {
-        return (desc()->attrs&
+        return (desc().attrs&
                 (JSPROP_GETTER | JSPROP_SETTER | JSPROP_IGNORE_READONLY | JSPROP_IGNORE_VALUE)) ==
                (JSPROP_IGNORE_READONLY | JSPROP_IGNORE_VALUE);
     }
@@ -2475,7 +2478,7 @@ class PropertyDescriptorOperations
 
     bool hasValue() const { return !isAccessorDescriptor() && !has(JSPROP_IGNORE_VALUE); }
     JS::HandleValue value() const {
-        return JS::HandleValue::fromMarkedLocation(&desc()->value);
+        return JS::HandleValue::fromMarkedLocation(&desc().value);
     }
 
     bool hasWritable() const { return !isAccessorDescriptor() && !has(JSPROP_IGNORE_READONLY); }
@@ -2485,24 +2488,24 @@ class PropertyDescriptorOperations
     JS::HandleObject getterObject() const {
         MOZ_ASSERT(hasGetterObject());
         return JS::HandleObject::fromMarkedLocation(
-                reinterpret_cast<JSObject* const*>(&desc()->getter));
+                reinterpret_cast<JSObject* const*>(&desc().getter));
     }
     bool hasSetterObject() const { return has(JSPROP_SETTER); }
     JS::HandleObject setterObject() const {
         MOZ_ASSERT(hasSetterObject());
         return JS::HandleObject::fromMarkedLocation(
-                reinterpret_cast<JSObject* const*>(&desc()->setter));
+                reinterpret_cast<JSObject* const*>(&desc().setter));
     }
 
-    bool hasGetterOrSetter() const { return desc()->getter || desc()->setter; }
+    bool hasGetterOrSetter() const { return desc().getter || desc().setter; }
     bool isShared() const { return has(JSPROP_SHARED); }
 
     JS::HandleObject object() const {
-        return JS::HandleObject::fromMarkedLocation(&desc()->obj);
+        return JS::HandleObject::fromMarkedLocation(&desc().obj);
     }
-    unsigned attributes() const { return desc()->attrs; }
-    JSGetterOp getter() const { return desc()->getter; }
-    JSSetterOp setter() const { return desc()->setter; }
+    unsigned attributes() const { return desc().attrs; }
+    JSGetterOp getter() const { return desc().getter; }
+    JSSetterOp setter() const { return desc().setter; }
 
     void assertValid() const {
 #ifdef DEBUG
@@ -2569,7 +2572,7 @@ class PropertyDescriptorOperations
 template <typename Outer>
 class MutablePropertyDescriptorOperations : public PropertyDescriptorOperations<Outer>
 {
-    JSPropertyDescriptor * desc() { return static_cast<Outer*>(this)->extractMutable(); }
+    JSPropertyDescriptor& desc() { return static_cast<Outer*>(this)->get(); }
 
   public:
     void clear() {
@@ -2615,63 +2618,63 @@ class MutablePropertyDescriptorOperations : public PropertyDescriptorOperations<
     }
 
     JS::MutableHandleObject object() {
-        return JS::MutableHandleObject::fromMarkedLocation(&desc()->obj);
+        return JS::MutableHandleObject::fromMarkedLocation(&desc().obj);
     }
-    unsigned& attributesRef() { return desc()->attrs; }
-    JSGetterOp& getter() { return desc()->getter; }
-    JSSetterOp& setter() { return desc()->setter; }
+    unsigned& attributesRef() { return desc().attrs; }
+    JSGetterOp& getter() { return desc().getter; }
+    JSSetterOp& setter() { return desc().setter; }
     JS::MutableHandleValue value() {
-        return JS::MutableHandleValue::fromMarkedLocation(&desc()->value);
+        return JS::MutableHandleValue::fromMarkedLocation(&desc().value);
     }
     void setValue(JS::HandleValue v) {
-        MOZ_ASSERT(!(desc()->attrs & (JSPROP_GETTER | JSPROP_SETTER)));
+        MOZ_ASSERT(!(desc().attrs & (JSPROP_GETTER | JSPROP_SETTER)));
         attributesRef() &= ~JSPROP_IGNORE_VALUE;
         value().set(v);
     }
 
     void setConfigurable(bool configurable) {
-        setAttributes((desc()->attrs & ~(JSPROP_IGNORE_PERMANENT | JSPROP_PERMANENT)) |
+        setAttributes((desc().attrs & ~(JSPROP_IGNORE_PERMANENT | JSPROP_PERMANENT)) |
                       (configurable ? 0 : JSPROP_PERMANENT));
     }
     void setEnumerable(bool enumerable) {
-        setAttributes((desc()->attrs & ~(JSPROP_IGNORE_ENUMERATE | JSPROP_ENUMERATE)) |
+        setAttributes((desc().attrs & ~(JSPROP_IGNORE_ENUMERATE | JSPROP_ENUMERATE)) |
                       (enumerable ? JSPROP_ENUMERATE : 0));
     }
     void setWritable(bool writable) {
-        MOZ_ASSERT(!(desc()->attrs & (JSPROP_GETTER | JSPROP_SETTER)));
-        setAttributes((desc()->attrs & ~(JSPROP_IGNORE_READONLY | JSPROP_READONLY)) |
+        MOZ_ASSERT(!(desc().attrs & (JSPROP_GETTER | JSPROP_SETTER)));
+        setAttributes((desc().attrs & ~(JSPROP_IGNORE_READONLY | JSPROP_READONLY)) |
                       (writable ? 0 : JSPROP_READONLY));
     }
-    void setAttributes(unsigned attrs) { desc()->attrs = attrs; }
+    void setAttributes(unsigned attrs) { desc().attrs = attrs; }
 
     void setGetter(JSGetterOp op) {
         MOZ_ASSERT(op != JS_PropertyStub);
-        desc()->getter = op;
+        desc().getter = op;
     }
     void setSetter(JSSetterOp op) {
         MOZ_ASSERT(op != JS_StrictPropertyStub);
-        desc()->setter = op;
+        desc().setter = op;
     }
     void setGetterObject(JSObject* obj) {
-        desc()->getter = reinterpret_cast<JSGetterOp>(obj);
-        desc()->attrs &= ~(JSPROP_IGNORE_VALUE | JSPROP_IGNORE_READONLY | JSPROP_READONLY);
-        desc()->attrs |= JSPROP_GETTER | JSPROP_SHARED;
+        desc().getter = reinterpret_cast<JSGetterOp>(obj);
+        desc().attrs &= ~(JSPROP_IGNORE_VALUE | JSPROP_IGNORE_READONLY | JSPROP_READONLY);
+        desc().attrs |= JSPROP_GETTER | JSPROP_SHARED;
     }
     void setSetterObject(JSObject* obj) {
-        desc()->setter = reinterpret_cast<JSSetterOp>(obj);
-        desc()->attrs &= ~(JSPROP_IGNORE_VALUE | JSPROP_IGNORE_READONLY | JSPROP_READONLY);
-        desc()->attrs |= JSPROP_SETTER | JSPROP_SHARED;
+        desc().setter = reinterpret_cast<JSSetterOp>(obj);
+        desc().attrs &= ~(JSPROP_IGNORE_VALUE | JSPROP_IGNORE_READONLY | JSPROP_READONLY);
+        desc().attrs |= JSPROP_SETTER | JSPROP_SHARED;
     }
 
     JS::MutableHandleObject getterObject() {
         MOZ_ASSERT(this->hasGetterObject());
         return JS::MutableHandleObject::fromMarkedLocation(
-                reinterpret_cast<JSObject**>(&desc()->getter));
+                reinterpret_cast<JSObject**>(&desc().getter));
     }
     JS::MutableHandleObject setterObject() {
         MOZ_ASSERT(this->hasSetterObject());
         return JS::MutableHandleObject::fromMarkedLocation(
-                reinterpret_cast<JSObject**>(&desc()->setter));
+                reinterpret_cast<JSObject**>(&desc().setter));
     }
 };
 
@@ -2682,40 +2685,17 @@ namespace js {
 template <>
 class RootedBase<JSPropertyDescriptor>
   : public JS::MutablePropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor>>
-{
-    friend class JS::PropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor>>;
-    friend class JS::MutablePropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor>>;
-    const JSPropertyDescriptor* extract() const {
-        return static_cast<const JS::Rooted<JSPropertyDescriptor>*>(this)->address();
-    }
-    JSPropertyDescriptor* extractMutable() {
-        return static_cast<JS::Rooted<JSPropertyDescriptor>*>(this)->address();
-    }
-};
+{};
 
 template <>
 class HandleBase<JSPropertyDescriptor>
   : public JS::PropertyDescriptorOperations<JS::Handle<JSPropertyDescriptor>>
-{
-    friend class JS::PropertyDescriptorOperations<JS::Handle<JSPropertyDescriptor>>;
-    const JSPropertyDescriptor* extract() const {
-        return static_cast<const JS::Handle<JSPropertyDescriptor>*>(this)->address();
-    }
-};
+{};
 
 template <>
 class MutableHandleBase<JSPropertyDescriptor>
   : public JS::MutablePropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor>>
-{
-    friend class JS::PropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor>>;
-    friend class JS::MutablePropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor>>;
-    const JSPropertyDescriptor* extract() const {
-        return static_cast<const JS::MutableHandle<JSPropertyDescriptor>*>(this)->address();
-    }
-    JSPropertyDescriptor* extractMutable() {
-        return static_cast<JS::MutableHandle<JSPropertyDescriptor>*>(this)->address();
-    }
-};
+{};
 
 } /* namespace js */
 
@@ -5331,6 +5311,7 @@ class AutoStopwatch;
 
 // Container for performance data
 // All values are monotonic.
+// All values are updated after running to completion.
 struct PerformanceData {
     // Number of times we have spent at least 2^n consecutive
     // milliseconds executing code in this group.
@@ -5397,28 +5378,66 @@ struct PerformanceGroup {
     // An id unique to this runtime.
     const uint64_t uid;
 
+    // The number of cycles spent in this group during this iteration
+    // of the event loop. Note that cycles are not a reliable measure,
+    // especially over short intervals. See Runtime.cpp for a more
+    // complete discussion on the imprecision of cycle measurement.
+    uint64_t recentCycles;
+
+    // The number of times this group has been activated during this
+    // iteration of the event loop.
+    uint64_t recentTicks;
+
+    // The number of milliseconds spent doing CPOW during this
+    // iteration of the event loop.
+    uint64_t recentCPOW;
+
+    // The current iteration of the event loop.
+    uint64_t iteration() const {
+        return iteration_;
+    }
+
     // `true` if an instance of `AutoStopwatch` is already monitoring
     // the performance of this performance group for this iteration
     // of the event loop, `false` otherwise.
-    bool hasStopwatch(uint64_t iteration) const {
-        return stopwatch_ != nullptr && iteration_ == iteration;
+    bool hasStopwatch(uint64_t it) const {
+        return stopwatch_ != nullptr && iteration_ == it;
+    }
+
+    // `true` if a specific instance of `AutoStopwatch` is already monitoring
+    // the performance of this performance group for this iteration
+    // of the event loop, `false` otherwise.
+    bool hasStopwatch(uint64_t it, const AutoStopwatch* stopwatch) const {
+        return stopwatch_ == stopwatch && iteration_ == it;
     }
 
     // Mark that an instance of `AutoStopwatch` is monitoring
     // the performance of this group for a given iteration.
-    void acquireStopwatch(uint64_t iteration, const AutoStopwatch* stopwatch) {
-        iteration_ = iteration;
+    void acquireStopwatch(uint64_t it, const AutoStopwatch* stopwatch) {
+        if (iteration_ != it) {
+            // Any data that pretends to be recent is actually bound
+            // to an older iteration and therefore stale.
+            resetRecentData();
+        }
+        iteration_ = it;
         stopwatch_ = stopwatch;
     }
 
     // Mark that no `AutoStopwatch` is monitoring the
     // performance of this group for the iteration.
-    void releaseStopwatch(uint64_t iteration, const AutoStopwatch* stopwatch) {
-        if (iteration_ != iteration)
+    void releaseStopwatch(uint64_t it, const AutoStopwatch* stopwatch) {
+        if (iteration_ != it)
             return;
 
         MOZ_ASSERT(stopwatch == stopwatch_ || stopwatch_ == nullptr);
         stopwatch_ = nullptr;
+    }
+
+    // Get rid of any data that pretends to be recent.
+    void resetRecentData() {
+        recentCycles = 0;
+        recentTicks = 0;
+        recentCPOW = 0;
     }
 
     // Refcounting. For use with mozilla::RefPtr.
@@ -5448,9 +5467,8 @@ private:
     // The hash key for this PerformanceGroup.
     void* const key_;
 
-    // A reference counter.
+    // Refcounter.
     uint64_t refCount_;
-
 
     // `true` if this PerformanceGroup may be shared by several
     // compartments, `false` if it is dedicated to a single
@@ -5511,12 +5529,19 @@ struct PerformanceGroupHolder {
 };
 
 /**
- * Reset any stopwatch currently measuring.
+ * Commit any Performance Monitoring data.
  *
- * This function is designed to be called when we process a new event.
+ * Until `FlushMonitoring` has been called, all PerformanceMonitoring data is invisible
+ * to the outside world and can cancelled with a call to `ResetMonitoring`.
  */
 extern JS_PUBLIC_API(void)
-ResetStopwatches(JSRuntime*);
+FlushPerformanceMonitoring(JSRuntime*);
+
+/**
+ * Cancel any measurement that hasn't been committed.
+ */
+extern JS_PUBLIC_API(void)
+ResetPerformanceMonitoring(JSRuntime*);
 
 /**
  * Turn on/off stopwatch-based CPU monitoring.
@@ -5541,11 +5566,17 @@ GetStopwatchIsMonitoringPerCompartment(JSRuntime*);
 extern JS_PUBLIC_API(bool)
 IsStopwatchActive(JSRuntime*);
 
+// Extract the CPU rescheduling data.
+extern JS_PUBLIC_API(void)
+GetPerfMonitoringTestCpuRescheduling(JSRuntime*, uint64_t* stayed, uint64_t* moved);
+
+
 /**
- * Access the performance information stored in a compartment.
+ * Add a number of microseconds to the time spent waiting on CPOWs
+ * since process start.
  */
-extern JS_PUBLIC_API(PerformanceData*)
-GetPerformanceData(JSRuntime*);
+extern JS_PUBLIC_API(void)
+AddCPOWPerformanceDelta(JSRuntime*, uint64_t delta);
 
 typedef bool
 (PerformanceStatsWalker)(JSContext* cx,

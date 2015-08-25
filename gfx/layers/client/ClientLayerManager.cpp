@@ -110,7 +110,8 @@ ClientLayerManager::ClientLayerManager(nsIWidget* aWidget)
 ClientLayerManager::~ClientLayerManager()
 {
   if (mTransactionIdAllocator) {
-    DidComposite(mLatestTransactionId);
+    TimeStamp now = TimeStamp::Now();
+    DidComposite(mLatestTransactionId, now, now);
   }
   mMemoryPressureObserver->Destroy();
   ClearCachedResources();
@@ -194,7 +195,7 @@ ClientLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
   // If the last transaction was incomplete (a failed DoEmptyTransaction),
   // don't signal a new transaction to ShadowLayerForwarder. Carry on adding
   // to the previous transaction.
-  dom::ScreenOrientation orientation;
+  dom::ScreenOrientationInternal orientation;
   if (dom::TabChild* window = mWidget->GetOwningTabChild()) {
     orientation = window->GetOrientation();
   } else {
@@ -384,16 +385,18 @@ ClientLayerManager::Composite()
 }
 
 void
-ClientLayerManager::DidComposite(uint64_t aTransactionId)
+ClientLayerManager::DidComposite(uint64_t aTransactionId,
+                                 const TimeStamp& aCompositeStart,
+                                 const TimeStamp& aCompositeEnd)
 {
   MOZ_ASSERT(mWidget);
   nsIWidgetListener *listener = mWidget->GetWidgetListener();
   if (listener) {
-    listener->DidCompositeWindow();
+    listener->DidCompositeWindow(aCompositeStart, aCompositeEnd);
   }
   listener = mWidget->GetAttachedWidgetListener();
   if (listener) {
-    listener->DidCompositeWindow();
+    listener->DidCompositeWindow(aCompositeStart, aCompositeEnd);
   }
   mTransactionIdAllocator->NotifyTransactionCompleted(aTransactionId);
 }
@@ -788,6 +791,12 @@ bool
 ClientLayerManager::AsyncPanZoomEnabled() const
 {
   return mWidget && mWidget->AsyncPanZoomEnabled();
+}
+
+void
+ClientLayerManager::SetNextPaintSyncId(int32_t aSyncId)
+{
+  mForwarder->SetPaintSyncId(aSyncId);
 }
 
 ClientLayer::~ClientLayer()

@@ -10,6 +10,7 @@
 #include "jsscript.h"
 
 #include "asmjs/AsmJSLink.h"
+#include "builtin/ModuleObject.h"
 #include "frontend/BytecodeEmitter.h"
 #include "frontend/FoldConstants.h"
 #include "frontend/NameFunctions.h"
@@ -57,6 +58,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
     void setSourceArgumentsNotIncluded();
 
     JSScript* compileScript(HandleObject scopeChain, HandleScript evalCaller);
+    ModuleObject* compileModule();
     bool compileFunctionBody(MutableHandleFunction fun, Handle<PropertyNameVector> formals,
                              GeneratorKind generatorKind);
 
@@ -87,7 +89,6 @@ class MOZ_STACK_CLASS BytecodeCompiler
     bool maybeSetSourceMapFromOptions();
     bool emitFinalReturn();
     bool initGlobalBindings(ParseContext<FullParseHandler>& pc);
-    void markFunctionsWithinEvalScript();
     bool maybeCompleteCompressSource();
 
     AutoCompilationTraceLogger traceLogger;
@@ -428,16 +429,9 @@ BytecodeCompiler::checkArgumentsWithinEval(JSContext* cx, HandleFunction fun)
         return false;
     }
 
-    // Force construction of arguments objects for functions that use
-    // |arguments| within an eval.
     RootedScript script(cx, fun->getOrCreateScript(cx));
     if (!script)
         return false;
-
-    if (script->argumentsHasVarBinding()) {
-        if (!JSScript::argumentsOptimizationFailed(cx, script))
-            return false;
-    }
 
     // It's an error to use |arguments| in a legacy generator expression.
     if (script->isGeneratorExp() && script->isLegacyGenerator()) {
@@ -526,29 +520,6 @@ BytecodeCompiler::initGlobalBindings(ParseContext<FullParseHandler>& pc)
     return true;
 }
 
-void
-BytecodeCompiler::markFunctionsWithinEvalScript()
-{
-    // Mark top level functions in an eval script as being within an eval.
-
-    if (!script->hasObjects())
-        return;
-
-    ObjectArray* objects = script->objects();
-    size_t start = script->innerObjectsStart();
-
-    for (size_t i = start; i < objects->length; i++) {
-        JSObject* obj = objects->vector[i];
-        if (obj->is<JSFunction>()) {
-            JSFunction* fun = &obj->as<JSFunction>();
-            if (fun->hasScript())
-                fun->nonLazyScript()->setDirectlyInsideEval();
-            else if (fun->isInterpretedLazy())
-                fun->lazyScript()->setDirectlyInsideEval();
-        }
-    }
-}
-
 bool
 BytecodeCompiler::maybeCompleteCompressSource()
 {
@@ -628,12 +599,6 @@ BytecodeCompiler::compileScript(HandleObject scopeChain, HandleScript evalCaller
         return nullptr;
     }
 
-    // Note that this marking must happen before we tell Debugger
-    // about the new script, in case Debugger delazifies the script's
-    // inner functions.
-    if (options.forEval)
-        markFunctionsWithinEvalScript();
-
     emitter->tellDebuggerAboutCompiledScript(cx);
 
     if (!maybeCompleteCompressSource())
@@ -641,6 +606,60 @@ BytecodeCompiler::compileScript(HandleObject scopeChain, HandleScript evalCaller
 
     MOZ_ASSERT_IF(cx->isJSContext(), !cx->asJSContext()->isExceptionPending());
     return script;
+}
+
+ModuleObject* BytecodeCompiler::compileModule()
+{
+    MOZ_ASSERT(!enclosingStaticScope);
+
+    if (!createSourceAndParser())
+        return nullptr;
+
+    if (!createScript())
+        return nullptr;
+
+    Rooted<ModuleObject*> module(cx, ModuleObject::create(cx));
+    if (!module)
+        return nullptr;
+
+    module->init(script);
+
+    ParseNode* pn = parser->standaloneModule(module);
+    if (!pn)
+        return nullptr;
+
+    if (!NameFunctions(cx, pn) ||
+        !maybeSetDisplayURL(parser->tokenStream) ||
+        !maybeSetSourceMap(parser->tokenStream))
+    {
+        return nullptr;
+    }
+
+    script->bindings = pn->pn_modulebox->bindings;
+
+    RootedModuleEnvironmentObject dynamicScope(cx, ModuleEnvironmentObject::create(cx, module));
+    if (!dynamicScope)
+        return nullptr;
+
+    module->setInitialEnvironment(dynamicScope);
+
+    if (!createEmitter(pn->pn_modulebox) ||
+        !emitter->emitModuleScript(pn->pn_body))
+    {
+        return nullptr;
+    }
+
+    ModuleBuilder builder(cx->asJSContext());
+    if (!builder.buildAndInit(pn, module))
+        return nullptr;
+
+    parser->handler.freeTree(pn);
+
+    if (!maybeCompleteCompressSource())
+        return nullptr;
+
+    MOZ_ASSERT_IF(cx->isJSContext(), !cx->asJSContext()->isExceptionPending());
+    return module;
 }
 
 bool
@@ -758,6 +777,22 @@ frontend::CompileScript(ExclusiveContext* cx, LifoAlloc* alloc, HandleObject sco
     return compiler.compileScript(scopeChain, evalCaller);
 }
 
+ModuleObject*
+frontend::CompileModule(JSContext* cx, HandleObject obj,
+                        const ReadOnlyCompileOptions& optionsInput,
+                        SourceBufferHolder& srcBuf)
+{
+    MOZ_ASSERT(srcBuf.get());
+
+    CompileOptions options(cx, optionsInput);
+    options.maybeMakeStrictMode(true); // ES6 10.2.1 Module code is always strict mode code.
+    options.setIsRunOnce(true);
+
+    BytecodeCompiler compiler(cx, &cx->tempLifoAlloc(), options, srcBuf, nullptr,
+                              TraceLogger_ParserCompileModule);
+    return compiler.compileModule();
+}
+
 bool
 frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const char16_t* chars, size_t length)
 {
@@ -797,8 +832,6 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
 
     script->bindings = pn->pn_funbox->bindings;
 
-    if (lazy->directlyInsideEval())
-        script->setDirectlyInsideEval();
     if (lazy->usesArgumentsApplyAndThis())
         script->setUsesArgumentsApplyAndThis();
     if (lazy->hasBeenCloned())
