@@ -94,7 +94,7 @@ public:
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
   nsIThread* GetBackgroundThread() { return mPBackgroundThread; };
-  bool ChildIsAlive() { return mChildIsAlive; };
+  bool IsShuttingDown() { return !mChildIsAlive || mDestroyed; };
   ShmemBuffer GetBuffer(size_t aSize);
 
   // helper to forward to the PBackground thread

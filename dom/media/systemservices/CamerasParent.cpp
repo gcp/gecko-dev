@@ -41,7 +41,7 @@ public:
       mWidth(aWidth), mHeight(aHeight) {}
 
   NS_IMETHOD Run() {
-    if (!mParent->ChildIsAlive()) {
+    if (mParent->IsShuttingDown()) {
       // Communication channel is being torn down
       LOG(("FrameSizeChangeRunnable is active without active Child"));
       mResult = 0;
@@ -60,7 +60,7 @@ public:
   }
 
 private:
-  CamerasParent *mParent;
+  nsRefPtr<CamerasParent> mParent;
   CaptureEngine mCapEngine;
   int mCapId;
   unsigned int mWidth;
@@ -109,7 +109,7 @@ public:
   };
 
   NS_IMETHOD Run() {
-    if (!mParent->ChildIsAlive()) {
+    if (mParent->IsShuttingDown()) {
       // Communication channel is being torn down
       mResult = 0;
       return NS_OK;
@@ -130,7 +130,7 @@ public:
   }
 
 private:
-  CamerasParent *mParent;
+  nsRefPtr<CamerasParent> mParent;
   CaptureEngine mCapEngine;
   int mCapId;
   ShmemBuffer mBuffer;
@@ -376,6 +376,9 @@ CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine)
       int num = self->mEngines[aCapEngine].mPtrViECapture->NumberOfCaptureDevices();
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, num]() -> nsresult {
+          if (self->IsShuttingDown()) {
+            return NS_ERROR_FAILURE;
+          }
           if (num < 0) {
             LOG(("RecvNumberOfCaptureDevices couldn't find devices"));
             unused << self->SendReplyFailure();
@@ -415,6 +418,9 @@ CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
           MediaEngineSource::kMaxUniqueIdLength);
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, num]() -> nsresult {
+          if (self->IsShuttingDown()) {
+            return NS_ERROR_FAILURE;
+          }
           if (num < 0) {
             LOG(("RecvNumberOfCapabilities couldn't find capabilities"));
             unused << self->SendReplyFailure();
@@ -454,6 +460,9 @@ CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
         unique_id.get(), MediaEngineSource::kMaxUniqueIdLength, num, webrtcCaps);
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, webrtcCaps, error]() -> nsresult {
+          if (self->IsShuttingDown()) {
+            return NS_ERROR_FAILURE;
+          }
           CaptureCapability capCap(webrtcCaps.width,
                                    webrtcCaps.height,
                                    webrtcCaps.maxFPS,
@@ -515,6 +524,9 @@ CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
 
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, error, name, uniqueId]() -> nsresult {
+          if (self->IsShuttingDown()) {
+            return NS_ERROR_FAILURE;
+          }
           if (error) {
             LOG(("GetCaptureDevice failed: %d", error));
             unused << self->SendReplyFailure();
@@ -551,6 +563,9 @@ CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
         unique_id.get(), MediaEngineSource::kMaxUniqueIdLength, numdev);
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, numdev, error]() -> nsresult {
+          if (self->IsShuttingDown()) {
+            return NS_ERROR_FAILURE;
+          }
           if (error) {
             unused << self->SendReplyFailure();
             return NS_ERROR_FAILURE;
@@ -585,6 +600,9 @@ CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
       int error = self->mEngines[aCapEngine].mPtrViECapture->ReleaseCaptureDevice(numdev);
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, error, numdev]() -> nsresult {
+          if (self->IsShuttingDown()) {
+            return NS_ERROR_FAILURE;
+          }
           if (error) {
             unused << self->SendReplyFailure();
             return NS_ERROR_FAILURE;
@@ -654,6 +672,9 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
 
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, error]() -> nsresult {
+          if (self->IsShuttingDown()) {
+            return NS_ERROR_FAILURE;
+          }
           if (!error) {
             unused << self->SendReplySuccess();
             return NS_OK;
