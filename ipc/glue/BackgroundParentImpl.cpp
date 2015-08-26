@@ -288,7 +288,9 @@ BackgroundParentImpl::AllocPCamerasParent()
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
 
-  return camera::CreateCamerasParent();
+  nsRefPtr<mozilla::camera::CamerasParent> actor =
+      mozilla::camera::CamerasParent::Create();
+  return actor.forget().take();
 }
 
 bool
@@ -296,9 +298,10 @@ BackgroundParentImpl::DeallocPCamerasParent(camera::PCamerasParent *aActor)
 {
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
-
   MOZ_ASSERT(aActor);
-  delete static_cast<camera::CamerasParent*>(aActor);
+
+  nsRefPtr<mozilla::camera::CamerasParent> actor =
+      dont_AddRef(static_cast<mozilla::camera::CamerasParent*>(aActor));
   return true;
 }
 

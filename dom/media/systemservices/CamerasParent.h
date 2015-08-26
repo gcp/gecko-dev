@@ -75,9 +75,11 @@ public:
 
 class CamerasParent :  public PCamerasParent
 {
-  DISALLOW_COPY_AND_ASSIGN(CamerasParent);
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CamerasParent);
 
 public:
+  static already_AddRefed<CamerasParent> Create();
+
   // Messages received form the child. These run on the IPC/PBackground thread.
   virtual bool RecvAllocateCaptureDevice(const int&, const nsCString&) override;
   virtual bool RecvReleaseCaptureDevice(const int&, const int &) override;
@@ -107,9 +109,10 @@ public:
 
 
   CamerasParent();
+
+protected:
   virtual ~CamerasParent();
 
-private:
   bool SetupEngine(CaptureEngine aCapEngine);
   void CloseEngines();
   bool EnsureInitialized(int aEngine);
@@ -131,6 +134,7 @@ private:
 
   // Shutdown handling
   bool mChildIsAlive;
+  bool mDestroyed;
 };
 
 PCamerasParent* CreateCamerasParent();
