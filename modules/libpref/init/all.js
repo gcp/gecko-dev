@@ -4996,7 +4996,7 @@ pref("media.gmp-manager.cert.requireBuiltIn", true);
 pref("media.gmp-manager.cert.checkAttributes", true);
 pref("media.gmp-manager.certs.1.issuerName", "CN=DigiCert SHA2 Secure Server CA,O=DigiCert Inc,C=US");
 pref("media.gmp-manager.certs.1.commonName", "aus5.mozilla.org");
-pref("media.gmp-manager.certs.2.issuerName", "CN=thawte SSL CA - G2,O=thawte, Inc.,C=US");
+pref("media.gmp-manager.certs.2.issuerName", "CN=thawte SSL CA - G2,O=\"thawte, Inc.\",C=US");
 pref("media.gmp-manager.certs.2.commonName", "aus5.mozilla.org");
 #endif
 
@@ -5045,11 +5045,6 @@ pref("media.gmp.insecure.allow", false);
 #endif
 
 pref("dom.audiochannel.mutedByDefault", false);
-
-// Use vsync aligned rendering. b2g prefs are in b2g.js.
-// Hardware vsync supported on windows, os x, and b2g.
-// Linux and fennec will use software vsync.
-pref("gfx.vsync.refreshdriver", true);
 
 // Secure Element API
 #ifdef MOZ_SECUREELEMENT

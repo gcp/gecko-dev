@@ -7,13 +7,13 @@ const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 let { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
 let { Preferences } = Cu.import("resource://gre/modules/Preferences.jsm", {});
 let { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
-let { Promise } = Cu.import("resource://gre/modules/Promise.jsm", {});
 let { require } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
-let { TargetFactory } = require("devtools/framework/target");
 let { gDevTools } = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
-const DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
-let { DebuggerServer } = require("devtools/server/main");
 let { console } = require("resource://gre/modules/devtools/Console.jsm");
+let { TargetFactory } = require("devtools/framework/target");
+let Promise = require("promise");
+let DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
+let { DebuggerServer } = require("devtools/server/main");
 let { merge } = require("sdk/util/object");
 let { createPerformanceFront } = require("devtools/server/actors/performance");
 let RecordingUtils = require("devtools/toolkit/performance/utils");
@@ -56,6 +56,7 @@ let DEFAULT_PREFS = [
   "devtools.debugger.log",
   "devtools.performance.ui.invert-call-tree",
   "devtools.performance.ui.flatten-tree-recursion",
+  "devtools.performance.ui.show-triggers-for-gc-types",
   "devtools.performance.ui.show-platform-data",
   "devtools.performance.ui.show-idle-blocks",
   "devtools.performance.ui.enable-memory",
@@ -548,4 +549,8 @@ function synthesizeProfileForTest(samples) {
 
 function isVisible (element) {
   return !element.classList.contains("hidden") && !element.hidden;
+}
+
+function within (actual, expected, fuzz, desc) {
+  ok((actual - expected) <= fuzz, `${desc}: Expected ${actual} to be within ${fuzz} of ${expected}`);
 }

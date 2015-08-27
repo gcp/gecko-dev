@@ -203,15 +203,15 @@ html[dir="rtl"] .conversation-toolbar-btn-box.btn-edit-entry {
   content: url("../img/svg/video-mute-hover.svg");
 }
 
-.btn-mute-edit {
+.btn-settings {
   width: 28px;
   height: 28px;
   background-size: 28px;
   background-image: url("../img/svg/settings.svg");
 }
 
-.btn-mute-edit:hover,
-.btn-mute-edit:active {
+.btn-settings:hover,
+.btn-settings:active {
   background-image: url("../img/svg/settings-hover.svg");
 }
 
@@ -224,7 +224,7 @@ html[dir="rtl"] .conversation-toolbar-btn-box.btn-edit-entry {
   background-image: url("../img/svg/sharing-hover.svg");
 }
 
-.btn-mute-edit.muted,
+.btn-settings.muted,
 .btn-screen-share.active {
   opacity: 1;
 }
@@ -383,6 +383,17 @@ html[dir="rtl"] .conversation-toolbar-btn-box.btn-edit-entry {
   padding: .2rem;
   font-size: 1rem;
   white-space: nowrap;
+}
+
+.settings-menu.dropdown-menu {
+  left: auto;
+  bottom: 3.1rem;
+  right: 14px;
+}
+
+html[dir="rtl"] .settings-menu.dropdown-menu {
+  left: 14px;
+  right: auto;
 }
 
 /* Expired call url page */
@@ -883,7 +894,7 @@ body[platform="win"] .share-service-dropdown.overflow > .dropdown-menu-item {
      0.5rem for padding of .text-chat-entry > p */
   padding: calc(18px - 1px - 0.5rem);
   margin-bottom: 0.5em;
-  background-color: #E8F6FE;
+  background-color: #dbf7ff;
 }
 
 .room-context {
@@ -1227,6 +1238,12 @@ html[dir="rtl"] .room-context-btn-close {
     /* The remaining 30% that the .focus-stream doesn't use. */
     height: 30%;
   }
+
+  .media-wrapper.receiving-screen-share > .remote > .conversation-toolbar,
+  .media-wrapper.showing-local-streams.receiving-screen-share  > .remote > .conversation-toolbar {
+    bottom: calc(30% + 1.5rem);
+  }
+
 
   .desktop-call-wrapper > .media-layout > .media-wrapper > .text-chat-view,
   .desktop-room-wrapper > .media-layout > .media-wrapper > .text-chat-view {
@@ -1610,13 +1627,13 @@ html[dir="rtl"] .text-chat-entry.received .text-chat-arrow {
   color: black;
   font-weight: bold;
   text-align: start;
-  background-color: #E8F6FE;
+  background-color: #dbf7ff;
   margin-bottom: 0;
   margin-right: 0;
 }
 
 .text-chat-entry.special.room-name p {
-  background: #E8F6FE;
+  background: #dbf7ff;
   max-width: 100%;
   /* 18px for indent of .text-chat-arrow, 1px for border of .text-chat-entry > p,
    0.5rem for padding of .text-chat-entry > p */

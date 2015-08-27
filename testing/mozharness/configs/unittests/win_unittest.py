@@ -143,17 +143,13 @@ config = {
     # local mochi suites
     "all_mochitest_suites":
     {
-        "plain1": ["--total-chunks=5", "--this-chunk=1", "--chunk-by-dir=4"],
-        "plain2": ["--total-chunks=5", "--this-chunk=2", "--chunk-by-dir=4"],
-        "plain3": ["--total-chunks=5", "--this-chunk=3", "--chunk-by-dir=4"],
-        "plain4": ["--total-chunks=5", "--this-chunk=4", "--chunk-by-dir=4"],
-        "plain5": ["--total-chunks=5", "--this-chunk=5", "--chunk-by-dir=4"],
         "plain": [],
         "plain-chunked": ["--chunk-by-dir=4"],
         "mochitest-push": ["--subsuite=push"],
         "chrome": ["--chrome"],
         "browser-chrome": ["--browser-chrome"],
         "browser-chrome-chunked": ["--browser-chrome", "--chunk-by-runtime"],
+        "browser-chrome-addons": ["--browser-chrome", "--chunk-by-runtime", "--tag=addons"],
         "mochitest-gl": ["--subsuite=webgl"],
         "mochitest-devtools-chrome": ["--browser-chrome", "--subsuite=devtools"],
         "mochitest-devtools-chrome-chunked": ["--browser-chrome", "--subsuite=devtools", "--chunk-by-runtime"],

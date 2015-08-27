@@ -315,10 +315,6 @@ class MacroAssemblerMIPS : public Assembler
                               FPConditionBit fcc = FCC0);
 
   public:
-    // calls an Ion function, assumes that the stack is untouched (8 byte alinged)
-    void ma_callJit(const Register reg);
-    // callso an Ion function, assuming that sp has already been decremented
-    void ma_callJitNoPush(const Register reg);
     // calls an ion function, assuming that the stack is currently not 8 byte aligned
     void ma_callJitHalfPush(const Register reg);
     void ma_callJitHalfPush(Label* label);
@@ -733,8 +729,8 @@ protected:
 public:
     void moveValue(const Value& val, Register type, Register data);
 
-    CodeOffsetJump backedgeJump(RepatchLabel* label);
-    CodeOffsetJump jumpWithPatch(RepatchLabel* label);
+    CodeOffsetJump backedgeJump(RepatchLabel* label, Label* documentation = nullptr);
+    CodeOffsetJump jumpWithPatch(RepatchLabel* label, Label* documentation = nullptr);
 
     template <typename T>
     CodeOffsetJump branchPtrWithPatch(Condition cond, Register reg, T ptr, RepatchLabel* label) {

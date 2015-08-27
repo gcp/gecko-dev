@@ -1892,13 +1892,8 @@ MacroAssemblerARMCompat::callWithExitFrame(JitCode* target, Register dynStack)
 void
 MacroAssemblerARMCompat::callJit(Register callee)
 {
-    MOZ_ASSERT((asMasm().framePushed() & 3) == 0);
-    if ((asMasm().framePushed() & 7) == 4) {
-        ma_callJitHalfPush(callee);
-    } else {
-        asMasm().adjustFrame(sizeof(void*));
-        ma_callJit(callee);
-    }
+    MOZ_ASSERT((asMasm().framePushed() & 7) == 4);
+    ma_callJitHalfPush(callee);
 }
 
 void
@@ -3659,26 +3654,6 @@ MacroAssemblerARMCompat::storeTypeTag(ImmTag tag, const BaseIndex& dest)
 // ION ABI says *sp should be the address that we will return to when leaving
 // this function.
 void
-MacroAssemblerARM::ma_callJit(const Register r)
-{
-    // When the stack is 8 byte aligned, we want to decrement sp by 8, and write
-    // pc + 8 into the new sp. When we return from this call, sp will be its
-    // present value minus 4.
-    as_sub(sp, sp, Imm8(4));
-    as_blx(r);
-}
-void
-MacroAssemblerARM::ma_callJitNoPush(const Register r)
-{
-    // Since we just write the return address into the stack, which is popped on
-    // return, the net effect is removing 4 bytes from the stack.
-
-    // Bug 1103108: remove this function, and refactor all uses.
-    as_add(sp, sp, Imm8(4));
-    as_blx(r);
-}
-
-void
 MacroAssemblerARM::ma_callJitHalfPush(const Register r)
 {
     // The stack is unaligned by 4 bytes. We push the pc to the stack to align
@@ -4249,10 +4224,10 @@ MacroAssemblerARMCompat::roundf(FloatRegister input, Register output, Label* bai
 }
 
 CodeOffsetJump
-MacroAssemblerARMCompat::jumpWithPatch(RepatchLabel* label, Condition cond)
+MacroAssemblerARMCompat::jumpWithPatch(RepatchLabel* label, Condition cond, Label* documentation)
 {
     ARMBuffer::PoolEntry pe;
-    BufferOffset bo = as_BranchPool(0xdeadbeef, label, &pe, cond);
+    BufferOffset bo = as_BranchPool(0xdeadbeef, label, &pe, cond, documentation);
     // Fill in a new CodeOffset with both the load and the pool entry that the
     // instruction loads from.
     CodeOffsetJump ret(bo.getOffset(), pe.index());

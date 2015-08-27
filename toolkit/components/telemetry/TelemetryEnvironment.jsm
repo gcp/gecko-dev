@@ -111,6 +111,8 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["dom.ipc.plugins.enabled", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.processCount", {what: RECORD_PREF_VALUE, requiresRestart: true}],
   ["experiments.manifest.uri", {what: RECORD_PREF_VALUE}],
+  ["extensions.autoDisableScopes", {what: RECORD_PREF_VALUE}],
+  ["extensions.enabledScopes", {what: RECORD_PREF_VALUE}],
   ["extensions.blocklist.enabled", {what: RECORD_PREF_VALUE}],
   ["extensions.blocklist.url", {what: RECORD_PREF_VALUE}],
   ["extensions.strictCompatibility", {what: RECORD_PREF_VALUE}],
@@ -141,6 +143,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["privacy.trackingprotection.enabled", {what: RECORD_PREF_VALUE}],
   ["privacy.donottrackheader.enabled", {what: RECORD_PREF_VALUE}],
   ["services.sync.serverURL", {what: RECORD_PREF_STATE}],
+  ["xpinstall.signatures.required", {what: RECORD_PREF_VALUE}],
 ]);
 
 const LOGGER_NAME = "Toolkit.Telemetry";
@@ -680,6 +683,7 @@ function EnvironmentCache() {
     this._startWatchingPrefs();
     this._addonBuilder.watchForChanges();
     this._addObservers();
+    this._updateGraphicsFeatures();
     return this.currentEnvironment;
   };
 
@@ -851,7 +855,7 @@ EnvironmentCache.prototype = {
         // Full graphics information is not available until we have created at
         // least one off-main-thread-composited window. Thus we wait for the
         // first compositor to be created and then query nsIGfxInfo again.
-        this._onCompositorCreated();
+        this._updateGraphicsFeatures();
         break;
       case SANITY_TEST_FAILED_TOPIC:
         this._onGraphicsSanityTestFailed(aData);
@@ -925,7 +929,7 @@ EnvironmentCache.prototype = {
   /**
    * Update the graphics features object.
    */
-  _onCompositorCreated: function () {
+  _updateGraphicsFeatures: function () {
     let gfxData = this._currentEnvironment.system.gfx;
     try {
       let gfxInfo = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo);
@@ -1012,6 +1016,9 @@ EnvironmentCache.prototype = {
     } catch (e) {}
 
     this._currentEnvironment.settings = {
+#ifndef MOZ_WIDGET_GONK
+      addonCompatibilityCheckEnabled: AddonManager.checkCompatibility,
+#endif
       blocklistEnabled: Preferences.get(PREF_BLOCKLIST_ENABLED, true),
 #ifndef MOZ_WIDGET_ANDROID
       isDefaultBrowser: this._isDefaultBrowser(),

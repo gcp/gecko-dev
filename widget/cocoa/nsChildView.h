@@ -43,6 +43,7 @@ class RectTextureImage;
 
 namespace mozilla {
 class VibrancyManager;
+class InputData;
 namespace layers {
 class GLManager;
 class APZCTreeManager;
@@ -262,7 +263,7 @@ typedef NSInteger NSEventGestureAxis;
 // Stop NSView hierarchy being changed during [ChildView drawRect:]
 - (void)delayedTearDown;
 
-- (void)sendFocusEvent:(uint32_t)eventType;
+- (void)sendFocusEvent:(mozilla::EventMessage)eventMessage;
 
 - (void)handleMouseMoved:(NSEvent*)aEvent;
 
@@ -552,6 +553,8 @@ public:
   bool IsPluginFocused() { return mPluginFocused; }
 
   virtual nsIntPoint GetClientOffset() override;
+
+  mozilla::WidgetWheelEvent DispatchAPZWheelInputEvent(mozilla::InputData& aEvent);
 
 protected:
   virtual ~nsChildView();
