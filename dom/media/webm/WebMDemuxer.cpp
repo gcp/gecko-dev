@@ -42,13 +42,17 @@ static int webmdemux_read(void* aBuffer, size_t aLength, void* aUserData)
   MOZ_ASSERT(aUserData);
   MOZ_ASSERT(aLength < UINT32_MAX);
   WebMDemuxer* demuxer = reinterpret_cast<WebMDemuxer*>(aUserData);
-  int64_t length = demuxer->GetEndDataOffset();
   uint32_t count = aLength;
-  int64_t position = demuxer->GetResource()->Tell();
-  if (length >= 0 && count + position > length) {
-    count = length - position;
+  if (demuxer->IsMediaSource()) {
+    int64_t length = demuxer->GetEndDataOffset();
+    int64_t position = demuxer->GetResource()->Tell();
+    MOZ_ASSERT(position <= demuxer->GetResource()->GetLength());
+    MOZ_ASSERT(position <= length);
+    if (length >= 0 && count + position > length) {
+      count = length - position;
+    }
+    MOZ_ASSERT(count <= aLength);
   }
-
   uint32_t bytes = 0;
   nsresult rv =
     demuxer->GetResource()->Read(static_cast<char*>(aBuffer), count, &bytes);
@@ -115,6 +119,11 @@ static void webmdemux_log(nestegg* aContext,
 
 
 WebMDemuxer::WebMDemuxer(MediaResource* aResource)
+  : WebMDemuxer(aResource, false)
+{
+}
+
+WebMDemuxer::WebMDemuxer(MediaResource* aResource, bool aIsMediaSource)
   : mResource(aResource)
   , mBufferedState(nullptr)
   , mInitData(nullptr)
@@ -130,7 +139,7 @@ WebMDemuxer::WebMDemuxer(MediaResource* aResource)
   , mHasAudio(false)
   , mNeedReIndex(true)
   , mLastWebMBlockOffset(-1)
-  , mIsExpectingMoreData(true)
+  , mIsMediaSource(aIsMediaSource)
 {
   if (!gNesteggLog) {
     gNesteggLog = PR_NewLogModule("Nestegg");
@@ -444,9 +453,13 @@ WebMDemuxer::EnsureUpToDateIndex()
   if (!mInitData && mBufferedState->GetInitEndOffset() != -1) {
     mInitData = mResource.MediaReadAt(0, mBufferedState->GetInitEndOffset());
   }
-  mLastWebMBlockOffset = mBufferedState->GetLastBlockOffset();
-  mIsExpectingMoreData = mResource.GetResource()->IsExpectingMoreData();
   mNeedReIndex = false;
+
+  if (!mIsMediaSource) {
+    return;
+  }
+  mLastWebMBlockOffset = mBufferedState->GetLastBlockOffset();
+  MOZ_ASSERT(mLastWebMBlockOffset <= mResource.GetLength());
 }
 
 void
@@ -472,7 +485,9 @@ WebMDemuxer::GetCrypto()
 bool
 WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType, MediaRawDataQueue *aSamples)
 {
-  EnsureUpToDateIndex();
+  if (mIsMediaSource) {
+    EnsureUpToDateIndex();
+  }
 
   nsRefPtr<NesteggPacketHolder> holder(NextPacket(aType));
 

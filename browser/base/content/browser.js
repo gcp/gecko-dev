@@ -1831,7 +1831,8 @@ function gotoHistoryIndex(aEvent) {
   }
   // Modified click. Go there in a new tab/window.
 
-  duplicateTabIn(gBrowser.selectedTab, where, index - gBrowser.sessionHistory.index);
+  let historyindex = aEvent.target.getAttribute("historyindex");
+  duplicateTabIn(gBrowser.selectedTab, where, Number(historyindex));
   return true;
 }
 
@@ -3753,66 +3754,108 @@ function FillHistoryMenu(aParent) {
   }
 
   // Remove old entries if any
-  var children = aParent.childNodes;
+  let children = aParent.childNodes;
   for (var i = children.length - 1; i >= 0; --i) {
     if (children[i].hasAttribute("index"))
       aParent.removeChild(children[i]);
   }
 
-  var webNav = gBrowser.webNavigation;
-  var sessionHistory = webNav.sessionHistory;
+  const MAX_HISTORY_MENU_ITEMS = 15;
 
-  var count = sessionHistory.count;
-  if (count <= 1) // don't display the popup for a single item
+  const tooltipBack = gNavigatorBundle.getString("tabHistory.goBack");
+  const tooltipCurrent = gNavigatorBundle.getString("tabHistory.current");
+  const tooltipForward = gNavigatorBundle.getString("tabHistory.goForward");
+
+  function updateSessionHistory(sessionHistory, initial)
+  {
+    let count = sessionHistory.entries.length;
+
+    if (!initial) {
+      if (count <= 1) {
+        // if there is only one entry now, close the popup.
+        aParent.hidePopup();
+        return;
+      } else if (!aParent.parentNode.open) {
+        // if the popup wasn't open before, but now needs to be, reopen the menu.
+        // It should trigger FillHistoryMenu again.
+        aParent.parentNode.open = true;
+        return;
+      }
+    }
+
+    let index = sessionHistory.index;
+    let half_length = Math.floor(MAX_HISTORY_MENU_ITEMS / 2);
+    let start = Math.max(index - half_length, 0);
+    let end = Math.min(start == 0 ? MAX_HISTORY_MENU_ITEMS : index + half_length + 1, count);
+    if (end == count) {
+      start = Math.max(count - MAX_HISTORY_MENU_ITEMS, 0);
+    }
+
+    let existingIndex = 0;
+
+    for (let j = end - 1; j >= start; j--) {
+      let entry = sessionHistory.entries[j];
+      let uri = entry.url;
+
+      let item = existingIndex < children.length ?
+                   children[existingIndex] : document.createElement("menuitem");
+
+      let entryURI = BrowserUtils.makeURI(entry.url, entry.charset, null);
+      item.setAttribute("uri", uri);
+      item.setAttribute("label", entry.title || uri);
+      item.setAttribute("index", j);
+
+      // Cache this so that gotoHistoryIndex doesn't need the original index
+      item.setAttribute("historyindex", j - index);
+
+      if (j != index) {
+        PlacesUtils.favicons.getFaviconURLForPage(entryURI, function (aURI) {
+          if (aURI) {
+            let iconURL = PlacesUtils.favicons.getFaviconLinkForIcon(aURI).spec;
+            iconURL = PlacesUtils.getImageURLForResolution(window, iconURL);
+            item.style.listStyleImage = "url(" + iconURL + ")";
+          }
+        });
+      }
+
+      if (j < index) {
+        item.className = "unified-nav-back menuitem-iconic menuitem-with-favicon";
+        item.setAttribute("tooltiptext", tooltipBack);
+      } else if (j == index) {
+        item.setAttribute("type", "radio");
+        item.setAttribute("checked", "true");
+        item.className = "unified-nav-current";
+        item.setAttribute("tooltiptext", tooltipCurrent);
+      } else {
+        item.className = "unified-nav-forward menuitem-iconic menuitem-with-favicon";
+        item.setAttribute("tooltiptext", tooltipForward);
+      }
+
+      if (!item.parentNode) {
+        aParent.appendChild(item);
+      }
+
+      existingIndex++;
+    }
+
+    if (!initial) {
+      let existingLength = children.length;
+      while (existingIndex < existingLength) {
+        aParent.removeChild(aParent.lastChild);
+        existingIndex++;
+      }
+    }
+  }
+
+  let sessionHistory = SessionStore.getSessionHistory(gBrowser.selectedTab, updateSessionHistory);
+  if (!sessionHistory)
     return false;
 
-  const MAX_HISTORY_MENU_ITEMS = 15;
-  var index = sessionHistory.index;
-  var half_length = Math.floor(MAX_HISTORY_MENU_ITEMS / 2);
-  var start = Math.max(index - half_length, 0);
-  var end = Math.min(start == 0 ? MAX_HISTORY_MENU_ITEMS : index + half_length + 1, count);
-  if (end == count)
-    start = Math.max(count - MAX_HISTORY_MENU_ITEMS, 0);
+  // don't display the popup for a single item
+  if (sessionHistory.entries.length <= 1)
+    return false;
 
-  var tooltipBack = gNavigatorBundle.getString("tabHistory.goBack");
-  var tooltipCurrent = gNavigatorBundle.getString("tabHistory.current");
-  var tooltipForward = gNavigatorBundle.getString("tabHistory.goForward");
-
-  for (var j = end - 1; j >= start; j--) {
-    let item = document.createElement("menuitem");
-    let entry = sessionHistory.getEntryAtIndex(j, false);
-    let uri = entry.URI.spec;
-    let entryURI = BrowserUtils.makeURIFromCPOW(entry.URI);
-
-    item.setAttribute("uri", uri);
-    item.setAttribute("label", entry.title || uri);
-    item.setAttribute("index", j);
-
-    if (j != index) {
-      PlacesUtils.favicons.getFaviconURLForPage(entryURI, function (aURI) {
-        if (aURI) {
-          let iconURL = PlacesUtils.favicons.getFaviconLinkForIcon(aURI).spec;
-          iconURL = PlacesUtils.getImageURLForResolution(window, iconURL);
-          item.style.listStyleImage = "url(" + iconURL + ")";
-        }
-      });
-    }
-
-    if (j < index) {
-      item.className = "unified-nav-back menuitem-iconic menuitem-with-favicon";
-      item.setAttribute("tooltiptext", tooltipBack);
-    } else if (j == index) {
-      item.setAttribute("type", "radio");
-      item.setAttribute("checked", "true");
-      item.className = "unified-nav-current";
-      item.setAttribute("tooltiptext", tooltipCurrent);
-    } else {
-      item.className = "unified-nav-forward menuitem-iconic menuitem-with-favicon";
-      item.setAttribute("tooltiptext", tooltipForward);
-    }
-
-    aParent.appendChild(item);
-  }
+  updateSessionHistory(sessionHistory, true);
   return true;
 }
 
@@ -4049,6 +4092,10 @@ var XULBrowserWindow = {
     delete this.isImage;
     return this.isImage = document.getElementById("isImage");
   },
+  get canViewSource () {
+    delete this.canViewSource;
+    return this.canViewSource = document.getElementById("canViewSource");
+  },
 
   init: function () {
     // Initialize the security button's state and tooltip text.
@@ -4206,6 +4253,7 @@ var XULBrowserWindow = {
       if (aRequest) {
         let msg = "";
         let location;
+        let canViewSource = true;
         // Get the URI either from a channel or a pseudo-object
         if (aRequest instanceof nsIChannel || "URI" in aRequest) {
           location = aRequest.URI;
@@ -4213,6 +4261,9 @@ var XULBrowserWindow = {
           // For keyword URIs clear the user typed value since they will be changed into real URIs
           if (location.scheme == "keyword" && aWebProgress.isTopLevel)
             gBrowser.userTypedValue = null;
+
+          canViewSource = !Services.prefs.getBoolPref("view_source.tab") ||
+                          location.scheme != "view-source";
 
           if (location.spec != "about:blank") {
             switch (aStatus) {
@@ -4227,10 +4278,18 @@ var XULBrowserWindow = {
         this.setDefaultStatus(msg);
 
         // Disable menu entries for images, enable otherwise
-        if (browser.documentContentType && BrowserUtils.mimeTypeIsTextBased(browser.documentContentType))
+        if (browser.documentContentType && BrowserUtils.mimeTypeIsTextBased(browser.documentContentType)) {
           this.isImage.removeAttribute('disabled');
-        else
+        } else {
+          canViewSource = false;
           this.isImage.setAttribute('disabled', 'true');
+        }
+
+        if (canViewSource) {
+          this.canViewSource.removeAttribute('disabled');
+        } else {
+          this.canViewSource.setAttribute('disabled', 'true');
+        }
       }
 
       this.isBusy = false;
@@ -4822,7 +4881,9 @@ nsBrowserAccess.prototype = {
     if (aOpener && aOpener.document) {
       referrerPolicy = aOpener.document.referrerPolicy;
     }
-    let isPrivate = PrivateBrowsingUtils.isWindowPrivate(aOpener || window);
+    let isPrivate = aOpener
+                  ? PrivateBrowsingUtils.isContentWindowPrivate(aOpener)
+                  : PrivateBrowsingUtils.isWindowPrivate(window);
 
     switch (aWhere) {
       case Ci.nsIBrowserDOMWindow.OPEN_NEWWINDOW :

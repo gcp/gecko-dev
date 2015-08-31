@@ -1280,6 +1280,12 @@
     "n_values": 10,
     "description": "Was the URL upgraded to HTTPS?  (0=already HTTPS, 1=no reason to upgrade, 2=STS upgrade blocked by pref, 3=upgraded with STS, 4=upgraded with CSP)"
   },
+  "HTTP_AUTH_DIALOG_STATS": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 3,
+    "description": "Stats about what kind of resource requested http authentication. (0=top-level doc, 1=same origin subresources 2=cross-origin subresources)"
+  },
   "SSL_HANDSHAKE_VERSION": {
     "expires_in_version": "never",
     "kind": "enumerated",
@@ -8417,7 +8423,7 @@
     "expires_in_version": "55",
     "kind": "enumerated",
     "n_values": 8,
-    "description": "The safety of a page where we see a password field. (0=unsafe, 1=safe)"
+    "description": "The safety of a page where we see a password field. (0: safe page & safe submit; 1: safe page & unsafe submit; 2: safe page & unknown submit; 3: unsafe page & safe submit; 4: unsafe page & unsafe submit; 5: unsafe page & unknown submit)"
   },
   "PWMGR_MANAGE_COPIED_PASSWORD": {
     "expires_in_version": "never",
@@ -8722,12 +8728,6 @@
     "expires_in_version": "never",
     "kind": "flag",
     "description": "An Attr node that's not namespace-aware and was created from an HTML document is set on a non-HTML element and has a name containing uppercase ASCII chars"
-  },
-  "FENNEC_TITLE_IN_TITLEBAR_ENABLED": {
-    "alert_emails": ["michael.l.comella@gmail.com"],
-    "expires_in_version": "43",
-    "kind": "boolean",
-    "description": "Is the title shown in the url bar (as determined by the titlebar title or url preference)?"
   },
   "DEVTOOLS_HUD_JANK": {
     "expires_in_version": "never",
@@ -9055,7 +9055,7 @@
   },
   "PERF_MONITORING_TEST_CPU_RESCHEDULING_PROPORTION_MOVED": {
     "alert_emails": ["dteller@mozilla.com"],
-    "expires_in_version": "44",
+    "expires_in_version": "45",
     "kind": "linear",
     "high": "100",
     "n_buckets": "20",

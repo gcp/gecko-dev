@@ -1315,7 +1315,9 @@ nsDOMWindowUtils::SendSimpleGestureEvent(const nsAString& aType,
     return NS_ERROR_FAILURE;
 
   EventMessage msg;
-  if (aType.EqualsLiteral("MozSwipeGestureStart"))
+  if (aType.EqualsLiteral("MozSwipeGestureMayStart"))
+    msg = NS_SIMPLE_GESTURE_SWIPE_MAY_START;
+  else if (aType.EqualsLiteral("MozSwipeGestureStart"))
     msg = NS_SIMPLE_GESTURE_SWIPE_START;
   else if (aType.EqualsLiteral("MozSwipeGestureUpdate"))
     msg = NS_SIMPLE_GESTURE_SWIPE_UPDATE;
@@ -3205,6 +3207,93 @@ nsDOMWindowUtils::RemoteFrameFullscreenReverted()
   return NS_OK;
 }
 
+class MOZ_STACK_CLASS FullscreenChangePrepare
+{
+public:
+  FullscreenChangePrepare(nsIPresShell* aPresShell,
+                          const nsSize& aSize, nsSize* aOldSize = nullptr)
+    : mPresShell(aPresShell)
+  {
+    if (mPresShell) {
+      mPresShell->SetIsInFullscreenChange(true);
+    }
+    if (aSize.IsEmpty()) {
+      return;
+    }
+    if (nsViewManager* viewManager = mPresShell->GetViewManager()) {
+      if (aOldSize) {
+        viewManager->GetWindowDimensions(&aOldSize->width, &aOldSize->height);
+      }
+      viewManager->SetWindowDimensions(aSize.width, aSize.height);
+    }
+  }
+
+  ~FullscreenChangePrepare()
+  {
+    if (mPresShell) {
+      mPresShell->SetIsInFullscreenChange(false);
+    }
+  }
+
+private:
+  nsCOMPtr<nsIPresShell> mPresShell;
+};
+
+class OldWindowSize : public LinkedListElement<OldWindowSize>
+{
+public:
+  static void Set(nsPIDOMWindow* aWindow, const nsSize& aSize)
+  {
+    OldWindowSize* item = GetItem(aWindow);
+    if (item) {
+      item->mSize = aSize;
+    } else if (aWindow) {
+      item = new OldWindowSize(do_GetWeakReference(aWindow), aSize);
+      sList.insertBack(item);
+    }
+  }
+
+  static nsSize GetAndRemove(nsPIDOMWindow* aWindow)
+  {
+    nsSize result;
+    if (OldWindowSize* item = GetItem(aWindow)) {
+      result = item->mSize;
+      delete item;
+    }
+    return result;
+  }
+
+private:
+  explicit OldWindowSize(already_AddRefed<nsIWeakReference>&& aWindow,
+                         const nsSize& aSize)
+    : mWindow(Move(aWindow)), mSize(aSize) { }
+  ~OldWindowSize() { };
+
+  static OldWindowSize* GetItem(nsPIDOMWindow* aWindow)
+  {
+    OldWindowSize* item = sList.getFirst();
+    while (item) {
+      nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(item->mWindow);
+      if (!window) {
+        OldWindowSize* thisItem = item;
+        item = thisItem->getNext();
+        delete thisItem;
+        continue;
+      }
+      if (window == aWindow) {
+        break;
+      }
+    }
+    return item;
+  }
+
+  static LinkedList<OldWindowSize> sList;
+  nsWeakPtr mWindow;
+  nsSize mSize;
+};
+
+LinkedList<OldWindowSize> OldWindowSize::sList;
+
 NS_IMETHODIMP
 nsDOMWindowUtils::HandleFullscreenRequests(bool* aRetVal)
 {
@@ -3212,6 +3301,18 @@ nsDOMWindowUtils::HandleFullscreenRequests(bool* aRetVal)
 
   nsCOMPtr<nsIDocument> doc = GetDocument();
   NS_ENSURE_STATE(doc);
+
+  // Notify the pres shell that we are starting fullscreen change, and
+  // set the window dimensions in advance. Since the resize message
+  // comes after the fullscreen change call, doing so could avoid an
+  // extra resize reflow after this point.
+  nsRect screenRect;
+  if (nsPresContext* presContext = GetPresContext()) {
+    presContext->DeviceContext()->GetRect(screenRect);
+  }
+  nsSize oldSize;
+  FullscreenChangePrepare prepare(GetPresShell(), screenRect.Size(), &oldSize);
+  OldWindowSize::Set(doc->GetWindow(), oldSize);
 
   *aRetVal = nsIDocument::HandlePendingFullscreenRequests(doc);
   return NS_OK;
@@ -3224,6 +3325,16 @@ nsDOMWindowUtils::ExitFullscreen()
 
   nsCOMPtr<nsIDocument> doc = GetDocument();
   NS_ENSURE_STATE(doc);
+  if (!doc->IsFullScreenDoc()) {
+    return NS_OK;
+  }
+
+  // Notify the pres shell that we are starting fullscreen change, and
+  // set the window dimensions in advance. Since the resize message
+  // comes after the fullscreen change call, doing so could avoid an
+  // extra resize reflow after this point.
+  FullscreenChangePrepare prepare(
+    GetPresShell(), OldWindowSize::GetAndRemove(doc->GetWindow()));
 
   nsIDocument::ExitFullscreenInDocTree(doc);
   return NS_OK;
@@ -3468,7 +3579,7 @@ nsDOMWindowUtils::IsNodeDisabledForEvents(nsIDOMNode* aNode, bool* aRetVal)
   while (node) {
     if (node->IsNodeOfType(nsINode::eHTML_FORM_CONTROL)) {
       nsCOMPtr<nsIFormControl> fc = do_QueryInterface(node);
-      if (fc && fc->IsDisabledForEvents(NS_EVENT_NULL)) {
+      if (fc && fc->IsDisabledForEvents(eVoidEvent)) {
         *aRetVal = true;
         break;
       }

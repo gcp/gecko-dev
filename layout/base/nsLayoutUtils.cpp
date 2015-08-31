@@ -920,6 +920,12 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
   ScreenRect screenRect = LayoutDeviceRect::FromAppUnits(base, auPerDevPixel)
                         * parentRes;
 
+  nsRect expandedScrollableRect =
+    nsLayoutUtils::CalculateExpandedScrollableRect(frame);
+  ScreenRect screenExpScrollableRect =
+    LayoutDeviceRect::FromAppUnits(expandedScrollableRect - scrollPos,
+                                   auPerDevPixel) * parentRes;
+
   if (gfxPrefs::LayersTilesEnabled()) {
     // Note on the correctness of applying the alignment in Screen space:
     //   The correct space to apply the alignment in would be Layer space, but
@@ -942,6 +948,9 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
     // moving origin occasionally being smaller when it coincidentally lines
     // up to tile boundaries.
     screenRect.Inflate(1);
+
+    // Make sure the displayport remains within the scrollable rect.
+    screenRect = screenRect.ForceInside(screenExpScrollableRect);
 
     // Avoid division by zero.
     if (alignmentX == 0) {
@@ -992,6 +1001,9 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
       screenRect.x -= left;
       screenRect.width += left + right;
     }
+
+    // Make sure the displayport remains within the scrollable rect.
+    screenRect = screenRect.ForceInside(screenExpScrollableRect);
   }
 
   // Convert the aligned rect back into app units.
@@ -1001,7 +1013,6 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
   result = ApplyRectMultiplier(result, aMultiplier);
 
   // Finally, clamp it to the expanded scrollable rect.
-  nsRect expandedScrollableRect = nsLayoutUtils::CalculateExpandedScrollableRect(frame);
   result = expandedScrollableRect.Intersect(result + scrollPos) - scrollPos;
 
   return result;
@@ -8162,7 +8173,7 @@ nsLayoutUtils::HasApzAwareListeners(EventListenerManager* aElm)
 nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(nsIPresShell* aShell)
 {
   if (nsIDocument* doc = aShell->GetDocument()) {
-    WidgetEvent event(true, NS_EVENT_NULL);
+    WidgetEvent event(true, eVoidEvent);
     nsTArray<EventTarget*> targets;
     nsresult rv = EventDispatcher::Dispatch(doc, nullptr, &event, nullptr,
         nullptr, nullptr, &targets);

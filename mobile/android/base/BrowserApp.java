@@ -140,6 +140,8 @@ import android.widget.ListView;
 import android.widget.RelativeLayout;
 import android.widget.Toast;
 import android.widget.ViewFlipper;
+import com.keepsafe.switchboard.AsyncConfigLoader;
+import com.keepsafe.switchboard.SwitchBoard;
 import com.nineoldandroids.animation.Animator;
 import com.nineoldandroids.animation.ObjectAnimator;
 import org.json.JSONException;
@@ -740,6 +742,21 @@ public class BrowserApp extends GeckoApp
 
         final Context appContext = getApplicationContext();
 
+        if (AppConstants.MOZ_SWITCHBOARD) {
+            // Initializes the default URLs the first time.
+            Log.d(LOGTAG, "init Server Urls");
+            SwitchBoard.initDefaultServerUrls("https://mozilla-switchboard.herokuapp.com/SwitchboardURLs.php", "https://mozilla-switchboard.herokuapp.com/SwitchboardDriver.php", true);
+
+            // Looks at the server if there are changes in the server URL that should be used in the future
+            Log.d(LOGTAG, "update server urls from remote");
+            new AsyncConfigLoader(this, AsyncConfigLoader.UPDATE_SERVER).execute();
+
+            // Loads the actual config. This can be done on app start or on app onResume() depending
+            // how often you want to update the config.
+            Log.d(LOGTAG, "update app config");
+            new AsyncConfigLoader(this, AsyncConfigLoader.CONFIG_SERVER).execute();
+        }
+
         mBrowserChrome = (ViewGroup) findViewById(R.id.browser_chrome);
         mActionBarFlipper = (ViewFlipper) findViewById(R.id.browser_actionbar);
         mActionBar = (ActionModeCompatView) findViewById(R.id.actionbar);
@@ -1230,7 +1247,7 @@ public class BrowserApp extends GeckoApp
                 ViewHelper.setTranslationY(mBrowserChrome, 0);
             }
             if (mLayerView != null) {
-                ViewHelper.setTranslationY(mLayerView, 0);
+                mLayerView.setSurfaceTranslation(0);
             }
         }
 
@@ -1542,11 +1559,10 @@ public class BrowserApp extends GeckoApp
         }
 
         final View browserChrome = mBrowserChrome;
-        final View layerView = mLayerView;
         final ToolbarProgressView progressView = mProgressView;
 
         ViewHelper.setTranslationY(browserChrome, -aToolbarTranslation);
-        ViewHelper.setTranslationY(layerView, mToolbarHeight - aLayerViewTranslation);
+        mLayerView.setSurfaceTranslation(mToolbarHeight - aLayerViewTranslation);
 
         // Stop the progressView from moving all the way up so that we can still see a good chunk of it
         // when the chrome is offscreen.
@@ -1620,7 +1636,7 @@ public class BrowserApp extends GeckoApp
 
         if (mLayerView != null && height != mToolbarHeight) {
             mToolbarHeight = height;
-            mLayerView.getDynamicToolbarAnimator().setMaxTranslation(height);
+            mLayerView.setMaxTranslation(height);
             mDynamicToolbar.setVisible(true, VisibilityTransition.IMMEDIATE);
         }
     }
@@ -2952,27 +2968,6 @@ public class BrowserApp extends GeckoApp
             }
         });
 
-        if (info.icon == null) {
-            item.setIcon(R.drawable.ic_menu_addons_filler);
-        } else {
-            final int id = info.id;
-            BitmapUtils.getDrawable(this, info.icon, new BitmapUtils.BitmapLoader() {
-                @Override
-                public void onBitmapFound(Drawable d) {
-                    // TODO: why do we re-find the item?
-                    final MenuItem item = destination.findItem(id);
-                    if (item == null) {
-                        return;
-                    }
-                    if (d == null) {
-                        item.setIcon(R.drawable.ic_menu_addons_filler);
-                        return;
-                    }
-                    item.setIcon(d);
-                }
-            });
-        }
-
         item.setCheckable(info.checkable);
         item.setChecked(info.checked);
         item.setEnabled(info.enabled);
@@ -3188,7 +3183,6 @@ public class BrowserApp extends GeckoApp
                                                         ClearOnShutdownPref.PREF,
                                                         new HashSet<String>()).isEmpty();
         aMenu.findItem(R.id.quit).setVisible(visible);
-        aMenu.findItem(R.id.logins).setVisible(visible);
 
         if (tab == null || tab.getURL() == null) {
             bookmark.setEnabled(false);
@@ -3235,7 +3229,6 @@ public class BrowserApp extends GeckoApp
         back.setEnabled(tab.canDoBack());
         forward.setEnabled(tab.canDoForward());
         desktopMode.setChecked(tab.getDesktopMode());
-        desktopMode.setIcon(tab.getDesktopMode() ? R.drawable.ic_menu_desktop_mode_on : R.drawable.ic_menu_desktop_mode_off);
 
         View backButtonView = MenuItemCompat.getActionView(back);
 

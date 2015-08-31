@@ -1146,7 +1146,7 @@ js::intrinsic_SetOverlappingTypedElements(JSContext* cx, unsigned argc, Value* v
 }
 
 bool
-CallSelfHostedNonGenericMethod(JSContext* cx, CallArgs args)
+CallSelfHostedNonGenericMethod(JSContext* cx, const CallArgs& args)
 {
     // This function is called when a self-hosted method is invoked on a
     // wrapper object, like a CrossCompartmentWrapper. The last argument is
@@ -1749,13 +1749,13 @@ CloneString(JSContext* cx, JSFlatString* selfHostedString)
 static JSObject*
 CloneObject(JSContext* cx, HandleNativeObject selfHostedObject)
 {
+#ifdef DEBUG
     AutoCycleDetector detect(cx, selfHostedObject);
     if (!detect.init())
         return nullptr;
-    if (detect.foundCycle()) {
-        JS_ReportError(cx, "SelfHosted cloning cannot handle cyclic object graphs.");
-        return nullptr;
-    }
+    if (detect.foundCycle())
+        MOZ_CRASH("SelfHosted cloning cannot handle cyclic object graphs.");
+#endif
 
     RootedObject clone(cx);
     if (selfHostedObject->is<JSFunction>()) {

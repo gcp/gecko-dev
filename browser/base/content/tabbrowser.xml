@@ -34,7 +34,7 @@
       </xul:tabbox>
       <children/>
     </content>
-    <implementation implements="nsIDOMEventListener, nsIMessageListener">
+    <implementation implements="nsIDOMEventListener, nsIMessageListener, nsIObserver">
 
       <property name="tabContextMenu" readonly="true"
                 onget="return this.tabContainer.contextMenu;"/>
@@ -101,6 +101,9 @@
       </field>
       <field name="mProgressListeners">
         []
+      </field>
+      <field name="mActiveResizeDisplayportSuppression">
+        null
       </field>
       <field name="mTabsProgressListeners">
         []
@@ -3942,16 +3945,23 @@
             event.preventDefault();
             return;
           }
+
+          let stringWithShortcut = (stringId, keyElemId) => {
+            let keyElem = document.getElementById(keyElemId);
+            let shortcut = ShortcutUtils.prettifyShortcut(keyElem);
+            return this.mStringBundle.getFormattedString(stringId, [shortcut]);
+          };
+
           var label;
           if (tab.mOverCloseButton) {
-            label = this.mStringBundle.getString("tabs.closeTab.tooltip");
+            label = tab.selected ?
+                    stringWithShortcut("tabs.closeSelectedTab.tooltip", "key_close") :
+                    this.mStringBundle.getString("tabs.closeTab.tooltip");
           } else if (tab._overPlayingIcon) {
-            var stringID = tab.linkedBrowser.audioMuted ?
+            let stringID = tab.linkedBrowser.audioMuted ?
               "tabs.unmuteAudio.tooltip" :
               "tabs.muteAudio.tooltip";
-            var key = document.getElementById("key_toggleMute");
-            var shortcut = ShortcutUtils.prettifyShortcut(key);
-            label = this.mStringBundle.getFormattedString(stringID, [shortcut]);
+            label = stringWithShortcut(stringID, "key_toggleMute");
           } else {
             label = tab.getAttribute("label") +
                       (this.AppConstants.E10S_TESTING_ONLY && tab.linkedBrowser && tab.linkedBrowser.isRemoteBrowser ? " - e10s" : "");
@@ -4070,11 +4080,39 @@
         ]]></body>
       </method>
 
+      <method name="observe">
+        <parameter name="aSubject"/>
+        <parameter name="aTopic"/>
+        <parameter name="aData"/>
+        <body><![CDATA[
+          if (aTopic == "live-resize-start") {
+            let browser = this.mCurrentTab.linkedBrowser;
+            let fl = browser.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader;
+            if (fl && fl.tabParent && !this.mActiveResizeDisplayportSuppression) {
+              fl.tabParent.suppressDisplayport(true);
+              this.mActiveResizeDisplayportSuppression = browser;
+            }
+          } else if (aTopic == "live-resize-end") {
+            let browser = this.mActiveResizeDisplayportSuppression;
+            if (browser) {
+              let fl = browser.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader;
+              if (fl && fl.tabParent) {
+                fl.tabParent.suppressDisplayport(false);
+                this.mActiveResizeDisplayportSuppression = null;
+              }
+            }
+          }
+        ]]></body>
+      </method>
+
       <constructor>
         <![CDATA[
           let browserStack = document.getAnonymousElementByAttribute(this, "anonid", "browserStack");
           this.mCurrentBrowser = document.getAnonymousElementByAttribute(this, "anonid", "initialBrowser");
           this.mCurrentBrowser.permanentKey = {};
+
+          Services.obs.addObserver(this, "live-resize-start", false);
+          Services.obs.addObserver(this, "live-resize-end", false);
 
           this.mCurrentTab = this.tabContainer.firstChild;
           const nsIEventListenerService =
@@ -4161,6 +4199,9 @@
 
       <destructor>
         <![CDATA[
+          Services.obs.removeObserver(this, "live-resize-start", false);
+          Services.obs.removeObserver(this, "live-resize-end", false);
+
           for (var i = 0; i < this.mTabListeners.length; ++i) {
             let browser = this.getBrowserAtIndex(i);
             if (browser.registeredOpenURI) {
