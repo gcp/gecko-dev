@@ -62,6 +62,7 @@ SOURCES += [
     'SandboxChroot.cpp',
     'SandboxFilter.cpp',
     'SandboxFilterUtil.cpp',
+    'SandboxHooks.cpp',
     'SandboxLogging.cpp',
     'SandboxUtil.cpp',
 ]
