@@ -30,13 +30,13 @@ SandboxBrokerPolicyFactory::IsSystemSupported() {
   if (length > 0 && strcmp(hardware, "goldfish") == 0) {
     return true;
   }
-
+#endif
   // When broker is running in permissive mode, we enable it
-  // automatically regardless of the device.
+  // automatically regardless of the system type.
   if (SandboxInfo::Get().Test(SandboxInfo::kPermissive)) {
     return true;
   }
-#endif
+
   return false;
 }
 
@@ -146,8 +146,10 @@ SandboxBrokerPolicyFactory::GetContentPolicy(int aPid)
 
   return policy;
 #else // MOZ_WIDGET_GONK
-  // Not implemented for desktop yet.
-  return nullptr;
+  UniquePtr<SandboxBroker::Policy> policy(new SandboxBroker::Policy());
+
+  // Return an empty policy.
+  return policy;
 #endif
 }
 
