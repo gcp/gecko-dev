@@ -52,6 +52,8 @@
 #include "nsIFrameInlines.h"
 #include "CounterStyleManager.h"
 #include "nsISelection.h"
+#include "mozilla/dom/HTMLDetailsElement.h"
+#include "mozilla/dom/HTMLSummaryElement.h"
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 
@@ -713,7 +715,7 @@ nsBlockFrame::GetMinISize(nsRenderingContext *aRenderingContext)
 #endif
       if (line->IsBlock()) {
         data.ForceBreak();
-        data.currentLine = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
+        data.mCurrentLine = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
                         line->mFirstChild, nsLayoutUtils::MIN_ISIZE);
         data.ForceBreak();
       } else {
@@ -724,11 +726,11 @@ nsBlockFrame::GetMinISize(nsRenderingContext *aRenderingContext)
           // behavior for calc(10%-3px).
           const nsStyleCoord &indent = StyleText()->mTextIndent;
           if (indent.ConvertsToLength())
-            data.currentLine += nsRuleNode::ComputeCoordPercentCalc(indent, 0);
+            data.mCurrentLine += nsRuleNode::ComputeCoordPercentCalc(indent, 0);
         }
         // XXX Bug NNNNNN Should probably handle percentage text-indent.
 
-        data.line = &line;
+        data.mLine = &line;
         data.SetLineContainer(curFrame);
         nsIFrame *kid = line->mFirstChild;
         for (int32_t i = 0, i_end = line->GetChildCount(); i != i_end;
@@ -740,14 +742,14 @@ nsBlockFrame::GetMinISize(nsRenderingContext *aRenderingContext)
       if (gNoisyIntrinsic) {
         IndentBy(stdout, gNoiseIndent);
         printf("min: [prevLines=%d currentLine=%d]\n",
-               data.prevLines, data.currentLine);
+               data.mPrevLines, data.mCurrentLine);
       }
 #endif
     }
   }
   data.ForceBreak();
 
-  mMinWidth = data.prevLines;
+  mMinWidth = data.mPrevLines;
   return mMinWidth;
 }
 
@@ -801,7 +803,7 @@ nsBlockFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
 #endif
       if (line->IsBlock()) {
         data.ForceBreak();
-        data.currentLine = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
+        data.mCurrentLine = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
                         line->mFirstChild, nsLayoutUtils::PREF_ISIZE);
         data.ForceBreak();
       } else {
@@ -812,11 +814,11 @@ nsBlockFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
           // behavior for calc(10%-3px).
           const nsStyleCoord &indent = StyleText()->mTextIndent;
           if (indent.ConvertsToLength())
-            data.currentLine += nsRuleNode::ComputeCoordPercentCalc(indent, 0);
+            data.mCurrentLine += nsRuleNode::ComputeCoordPercentCalc(indent, 0);
         }
         // XXX Bug NNNNNN Should probably handle percentage text-indent.
 
-        data.line = &line;
+        data.mLine = &line;
         data.SetLineContainer(curFrame);
         nsIFrame *kid = line->mFirstChild;
         for (int32_t i = 0, i_end = line->GetChildCount(); i != i_end;
@@ -828,14 +830,14 @@ nsBlockFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
       if (gNoisyIntrinsic) {
         IndentBy(stdout, gNoiseIndent);
         printf("pref: [prevLines=%d currentLine=%d]\n",
-               data.prevLines, data.currentLine);
+               data.mPrevLines, data.mCurrentLine);
       }
 #endif
     }
   }
   data.ForceBreak();
 
-  mPrefWidth = data.prevLines;
+  mPrefWidth = data.mPrevLines;
   return mPrefWidth;
 }
 
@@ -885,12 +887,12 @@ nsBlockFrame::GetPrefWidthTightBounds(nsRenderingContext* aRenderingContext,
           // behavior for calc(10%-3px).
           const nsStyleCoord &indent = StyleText()->mTextIndent;
           if (indent.ConvertsToLength()) {
-            data.currentLine += nsRuleNode::ComputeCoordPercentCalc(indent, 0);
+            data.mCurrentLine += nsRuleNode::ComputeCoordPercentCalc(indent, 0);
           }
         }
         // XXX Bug NNNNNN Should probably handle percentage text-indent.
 
-        data.line = &line;
+        data.mLine = &line;
         data.SetLineContainer(curFrame);
         nsIFrame *kid = line->mFirstChild;
         for (int32_t i = 0, i_end = line->GetChildCount(); i != i_end;
@@ -898,8 +900,8 @@ nsBlockFrame::GetPrefWidthTightBounds(nsRenderingContext* aRenderingContext,
           rv = kid->GetPrefWidthTightBounds(aRenderingContext, &childX,
                                             &childXMost);
           NS_ENSURE_SUCCESS(rv, rv);
-          *aX = std::min(*aX, data.currentLine + childX);
-          *aXMost = std::max(*aXMost, data.currentLine + childXMost);
+          *aX = std::min(*aX, data.mCurrentLine + childX);
+          *aXMost = std::max(*aXMost, data.mCurrentLine + childXMost);
           kid->AddInlinePrefISize(aRenderingContext, &data);
         }
       }
@@ -6918,7 +6920,6 @@ nsBlockFrame::CreateBulletFrameForListItem(bool aCreateBulletList,
   // If the list bullet frame should be positioned inside then add
   // it to the flow now.
   if (aListStylePositionInside) {
-
     nsFrameList bulletList(bullet, bullet);
     AddFrames(bulletList, nullptr);
     Properties().Set(InsideBulletProperty(), bullet);
@@ -7089,6 +7090,15 @@ nsBlockFrame::RenumberListsFor(nsPresContext* aPresContext,
   // possible there is no content insertion frame
   if (!kid)
     return false;
+
+  // Do not renumber list for summary elements.
+  if (HTMLDetailsElement::IsDetailsEnabled()) {
+    HTMLSummaryElement* summary =
+      HTMLSummaryElement::FromContent(kid->GetContent());
+    if (summary && summary->IsMainSummary()) {
+      return false;
+    }
+  }
 
   bool kidRenumberedABullet = false;
 
