@@ -308,7 +308,7 @@ NS_IMETHODIMP
 PuppetWidget::DispatchEvent(WidgetGUIEvent* event, nsEventStatus& aStatus)
 {
 #ifdef DEBUG
-  debug_DumpEvent(stdout, event->widget, event, "PuppetWidget", 0);
+  debug_DumpEvent(stdout, event->mWidget, event, "PuppetWidget", 0);
 #endif
 
   MOZ_ASSERT(!mChild || mChild->mWindowType == eWindowType_popup,
@@ -450,7 +450,7 @@ PuppetWidget::SynthesizeNativeMouseScrollEvent(mozilla::LayoutDeviceIntPoint aPo
 nsresult
 PuppetWidget::SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                          TouchPointerState aPointerState,
-                                         ScreenIntPoint aPointerScreenPoint,
+                                         LayoutDeviceIntPoint aPoint,
                                          double aPointerPressure,
                                          uint32_t aPointerOrientation,
                                          nsIObserver* aObserver)
@@ -460,13 +460,13 @@ PuppetWidget::SynthesizeNativeTouchPoint(uint32_t aPointerId,
     return NS_ERROR_FAILURE;
   }
   mTabChild->SendSynthesizeNativeTouchPoint(aPointerId, aPointerState,
-    aPointerScreenPoint, aPointerPressure, aPointerOrientation,
+    aPoint, aPointerPressure, aPointerOrientation,
     notifier.SaveObserver());
   return NS_OK;
 }
 
 nsresult
-PuppetWidget::SynthesizeNativeTouchTap(ScreenIntPoint aPointerScreenPoint,
+PuppetWidget::SynthesizeNativeTouchTap(LayoutDeviceIntPoint aPoint,
                                        bool aLongTap,
                                        nsIObserver* aObserver)
 {
@@ -474,7 +474,7 @@ PuppetWidget::SynthesizeNativeTouchTap(ScreenIntPoint aPointerScreenPoint,
   if (!mTabChild) {
     return NS_ERROR_FAILURE;
   }
-  mTabChild->SendSynthesizeNativeTouchTap(aPointerScreenPoint, aLongTap,
+  mTabChild->SendSynthesizeNativeTouchTap(aPoint, aLongTap,
     notifier.SaveObserver());
   return NS_OK;
 }
@@ -1431,33 +1431,31 @@ PuppetWidget::HasPendingInputEvent()
     return false;
   }
 
-  static const IPC::Message::msgid_t kInputEvents[] = {
-    mozilla::dom::PBrowser::Msg_RealMouseMoveEvent__ID,
-    mozilla::dom::PBrowser::Msg_SynthMouseMoveEvent__ID,
-    mozilla::dom::PBrowser::Msg_RealMouseButtonEvent__ID,
-    mozilla::dom::PBrowser::Msg_RealKeyEvent__ID,
-    mozilla::dom::PBrowser::Msg_MouseWheelEvent__ID,
-    mozilla::dom::PBrowser::Msg_RealTouchEvent__ID,
-    mozilla::dom::PBrowser::Msg_RealTouchMoveEvent__ID,
-    mozilla::dom::PBrowser::Msg_RealDragEvent__ID,
-    mozilla::dom::PBrowser::Msg_UpdateDimensions__ID,
-    mozilla::dom::PBrowser::Msg_MouseEvent__ID,
-    mozilla::dom::PBrowser::Msg_KeyEvent__ID
-  };
   bool ret = false;
 
-  for (IPC::Message::msgid_t e: kInputEvents) {
-    mTabChild->GetIPCChannel()->PeekMessages(
-      e,
-      [&ret](const IPC::Message& aMsg) -> bool {
-        ret = true;
-        return false;  // Stop peeking.
+  mTabChild->GetIPCChannel()->PeekMessages(
+    [&ret](const IPC::Message& aMsg) -> bool {
+      if ((aMsg.type() & mozilla::dom::PBrowser::PBrowserStart)
+          == mozilla::dom::PBrowser::PBrowserStart) {
+        switch (aMsg.type()) {
+          case mozilla::dom::PBrowser::Msg_RealMouseMoveEvent__ID:
+          case mozilla::dom::PBrowser::Msg_SynthMouseMoveEvent__ID:
+          case mozilla::dom::PBrowser::Msg_RealMouseButtonEvent__ID:
+          case mozilla::dom::PBrowser::Msg_RealKeyEvent__ID:
+          case mozilla::dom::PBrowser::Msg_MouseWheelEvent__ID:
+          case mozilla::dom::PBrowser::Msg_RealTouchEvent__ID:
+          case mozilla::dom::PBrowser::Msg_RealTouchMoveEvent__ID:
+          case mozilla::dom::PBrowser::Msg_RealDragEvent__ID:
+          case mozilla::dom::PBrowser::Msg_UpdateDimensions__ID:
+          case mozilla::dom::PBrowser::Msg_MouseEvent__ID:
+          case mozilla::dom::PBrowser::Msg_KeyEvent__ID:
+            ret = true;
+            return false;  // Stop peeking.
+        }
       }
-    );
-    if (ret) {
-      break;
+      return true;
     }
-  }
+  );
 
   return ret;
 }

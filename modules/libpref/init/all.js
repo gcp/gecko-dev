@@ -197,12 +197,6 @@ pref("dom.url.getters_decode_hash", false);
 // significantly increase the number of compartments in the system.
 pref("dom.compartment_per_addon", true);
 
-#ifdef NIGHTLY_BUILD
-pref("dom.document.scrollingElement.enabled", true);
-#else
-pref("dom.document.scrollingElement.enabled", false);
-#endif
-
 // Fastback caching - if this pref is negative, then we calculate the number
 // of content viewers to cache based on the amount of available memory.
 pref("browser.sessionhistory.max_total_viewers", -1);
@@ -2029,7 +2023,6 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 pref("security.csp.enable", true);
-pref("security.csp.debug", false);
 pref("security.csp.experimentalEnabled", false);
 
 // Default Content Security Policy to apply to privileged apps.
@@ -2422,6 +2415,13 @@ pref("layout.css.scope-pseudo.enabled", true);
 // Is support for background-blend-mode enabled?
 pref("layout.css.background-blend-mode.enabled", true);
 
+// Is support for background-clip:text enabled? (bug 1264905)
+#ifdef RELEASE_BUILD
+pref("layout.css.background-clip-text.enabled", false);
+#else
+pref("layout.css.background-clip-text.enabled", true);
+#endif
+
 // Is support for CSS vertical text enabled?
 pref("layout.css.vertical-text.enabled", true);
 
@@ -2563,6 +2563,16 @@ pref("dom.animations-api.core.enabled", false);
 pref("dom.animations-api.core.enabled", true);
 #endif
 
+// Is support for the Element.animate() function (a subset of the Web Animations
+// API) enabled?
+// Note that if dom.animations-api.core.enabled is true, this preference is
+// ignored.
+#ifdef RELEASE_BUILD
+pref("dom.animations-api.element-animate.enabled", false);
+#else
+pref("dom.animations-api.element-animate.enabled", true);
+#endif
+
 // pref to permit users to make verified SOAP calls by default
 pref("capability.policy.default.SOAPCall.invokeVerifySourceHeader", "allAccess");
 
@@ -2585,7 +2595,6 @@ pref("editor.positioning.offset",            0);
 
 pref("dom.use_watchdog", true);
 pref("dom.max_chrome_script_run_time", 20);
-pref("dom.max_child_script_run_time", 10);
 pref("dom.max_script_run_time", 10);
 
 // If true, ArchiveReader will be enabled

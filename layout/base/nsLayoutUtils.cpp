@@ -146,6 +146,7 @@ using namespace mozilla::gfx;
 #define DISPLAY_CONTENTS_ENABLED_PREF_NAME "layout.css.display-contents.enabled"
 #define TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME "layout.css.text-align-unsafe-value.enabled"
 #define FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME "layout.css.float-logical-values.enabled"
+#define BG_CLIP_TEXT_ENABLED_PREF_NAME "layout.css.background-clip-text.enabled"
 
 #ifdef DEBUG
 // TODO: remove, see bug 598468.
@@ -390,6 +391,39 @@ FloatLogicalValuesEnabledPrefChangeCallback(const char* aPrefName,
   MOZ_ASSERT(sIndexOfInlineEndInClearTable >= 0);
   nsCSSProps::kClearKTable[sIndexOfInlineEndInClearTable].mKeyword =
     isFloatLogicalValuesEnabled ? eCSSKeyword_inline_end : eCSSKeyword_UNKNOWN;
+}
+
+
+// When the pref "layout.css.background-clip-text.enabled" changes, this
+// function is invoked to let us update kBackgroundClipKTable, to selectively
+// disable or restore the entries for "text" in that table.
+static void
+BackgroundClipTextEnabledPrefChangeCallback(const char* aPrefName,
+                                            void* aClosure)
+{
+  NS_ASSERTION(strcmp(aPrefName, BG_CLIP_TEXT_ENABLED_PREF_NAME) == 0,
+               "Did you misspell " BG_CLIP_TEXT_ENABLED_PREF_NAME " ?");
+
+  static bool sIsBGClipKeywordIndexInitialized;
+  static int32_t sIndexOfTextInBGClipTable;
+  bool isBGClipTextEnabled =
+    Preferences::GetBool(BG_CLIP_TEXT_ENABLED_PREF_NAME, false);
+
+  if (!sIsBGClipKeywordIndexInitialized) {
+    // First run: find the position of "text" in kBackgroundClipKTable.
+    sIndexOfTextInBGClipTable =
+      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_text,
+                                     nsCSSProps::kBackgroundClipKTable);
+
+    sIsBGClipKeywordIndexInitialized = true;
+  }
+
+  // OK -- now, stomp on or restore the "text" entry in kBackgroundClipKTable,
+  // depending on whether the pref is enabled vs. disabled.
+  if (sIndexOfTextInBGClipTable >= 0) {
+    nsCSSProps::kBackgroundClipKTable[sIndexOfTextInBGClipTable].mKeyword =
+      isBGClipTextEnabled ? eCSSKeyword_text : eCSSKeyword_UNKNOWN;
+  }
 }
 
 template<typename TestType>
@@ -1184,7 +1218,7 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
   }
 
   nsRect oldDisplayPort;
-  bool hadDisplayPort = GetDisplayPort(aContent, &oldDisplayPort);
+  bool hadDisplayPort = GetHighResolutionDisplayPort(aContent, &oldDisplayPort);
 
   aContent->SetProperty(nsGkAtoms::DisplayPortMargins,
                         new DisplayPortMarginsPropertyData(
@@ -1192,7 +1226,7 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
                         nsINode::DeleteProperty<DisplayPortMarginsPropertyData>);
 
   nsRect newDisplayPort;
-  DebugOnly<bool> hasDisplayPort = GetDisplayPort(aContent, &newDisplayPort);
+  DebugOnly<bool> hasDisplayPort = GetHighResolutionDisplayPort(aContent, &newDisplayPort);
   MOZ_ASSERT(hasDisplayPort);
 
   bool changed = !hadDisplayPort ||
@@ -1288,6 +1322,15 @@ bool
 nsLayoutUtils::HasCriticalDisplayPort(nsIContent* aContent)
 {
   return GetCriticalDisplayPort(aContent, nullptr);
+}
+
+bool
+nsLayoutUtils::GetHighResolutionDisplayPort(nsIContent* aContent, nsRect* aResult)
+{
+  if (gfxPrefs::UseLowPrecisionBuffer()) {
+    return GetCriticalDisplayPort(aContent, aResult);
+  }
+  return GetDisplayPort(aContent, aResult);
 }
 
 void
@@ -2139,7 +2182,7 @@ nsLayoutUtils::GetEventCoordinatesRelativeTo(const WidgetEvent* aEvent,
     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
   }
 
-  nsIWidget* widget = aEvent->AsGUIEvent()->widget;
+  nsIWidget* widget = aEvent->AsGUIEvent()->mWidget;
   if (!widget) {
     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
   }
@@ -7601,6 +7644,26 @@ nsLayoutUtils::SizeOfTextRunsForFrames(nsIFrame* aFrame,
   return total;
 }
 
+struct PrefCallbacks
+{
+  const char* name;
+  PrefChangedFunc func;
+};
+static const PrefCallbacks kPrefCallbacks[] = {
+  { GRID_ENABLED_PREF_NAME,
+    GridEnabledPrefChangeCallback },
+  { WEBKIT_PREFIXES_ENABLED_PREF_NAME,
+    WebkitPrefixEnabledPrefChangeCallback },
+  { TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME,
+    TextAlignUnsafeEnabledPrefChangeCallback },
+  { DISPLAY_CONTENTS_ENABLED_PREF_NAME,
+    DisplayContentsEnabledPrefChangeCallback },
+  { FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME,
+    FloatLogicalValuesEnabledPrefChangeCallback },
+  { BG_CLIP_TEXT_ENABLED_PREF_NAME,
+    BackgroundClipTextEnabledPrefChangeCallback },
+};
+
 /* static */
 void
 nsLayoutUtils::Initialize()
@@ -7628,26 +7691,9 @@ nsLayoutUtils::Initialize()
   Preferences::AddBoolVarCache(&sSVGTransformBoxEnabled,
                                "svg.transform-box.enabled");
 
-  Preferences::RegisterCallback(GridEnabledPrefChangeCallback,
-                                GRID_ENABLED_PREF_NAME);
-  GridEnabledPrefChangeCallback(GRID_ENABLED_PREF_NAME, nullptr);
-  Preferences::RegisterCallback(WebkitPrefixEnabledPrefChangeCallback,
-                                WEBKIT_PREFIXES_ENABLED_PREF_NAME);
-  WebkitPrefixEnabledPrefChangeCallback(WEBKIT_PREFIXES_ENABLED_PREF_NAME,
-                                        nullptr);
-  Preferences::RegisterCallback(TextAlignUnsafeEnabledPrefChangeCallback,
-                                TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME);
-  Preferences::RegisterCallback(DisplayContentsEnabledPrefChangeCallback,
-                                DISPLAY_CONTENTS_ENABLED_PREF_NAME);
-  DisplayContentsEnabledPrefChangeCallback(DISPLAY_CONTENTS_ENABLED_PREF_NAME,
-                                           nullptr);
-  TextAlignUnsafeEnabledPrefChangeCallback(TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME,
-                                           nullptr);
-  Preferences::RegisterCallback(FloatLogicalValuesEnabledPrefChangeCallback,
-                                FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME);
-  FloatLogicalValuesEnabledPrefChangeCallback(FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME,
-                                              nullptr);
-
+  for (auto& callback : kPrefCallbacks) {
+    Preferences::RegisterCallbackAndCall(callback.func, callback.name);
+  }
   nsComputedDOMStyle::RegisterPrefChangeCallbacks();
 }
 
@@ -7660,10 +7706,9 @@ nsLayoutUtils::Shutdown()
     sContentMap = nullptr;
   }
 
-  Preferences::UnregisterCallback(GridEnabledPrefChangeCallback,
-                                  GRID_ENABLED_PREF_NAME);
-  Preferences::UnregisterCallback(WebkitPrefixEnabledPrefChangeCallback,
-                                  WEBKIT_PREFIXES_ENABLED_PREF_NAME);
+  for (auto& callback : kPrefCallbacks) {
+    Preferences::UnregisterCallback(callback.func, callback.name);
+  }
   nsComputedDOMStyle::UnregisterPrefChangeCallbacks();
 
   // so the cached initial quotes array doesn't appear to be a leak
@@ -9084,16 +9129,17 @@ nsLayoutUtils::UpdateDisplayPortMarginsFromPendingMessages() {
   if (mozilla::dom::ContentChild::GetSingleton() &&
       mozilla::dom::ContentChild::GetSingleton()->GetIPCChannel()) {
     mozilla::dom::ContentChild::GetSingleton()->GetIPCChannel()->PeekMessages(
-      mozilla::layers::PAPZ::Msg_UpdateFrame__ID,
       [](const IPC::Message& aMsg) -> bool {
-        void* iter = nullptr;
-        FrameMetrics frame;
-        if (!IPC::ReadParam(&aMsg, &iter, &frame)) {
-          MOZ_ASSERT(false);
-          return true;
-        }
+        if (aMsg.type() == mozilla::layers::PAPZ::Msg_UpdateFrame__ID) {
+          void* iter = nullptr;
+          FrameMetrics frame;
+          if (!IPC::ReadParam(&aMsg, &iter, &frame)) {
+            MOZ_ASSERT(false);
+            return true;
+          }
 
-        UpdateDisplayPortMarginsForPendingMetrics(frame);
+          UpdateDisplayPortMarginsForPendingMetrics(frame);
+        }
         return true;
       });
   }

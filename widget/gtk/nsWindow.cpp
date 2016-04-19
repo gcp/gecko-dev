@@ -555,7 +555,7 @@ nsresult
 nsWindow::DispatchEvent(WidgetGUIEvent* aEvent, nsEventStatus& aStatus)
 {
 #ifdef DEBUG
-    debug_DumpEvent(stdout, aEvent->widget, aEvent,
+    debug_DumpEvent(stdout, aEvent->mWidget, aEvent,
                     "something", 0);
 #endif
     aStatus = nsEventStatus_eIgnore;
@@ -6560,7 +6560,7 @@ nsWindow::GetDragInfo(WidgetMouseEvent* aMouseEvent,
                "gdk_window_get_toplevel should not return null");
     *aWindow = gdk_window;
 
-    if (!aMouseEvent->widget) {
+    if (!aMouseEvent->mWidget) {
         return false;
     }
 
@@ -6569,7 +6569,7 @@ nsWindow::GetDragInfo(WidgetMouseEvent* aMouseEvent,
     // moved since the mousedown.  (On the other hand, it's quite likely
     // that the mouse has moved, which is why we use the mouse position
     // from the event.)
-    LayoutDeviceIntPoint offset = aMouseEvent->widget->WidgetToScreenOffset();
+    LayoutDeviceIntPoint offset = aMouseEvent->mWidget->WidgetToScreenOffset();
     *aRootX = aMouseEvent->refPoint.x + offset.x;
     *aRootY = aMouseEvent->refPoint.y + offset.y;
 
@@ -6876,7 +6876,7 @@ nsWindow::SynthesizeNativeMouseScrollEvent(mozilla::LayoutDeviceIntPoint aPoint,
 nsresult
 nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                      TouchPointerState aPointerState,
-                                     ScreenIntPoint aPointerScreenPoint,
+                                     LayoutDeviceIntPoint aPoint,
                                      double aPointerPressure,
                                      uint32_t aPointerOrientation,
                                      nsIObserver* aObserver)
@@ -6938,13 +6938,10 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
   GdkDeviceManager* device_manager = gdk_display_get_device_manager(display);
   event.touch.device = gdk_device_manager_get_client_pointer(device_manager);
 
-  event.touch.x_root = DevicePixelsToGdkCoordRoundDown(aPointerScreenPoint.x);
-  event.touch.y_root = DevicePixelsToGdkCoordRoundDown(aPointerScreenPoint.y);
+  event.touch.x_root = DevicePixelsToGdkCoordRoundDown(aPoint.x);
+  event.touch.y_root = DevicePixelsToGdkCoordRoundDown(aPoint.y);
 
-  LayoutDeviceIntPoint pointInWindow =
-    ViewAs<LayoutDevicePixel>(aPointerScreenPoint,
-                              PixelCastJustification::LayoutDeviceIsScreenForUntransformedEvent)
-    - WidgetToScreenOffset();
+  LayoutDeviceIntPoint pointInWindow = aPoint - WidgetToScreenOffset();
   event.touch.x = DevicePixelsToGdkCoordRoundDown(pointInWindow.x);
   event.touch.y = DevicePixelsToGdkCoordRoundDown(pointInWindow.y);
 

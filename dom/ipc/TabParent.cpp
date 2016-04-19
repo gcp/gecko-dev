@@ -1250,7 +1250,7 @@ bool TabParent::RecvDispatchWheelEvent(const mozilla::WidgetWheelEvent& aEvent)
   }
 
   WidgetWheelEvent localEvent(aEvent);
-  localEvent.widget = widget;
+  localEvent.mWidget = widget;
   localEvent.refPoint -= GetChildProcessOffset();
 
   widget->DispatchInputEvent(&localEvent);
@@ -1266,7 +1266,7 @@ TabParent::RecvDispatchMouseEvent(const mozilla::WidgetMouseEvent& aEvent)
   }
 
   WidgetMouseEvent localEvent(aEvent);
-  localEvent.widget = widget;
+  localEvent.mWidget = widget;
   localEvent.refPoint -= GetChildProcessOffset();
 
   widget->DispatchInputEvent(&localEvent);
@@ -1282,7 +1282,7 @@ TabParent::RecvDispatchKeyboardEvent(const mozilla::WidgetKeyboardEvent& aEvent)
   }
 
   WidgetKeyboardEvent localEvent(aEvent);
-  localEvent.widget = widget;
+  localEvent.mWidget = widget;
   localEvent.refPoint -= GetChildProcessOffset();
 
   widget->DispatchInputEvent(&localEvent);
@@ -1462,7 +1462,7 @@ TabParent::RecvSynthesizeNativeMouseScrollEvent(const LayoutDeviceIntPoint& aPoi
 bool
 TabParent::RecvSynthesizeNativeTouchPoint(const uint32_t& aPointerId,
                                           const TouchPointerState& aPointerState,
-                                          const ScreenIntPoint& aPointerScreenPoint,
+                                          const LayoutDeviceIntPoint& aPoint,
                                           const double& aPointerPressure,
                                           const uint32_t& aPointerOrientation,
                                           const uint64_t& aObserverId)
@@ -1470,22 +1470,21 @@ TabParent::RecvSynthesizeNativeTouchPoint(const uint32_t& aPointerId,
   AutoSynthesizedEventResponder responder(this, aObserverId, "touchpoint");
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (widget) {
-    widget->SynthesizeNativeTouchPoint(aPointerId, aPointerState, aPointerScreenPoint,
+    widget->SynthesizeNativeTouchPoint(aPointerId, aPointerState, aPoint,
       aPointerPressure, aPointerOrientation, responder.GetObserver());
   }
   return true;
 }
 
 bool
-TabParent::RecvSynthesizeNativeTouchTap(const ScreenIntPoint& aPointerScreenPoint,
+TabParent::RecvSynthesizeNativeTouchTap(const LayoutDeviceIntPoint& aPoint,
                                         const bool& aLongTap,
                                         const uint64_t& aObserverId)
 {
   AutoSynthesizedEventResponder responder(this, aObserverId, "touchtap");
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (widget) {
-    widget->SynthesizeNativeTouchTap(aPointerScreenPoint, aLongTap,
-      responder.GetObserver());
+    widget->SynthesizeNativeTouchTap(aPoint, aLongTap, responder.GetObserver());
   }
   return true;
 }
@@ -1747,14 +1746,15 @@ TabParent::RecvSetStatus(const uint32_t& aType, const nsString& aStatus)
 }
 
 bool
-TabParent::RecvShowTooltip(const uint32_t& aX, const uint32_t& aY, const nsString& aTooltip)
+TabParent::RecvShowTooltip(const uint32_t& aX, const uint32_t& aY, const nsString& aTooltip,
+                           const nsString& aDirection)
 {
   nsCOMPtr<nsIXULBrowserWindow> xulBrowserWindow = GetXULBrowserWindow();
   if (!xulBrowserWindow) {
     return true;
   }
 
-  xulBrowserWindow->ShowTooltip(aX, aY, aTooltip);
+  xulBrowserWindow->ShowTooltip(aX, aY, aTooltip, aDirection);
   return true;
 }
 
@@ -2020,7 +2020,7 @@ TabParent::RecvDispatchAfterKeyboardEvent(const WidgetKeyboardEvent& aEvent)
   NS_ENSURE_TRUE(mFrameElement, true);
 
   WidgetKeyboardEvent localEvent(aEvent);
-  localEvent.widget = GetWidget();
+  localEvent.mWidget = GetWidget();
 
   nsIDocument* doc = mFrameElement->OwnerDoc();
   nsCOMPtr<nsIPresShell> presShell = doc->GetShell();
@@ -3241,6 +3241,20 @@ TabParent::AudioChannelChangeNotification(nsPIDOMWindowOuter* aWindow,
 
     window = win;
   }
+}
+
+bool
+TabParent::RecvGetTabCount(uint32_t* aValue)
+{
+  nsCOMPtr<nsIXULBrowserWindow> xulBrowserWindow = GetXULBrowserWindow();
+  NS_ENSURE_TRUE(xulBrowserWindow, false);
+
+  uint32_t tabCount;
+  nsresult rv = xulBrowserWindow->GetTabCount(&tabCount);
+  NS_ENSURE_SUCCESS(rv, false);
+
+  *aValue = tabCount;
+  return true;
 }
 
 NS_IMETHODIMP

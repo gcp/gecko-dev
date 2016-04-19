@@ -1286,6 +1286,7 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
 
   if (!success || !lf) {
     NS_WARNING("Failed to create an OMT compositor.");
+    mAPZC = nullptr;
     DestroyCompositor();
     mLayerManager = nullptr;
     mCompositorBridgeChild = nullptr;
@@ -1922,7 +1923,7 @@ nsBaseWidget::GetWidgetScreen()
 }
 
 nsresult
-nsIWidget::SynthesizeNativeTouchTap(ScreenIntPoint aPointerScreenPoint, bool aLongTap,
+nsIWidget::SynthesizeNativeTouchTap(LayoutDeviceIntPoint aPoint, bool aLongTap,
                                     nsIObserver* aObserver)
 {
   AutoObserverNotifier notifier(aObserver, "touchtap");
@@ -1933,14 +1934,14 @@ nsIWidget::SynthesizeNativeTouchTap(ScreenIntPoint aPointerScreenPoint, bool aLo
   int pointerId = sPointerIdCounter;
   sPointerIdCounter++;
   nsresult rv = SynthesizeNativeTouchPoint(pointerId, TOUCH_CONTACT,
-                                           aPointerScreenPoint, 1.0, 90, nullptr);
+                                           aPoint, 1.0, 90, nullptr);
   if (NS_FAILED(rv)) {
     return rv;
   }
 
   if (!aLongTap) {
     nsresult rv = SynthesizeNativeTouchPoint(pointerId, TOUCH_REMOVE,
-                                             aPointerScreenPoint, 0, 0, nullptr);
+                                             aPoint, 0, 0, nullptr);
     return rv;
   }
 
@@ -1951,7 +1952,7 @@ nsIWidget::SynthesizeNativeTouchTap(ScreenIntPoint aPointerScreenPoint, bool aLo
     mLongTapTimer = do_CreateInstance(NS_TIMER_CONTRACTID, &rv);
     if (NS_FAILED(rv)) {
       SynthesizeNativeTouchPoint(pointerId, TOUCH_CANCEL,
-                                 aPointerScreenPoint, 0, 0, nullptr);
+                                 aPoint, 0, 0, nullptr);
       return NS_ERROR_UNEXPECTED;
     }
     // Windows requires recuring events, so we set this to a smaller window
@@ -1972,7 +1973,7 @@ nsIWidget::SynthesizeNativeTouchTap(ScreenIntPoint aPointerScreenPoint, bool aLo
                                mLongTapTouchPoint->mPosition, 0, 0, nullptr);
   }
 
-  mLongTapTouchPoint = new LongTapInfo(pointerId, aPointerScreenPoint,
+  mLongTapTouchPoint = new LongTapInfo(pointerId, aPoint,
                                        TimeDuration::FromMilliseconds(elapse),
                                        aObserver);
   notifier.SkipNotification();  // we'll do it in the long-tap callback
@@ -2105,60 +2106,6 @@ nsIWidget::UpdateRegisteredPluginWindowVisibility(uintptr_t aOwnerWidget,
     }
   }
 #endif
-}
-
-already_AddRefed<mozilla::gfx::SourceSurface>
-nsIWidget::SnapshotWidgetOnScreen()
-{
-  // This is only supported on a widget with a compositor.
-  LayerManager* layerManager = GetLayerManager();
-  if (!layerManager) {
-    return nullptr;
-  }
-
-  ClientLayerManager* lm = layerManager->AsClientLayerManager();
-  if (!lm) {
-    return nullptr;
-  }
-
-  CompositorBridgeChild* cc = lm->GetRemoteRenderer();
-  if (!cc) {
-    return nullptr;
-  }
-
-  LayoutDeviceIntRect bounds;
-  GetBounds(bounds);
-  if (bounds.IsEmpty()) {
-    return nullptr;
-  }
-
-  gfx::IntSize size(bounds.width, bounds.height);
-
-  ShadowLayerForwarder* forwarder = lm->AsShadowForwarder();
-  SurfaceDescriptor surface;
-  if (!forwarder->AllocSurfaceDescriptor(size, gfxContentType::COLOR_ALPHA, &surface)) {
-    return nullptr;
-  }
-
-  if (!cc->SendMakeWidgetSnapshot(surface)) {
-    return nullptr;
-  }
-
-  RefPtr<gfx::DataSourceSurface> snapshot = GetSurfaceForDescriptor(surface);
-  RefPtr<gfx::DrawTarget> dt =
-    gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(size, gfx::SurfaceFormat::B8G8R8A8);
-  if (!snapshot || !dt) {
-    forwarder->DestroySurfaceDescriptor(&surface);
-    return nullptr;
-  }
-
-  dt->DrawSurface(snapshot,
-                  gfx::Rect(gfx::Point(), gfx::Size(size)),
-                  gfx::Rect(gfx::Point(), gfx::Size(size)),
-                  gfx::DrawSurfaceOptions(gfx::Filter::POINT));
-
-  forwarder->DestroySurfaceDescriptor(&surface);
-  return dt->Snapshot();
 }
 
 NS_IMETHODIMP_(nsIWidget::NativeIMEContext)

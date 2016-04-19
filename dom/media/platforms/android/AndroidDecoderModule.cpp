@@ -305,9 +305,12 @@ AndroidDecoderModule::CreateAudioDecoder(
 
   MediaFormat::LocalRef format;
 
+  LOG("CreateAudioFormat with mimeType=%s, mRate=%d, channels=%d",
+      aConfig.mMimeType.Data(), aConfig.mRate, aConfig.mChannels);
+
   NS_ENSURE_SUCCESS(MediaFormat::CreateAudioFormat(
       aConfig.mMimeType,
-      aConfig.mBitDepth,
+      aConfig.mRate,
       aConfig.mChannels,
       &format), nullptr);
 
@@ -499,7 +502,7 @@ MediaCodecDataDecoder::QueueSample(const MediaRawData* aSample)
     return res;
   }
 
-  mDurations.push(TimeUnit::FromMicroseconds(aSample->mDuration));
+  mDurations.push_back(TimeUnit::FromMicroseconds(aSample->mDuration));
   return NS_OK;
 }
 
@@ -544,7 +547,7 @@ MediaCodecDataDecoder::GetOutputDuration()
 {
   MOZ_ASSERT(!mDurations.empty(), "Should have had a duration queued");
   const TimeUnit duration = mDurations.front();
-  mDurations.pop();
+  mDurations.pop_front();
   return duration;
 }
 
@@ -597,7 +600,7 @@ MediaCodecDataDecoder::DecoderLoop()
         // We've fed this into the decoder, so remove it from the queue.
         MonitorAutoLock lock(mMonitor);
         MOZ_RELEASE_ASSERT(mQueue.size(), "Queue may not be empty");
-        mQueue.pop();
+        mQueue.pop_front();
         isOutputDone = false;
       }
     }
@@ -695,28 +698,20 @@ MediaCodecDataDecoder::State(ModuleState aState)
   return ok;
 }
 
-template<typename T>
-void
-Clear(T& aCont)
-{
-  T aEmpty = T();
-  swap(aCont, aEmpty);
-}
-
 void
 MediaCodecDataDecoder::ClearQueue()
 {
   mMonitor.AssertCurrentThreadOwns();
 
-  Clear(mQueue);
-  Clear(mDurations);
+  mQueue.clear();
+  mDurations.clear();
 }
 
 nsresult
 MediaCodecDataDecoder::Input(MediaRawData* aSample)
 {
   MonitorAutoLock lock(mMonitor);
-  mQueue.push(aSample);
+  mQueue.push_back(aSample);
   lock.NotifyAll();
 
   return NS_OK;

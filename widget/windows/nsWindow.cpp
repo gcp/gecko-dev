@@ -3866,7 +3866,7 @@ NS_IMETHODIMP nsWindow::DispatchEvent(WidgetGUIEvent* event,
 {
 #ifdef WIDGET_DEBUG_OUTPUT
   debug_DumpEvent(stdout,
-                  event->widget,
+                  event->mWidget,
                   event,
                   "something",
                   (int32_t) mWnd);
@@ -5373,6 +5373,16 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
 
     case WM_MOVING:
       FinishLiveResizing(MOVING);
+      if (WinUtils::IsPerMonitorDPIAware()) {
+        // Sometimes, we appear to miss a WM_DPICHANGED message while moving
+        // a window around. Therefore, call ChangedDPI and ResetLayout here,
+        // which causes the prescontext and appshell window management code to
+        // check the appUnitsPerDevPixel value and current widget size, and
+        // refresh them if necessary. If nothing has changed, these calls will
+        // return without actually triggering any extra reflow or painting.
+        ChangedDPI();
+        ResetLayout();
+      }
       break;
 
     case WM_ENTERSIZEMOVE:
@@ -6924,6 +6934,7 @@ nsWindow::OnDPIChanged(int32_t x, int32_t y, int32_t width, int32_t height)
     Resize(x, y, width, height, true);
   }
   ChangedDPI();
+  ResetLayout();
 }
 
 /**************************************************************
@@ -7791,47 +7802,6 @@ void nsWindow::PickerClosed()
   if (!mPickerDisplayCount && mDestroyCalled) {
     Destroy();
   }
-}
-
-bool nsWindow::CaptureWidgetOnScreen(RefPtr<DrawTarget> aDT)
-{
-  BOOL dwmEnabled = false;
-  if (WinUtils::dwmIsCompositionEnabledPtr &&
-      WinUtils::dwmFlushProcPtr &&
-      WinUtils::dwmIsCompositionEnabledPtr(&dwmEnabled) &&
-      dwmEnabled)
-  {
-    WinUtils::dwmFlushProcPtr();
-  }
-
-  HDC dc = ::GetDC(mWnd);
-  uint32_t flags = (mTransparencyMode == eTransparencyOpaque)
-                   ? 0
-                   : gfxWindowsSurface::FLAG_IS_TRANSPARENT;
-
-  RefPtr<gfxASurface> surf = new gfxWindowsSurface(dc, flags);
-  IntSize size(surf->GetSize().width, surf->GetSize().height);
-  if (size.width <= 0 || size.height <= 0) {
-    ::ReleaseDC(mWnd, dc);
-    return false;
-  }
-
-  RefPtr<DrawTarget> source = Factory::CreateDrawTargetForCairoSurface(surf->CairoSurface(), size);
-  if (!source) {
-    ::ReleaseDC(mWnd, dc);
-    return false;
-  }
-  RefPtr<SourceSurface> snapshot = source->Snapshot();
-  if (!snapshot) {
-    ::ReleaseDC(mWnd, dc);
-    return false;
-  }
-
-  aDT->DrawSurface(snapshot,
-                   Rect(0, 0, size.width, size.height),
-                   Rect(0, 0, size.width, size.height));
-  ::ReleaseDC(mWnd, dc);
-  return true;
 }
 
 bool nsWindow::PreRender(LayerManagerComposite*)
