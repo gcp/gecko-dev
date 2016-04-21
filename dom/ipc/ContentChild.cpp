@@ -65,6 +65,9 @@
 #elif defined(XP_LINUX)
 #include "mozilla/Sandbox.h"
 #include "mozilla/SandboxInfo.h"
+
+#include "nsIProtocolProxyService2.h"
+#include "CubebUtils.h"
 #elif defined(XP_MACOSX)
 #include "mozilla/Sandbox.h"
 #endif
@@ -1472,6 +1475,13 @@ ContentChild::RecvSetProcessSandbox(const MaybeFileDesc& aBroker)
   if (!SandboxInfo::Get().CanSandboxContent()) {
       return true;
   }
+
+  // Bug 1259508: During initialization, fork/exec may be required
+  nsresult rv;
+  nsCOMPtr<nsIProtocolProxyService> pps =
+            do_GetService(NS_PROTOCOLPROXYSERVICE_CONTRACTID, &rv);
+
+  CubebUtils::GetCubebContext();
 #endif
   int brokerFd = -1;
   if (aBroker.type() == MaybeFileDesc::TFileDescriptor) {
