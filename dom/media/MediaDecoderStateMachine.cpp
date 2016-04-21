@@ -219,8 +219,7 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   mCurrentFrameID(0),
   mObservedDuration(TimeUnit(), "MediaDecoderStateMachine::mObservedDuration"),
   mFragmentEndTime(-1),
-  mReader(aReader),
-  mReaderWrapper(new MediaDecoderReaderWrapper(aRealTime, mTaskQueue, aReader)),
+  mReader(new MediaDecoderReaderWrapper(aRealTime, mTaskQueue, aReader)),
   mDecodedAudioEndTime(0),
   mDecodedVideoEndTime(0),
   mPlaybackRate(1.0),
@@ -697,8 +696,8 @@ MediaDecoderStateMachine::OnNotDecoded(MediaData::Type aType,
     MOZ_ASSERT(mReader->IsWaitForDataSupported(),
                "Readers that send WAITING_FOR_DATA need to implement WaitForData");
     RefPtr<MediaDecoderStateMachine> self = this;
-    WaitRequestRef(aType).Begin(InvokeAsync(DecodeTaskQueue(), mReader.get(), __func__,
-                                            &MediaDecoderReader::WaitForData, aType)
+    WaitRequestRef(aType).Begin(
+      mReader->WaitForData(aType)
       ->Then(OwnerThread(), __func__,
              [self] (MediaData::Type aType) -> void {
                self->WaitRequestRef(aType).Complete();
@@ -1168,8 +1167,7 @@ MediaDecoderStateMachine::SetDormant(bool aDormant)
     // that run after ResetDecode are supposed to run with a clean slate. We rely
     // on that in other places (i.e. seeking), so it seems reasonable to rely on
     // it here as well.
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(mReader, &MediaDecoderReader::ReleaseMediaResources);
-    DecodeTaskQueue()->Dispatch(r.forget());
+    mReader->ReleaseMediaResources();
   } else if ((aDormant != true) && (mState == DECODER_STATE_DORMANT)) {
     mDecodingFirstFrame = true;
     SetState(DECODER_STATE_DECODING_METADATA);
@@ -1207,14 +1205,12 @@ MediaDecoderStateMachine::Shutdown()
   Reset();
 
   mMediaSink->Shutdown();
-  mReaderWrapper->Shutdown();
 
   DECODER_LOG("Shutdown started");
 
   // Put a task in the decode queue to shutdown the reader.
   // the queue to spin down.
-  return InvokeAsync(DecodeTaskQueue(), mReader.get(), __func__,
-                     &MediaDecoderReader::Shutdown)
+  return mReader->Shutdown()
     ->Then(OwnerThread(), __func__, this,
            &MediaDecoderStateMachine::FinishShutdown,
            &MediaDecoderStateMachine::FinishShutdown)
@@ -1344,7 +1340,7 @@ MediaDecoderStateMachine::ReadMetadata()
   DECODER_LOG("Dispatching AsyncReadMetadata");
   // Set mode to METADATA since we are about to read metadata.
   mResource->SetReadMode(MediaCacheStream::MODE_METADATA);
-  mMetadataRequest.Begin(mReaderWrapper->ReadMetadata()
+  mMetadataRequest.Begin(mReader->ReadMetadata()
     ->Then(OwnerThread(), __func__, this,
            &MediaDecoderStateMachine::OnMetadataRead,
            &MediaDecoderStateMachine::OnMetadataNotRead));
@@ -1457,8 +1453,7 @@ MediaDecoderStateMachine::DispatchDecodeTasksIfNeeded()
     DECODER_LOG("Dispatching SetIdle() audioQueue=%lld videoQueue=%lld",
                 GetDecodedAudioDuration(),
                 VideoQueue().Duration());
-    nsCOMPtr<nsIRunnable> task = NS_NewRunnableMethod(mReader, &MediaDecoderReader::SetIdle);
-    DecodeTaskQueue()->Dispatch(task.forget());
+    mReader->SetIdle();
   }
 }
 
@@ -1475,8 +1470,8 @@ MediaDecoderStateMachine::InitiateSeek(SeekJob aSeekJob)
   mSeekTaskRequest.DisconnectIfExists();
 
   // Create a new SeekTask instance for the incoming seek task.
-  mSeekTask = SeekTask::CreateSeekTask(mDecoderID, OwnerThread(), mReader.get(),
-                                       mReaderWrapper.get(), Move(aSeekJob),
+  mSeekTask = SeekTask::CreateSeekTask(mDecoderID, OwnerThread(),
+                                       mReader.get(), Move(aSeekJob),
                                        mInfo, Duration(), GetMediaTime());
 
   // Stop playback now to ensure that while we're outside the monitor
@@ -1622,7 +1617,7 @@ MediaDecoderStateMachine::RequestAudioData()
              AudioQueue().GetSize(), mReader->SizeOfAudioQueueInFrames());
 
   mAudioDataRequest.Begin(
-    mReaderWrapper->RequestAudioData()
+    mReader->RequestAudioData()
     ->Then(OwnerThread(), __func__, this,
            &MediaDecoderStateMachine::OnAudioDecoded,
            &MediaDecoderStateMachine::OnAudioNotDecoded));
@@ -1689,7 +1684,7 @@ MediaDecoderStateMachine::RequestVideoData()
 
   RefPtr<MediaDecoderStateMachine> self = this;
   mVideoDataRequest.Begin(
-    mReaderWrapper->RequestVideoData(skipToNextKeyFrame, currentTime)
+    mReader->RequestVideoData(skipToNextKeyFrame, currentTime)
     ->Then(OwnerThread(), __func__,
            [self, videoDecodeStartTime] (MediaData* aVideoSample) {
              self->OnVideoDecoded(aVideoSample, videoDecodeStartTime);
@@ -1832,11 +1827,11 @@ MediaDecoderStateMachine::OnMetadataRead(MetadataHolder* aMetadata)
   if (mInfo.mMetadataDuration.isSome()) {
     RecomputeDuration();
   } else if (mInfo.mUnadjustedMetadataEndTime.isSome()) {
-    mReaderWrapper->AwaitStartTime()->Then(OwnerThread(), __func__,
+    mReader->AwaitStartTime()->Then(OwnerThread(), __func__,
       [self] () -> void {
         NS_ENSURE_TRUE_VOID(!self->IsShutdown());
         TimeUnit unadjusted = self->mInfo.mUnadjustedMetadataEndTime.ref();
-        TimeUnit adjustment = self->mReaderWrapper->StartTime();
+        TimeUnit adjustment = self->mReader->StartTime();
         self->mInfo.mMetadataDuration.emplace(unadjusted - adjustment);
         self->RecomputeDuration();
       }, [] () -> void { NS_WARNING("Adjusting metadata end time failed"); }
@@ -1910,8 +1905,8 @@ MediaDecoderStateMachine::EnqueueFirstFrameLoadedEvent()
   bool firstFrameBeenLoaded = mSentFirstFrameLoadedEvent;
   mSentFirstFrameLoadedEvent = true;
   RefPtr<MediaDecoderStateMachine> self = this;
-  mBufferedUpdateRequest.Begin(InvokeAsync(DecodeTaskQueue(), mReader.get(), __func__,
-    &MediaDecoderReader::UpdateBufferedWithPromise)
+  mBufferedUpdateRequest.Begin(
+    mReader->UpdateBufferedWithPromise()
     ->Then(OwnerThread(),
     __func__,
     // Resolve
@@ -2275,9 +2270,7 @@ MediaDecoderStateMachine::Reset()
 
   mPlaybackOffset = 0;
 
-  nsCOMPtr<nsIRunnable> resetTask =
-    NS_NewRunnableMethod(mReader, &MediaDecoderReader::ResetDecode);
-  DecodeTaskQueue()->Dispatch(resetTask.forget());
+  mReader->ResetDecode();
 }
 
 int64_t
@@ -2692,6 +2685,30 @@ void MediaDecoderStateMachine::RemoveOutputStream(MediaStream* aStream)
       this, &MediaDecoderStateMachine::SetAudioCaptured, false);
     OwnerThread()->Dispatch(r.forget());
   }
+}
+
+size_t
+MediaDecoderStateMachine::SizeOfVideoQueue() const
+{
+  return mReader->SizeOfVideoQueueInBytes();
+}
+
+size_t
+MediaDecoderStateMachine::SizeOfAudioQueue() const
+{
+  return mReader->SizeOfAudioQueueInBytes();
+}
+
+AbstractCanonical<media::TimeIntervals>*
+MediaDecoderStateMachine::CanonicalBuffered() const
+{
+  return mReader->CanonicalBuffered();
+}
+
+MediaEventSource<void>&
+MediaDecoderStateMachine::OnMediaNotSeekable() const
+{
+  return mReader->OnMediaNotSeekable();
 }
 
 } // namespace mozilla

@@ -295,11 +295,10 @@ void
 PuppetWidget::InitEvent(WidgetGUIEvent& event, LayoutDeviceIntPoint* aPoint)
 {
   if (nullptr == aPoint) {
-    event.refPoint.x = 0;
-    event.refPoint.y = 0;
+    event.mRefPoint = LayoutDeviceIntPoint(0, 0);
   } else {
     // use the point override if provided
-    event.refPoint = *aPoint;
+    event.mRefPoint = *aPoint;
   }
   event.mTime = PR_Now() / 1000;
 }
@@ -989,7 +988,7 @@ PuppetWidget::SetCursor(imgIContainer* aCursor,
   mozilla::UniquePtr<char[]> surfaceData =
     nsContentUtils::GetSurfaceData(dataSurface, &length, &stride);
 
-  nsCString cursorData = nsCString(surfaceData.get(), length);
+  nsDependentCString cursorData(surfaceData.get(), length);
   mozilla::gfx::IntSize size = dataSurface->GetSize();
   if (!mTabChild->SendSetCustomCursor(cursorData, size.width, size.height, stride,
                                       static_cast<uint8_t>(dataSurface->GetFormat()),

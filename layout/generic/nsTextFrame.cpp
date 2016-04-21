@@ -49,7 +49,6 @@
 #include "nsTextFrameUtils.h"
 #include "nsTextRunTransformations.h"
 #include "MathMLTextRunFactory.h"
-#include "nsExpirationTracker.h"
 #include "nsUnicodeProperties.h"
 #include "nsStyleUtil.h"
 #include "nsRubyFrame.h"
@@ -185,7 +184,6 @@ NS_DECLARE_FRAME_PROPERTY_DELETABLE(TabWidthProperty, TabWidthStore)
 
 NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(OffsetToFrameProperty, nsTextFrame)
 
-// text runs are destroyed by the text run cache
 NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(UninflatedTextRunProperty, gfxTextRun)
 
 NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(FontSizeInflationProperty, float)
@@ -414,6 +412,18 @@ DestroyUserData(void* aUserData)
   }
 }
 
+static nsCSSProperty
+GetTextDecorationColorProp(nsStyleContext* aCtx)
+{
+  nscolor textColor;
+  bool foreground;
+  aCtx->StyleTextReset()->GetDecorationColor(textColor, foreground);
+
+  return (foreground && !aCtx->StyleText()->mWebkitTextFillColorForeground)
+         ? eCSSProperty__webkit_text_fill_color
+         : eCSSProperty_text_decoration_color;
+}
+
 /**
  * Remove |aTextRun| from the frame continuation chain starting at
  * |aStartContinuation| if non-null, otherwise starting at |aFrame|.
@@ -541,74 +551,6 @@ GlyphObserver::NotifyGlyphsChanged()
     // not easy to do well.
     shell->FrameNeedsReflow(f, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
   }
-}
-
-class FrameTextRunCache;
-
-static FrameTextRunCache *gTextRuns = nullptr;
-
-/*
- * Cache textruns and expire them after 3*10 seconds of no use.
- */
-class FrameTextRunCache final : public nsExpirationTracker<gfxTextRun,3> {
-public:
-  enum { TIMEOUT_SECONDS = 10 };
-  FrameTextRunCache()
-    : nsExpirationTracker<gfxTextRun,3>(TIMEOUT_SECONDS * 1000,
-                                        "FrameTextRunCache")
-  {}
-  ~FrameTextRunCache() {
-    AgeAllGenerations();
-  }
-
-  void RemoveFromCache(gfxTextRun* aTextRun) {
-    if (aTextRun->GetExpirationState()->IsTracked()) {
-      RemoveObject(aTextRun);
-    }
-  }
-
-  // This gets called when the timeout has expired on a gfxTextRun
-  virtual void NotifyExpired(gfxTextRun* aTextRun) {
-    UnhookTextRunFromFrames(aTextRun, nullptr);
-    RemoveFromCache(aTextRun);
-    delete aTextRun;
-  }
-};
-
-// Helper to create a textrun and remember it in the textframe cache,
-// for either 8-bit or 16-bit text strings
-template<typename T>
-gfxTextRun *
-MakeTextRun(const T *aText, uint32_t aLength,
-            gfxFontGroup *aFontGroup, const gfxFontGroup::Parameters* aParams,
-            uint32_t aFlags, gfxMissingFontRecorder *aMFR)
-{
-    nsAutoPtr<gfxTextRun> textRun(aFontGroup->MakeTextRun(aText, aLength,
-                                                          aParams, aFlags,
-                                                          aMFR));
-    if (!textRun) {
-        return nullptr;
-    }
-    nsresult rv = gTextRuns->AddObject(textRun);
-    if (NS_FAILED(rv)) {
-        gTextRuns->RemoveFromCache(textRun);
-        return nullptr;
-    }
-#ifdef NOISY_BIDI
-    printf("Created textrun\n");
-#endif
-    return textRun.forget();
-}
-
-void
-nsTextFrameTextRunCache::Init() {
-    gTextRuns = new FrameTextRunCache();
-}
-
-void
-nsTextFrameTextRunCache::Shutdown() {
-    delete gTextRuns;
-    gTextRuns = nullptr;
 }
 
 int32_t nsTextFrame::GetContentEnd() const {
@@ -1017,7 +959,7 @@ private:
   AutoTArray<MappedFlow,10>   mMappedFlows;
   AutoTArray<nsTextFrame*,50> mLineBreakBeforeFrames;
   AutoTArray<nsAutoPtr<BreakSink>,10> mBreakSinks;
-  AutoTArray<gfxTextRun*,5>   mTextRunsToDelete;
+  AutoTArray<UniquePtr<gfxTextRun>,5> mTextRunsToDelete;
   nsLineBreaker                 mLineBreaker;
   gfxTextRun*                   mCurrentFramesAllSameTextRun;
   DrawTarget*                   mDrawTarget;
@@ -1531,12 +1473,6 @@ void BuildTextRunsScanner::FlushLineBreaks(gfxTextRun* aTrailingTextRun)
     mBreakSinks[i]->Finish(mMissingFonts);
   }
   mBreakSinks.Clear();
-
-  for (uint32_t i = 0; i < mTextRunsToDelete.Length(); ++i) {
-    gfxTextRun* deleteTextRun = mTextRunsToDelete[i];
-    gTextRuns->RemoveFromCache(deleteTextRun);
-    delete deleteTextRun;
-  }
   mTextRunsToDelete.Clear();
 }
 
@@ -1845,10 +1781,7 @@ CreateReferenceDrawTarget(nsTextFrame* aTextFrame)
   return dt.forget();
 }
 
-/**
- * The returned textrun must be deleted when no longer needed.
- */
-static gfxTextRun*
+static UniquePtr<gfxTextRun>
 GetHyphenTextRun(gfxTextRun* aTextRun, DrawTarget* aDrawTarget,
                  nsTextFrame* aTextFrame)
 {
@@ -2215,7 +2148,7 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
                  "We didn't cover all the characters in the text run!");
   }
 
-  gfxTextRun* textRun;
+  UniquePtr<gfxTextRun> textRun;
   gfxTextRunFactory::Parameters params =
       { mDrawTarget, finalUserData, &skipChars,
         textBreakPointsAfterTransform.Elements(),
@@ -2233,8 +2166,8 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
         transformingFactory.forget();
       }
     } else {
-      textRun = MakeTextRun(text, transformedLength, fontGroup, &params,
-                            textFlags, mMissingFonts);
+      textRun = fontGroup->MakeTextRun(text, transformedLength, &params,
+                                       textFlags, mMissingFonts);
     }
   } else {
     const uint8_t* text = static_cast<const uint8_t*>(textPtr);
@@ -2248,8 +2181,8 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
         transformingFactory.forget();
       }
     } else {
-      textRun = MakeTextRun(text, transformedLength, fontGroup, &params,
-                            textFlags, mMissingFonts);
+      textRun = fontGroup->MakeTextRun(text, transformedLength, &params,
+                                       textFlags, mMissingFonts);
     }
   }
   if (!textRun) {
@@ -2261,18 +2194,15 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
   // the breaks may be stored in the textrun during this very call.
   // This is a bit annoying because it requires another loop over the frames
   // making up the textrun, but I don't see a way to avoid this.
-  SetupBreakSinksForTextRun(textRun, textPtr);
+  SetupBreakSinksForTextRun(textRun.get(), textPtr);
 
   if (anyTextEmphasis) {
-    SetupTextEmphasisForTextRun(textRun, textPtr);
+    SetupTextEmphasisForTextRun(textRun.get(), textPtr);
   }
 
   if (mSkipIncompleteTextRuns) {
     mSkipIncompleteTextRuns = !TextContainsLineBreakerWhiteSpace(textPtr,
         transformedLength, mDoubleByteText);
-    // Arrange for this textrun to be deleted the next time the linebreaker
-    // is flushed out
-    mTextRunsToDelete.AppendElement(textRun);
     // Since we're doing to destroy the user data now, avoid a dangling
     // pointer. Strictly speaking we don't need to do this since it should
     // not be used (since this textrun will not be used and will be
@@ -2280,13 +2210,16 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
     // pointers around.
     textRun->SetUserData(nullptr);
     DestroyUserData(userDataToDestroy);
+    // Arrange for this textrun to be deleted the next time the linebreaker
+    // is flushed out
+    mTextRunsToDelete.AppendElement(Move(textRun));
     return nullptr;
   }
 
   // Actually wipe out the textruns associated with the mapped frames and associate
   // those frames with this text run.
-  AssignTextRun(textRun, fontInflation);
-  return textRun;
+  AssignTextRun(textRun.get(), fontInflation);
+  return textRun.release();
 }
 
 // This is a cut-down version of BuildTextRunForFrames used to set up
@@ -2700,11 +2633,7 @@ nsTextFrame::EnsureTextRun(TextRunType aWhichTextRun,
                            uint32_t* aFlowEndInTextRun)
 {
   gfxTextRun *textRun = GetTextRun(aWhichTextRun);
-  if (textRun && (!aLine || !(*aLine)->GetInvalidateTextRuns())) {
-    if (textRun->GetExpirationState()->IsTracked()) {
-      gTextRuns->MarkUsed(textRun);
-    }
-  } else {
+  if (!textRun || (aLine && (*aLine)->GetInvalidateTextRuns())) {
     RefPtr<DrawTarget> refDT = aRefDrawTarget;
     if (!refDT) {
       refDT = CreateReferenceDrawTarget(this);
@@ -3608,10 +3537,8 @@ nsTextPaintStyle::GetTextColor()
     }
   }
 
-  nsCSSProperty property =
-    mFrame->StyleText()->mWebkitTextFillColorForeground
-    ? eCSSProperty_color : eCSSProperty__webkit_text_fill_color;
-  return nsLayoutUtils::GetColor(mFrame, property);
+  return nsLayoutUtils::GetColor(mFrame,
+                                 mFrame->StyleContext()->GetTextFillColorProp());
 }
 
 bool
@@ -3804,7 +3731,7 @@ nsTextPaintStyle::InitSelectionColorsAndShadow()
     if (sc) {
       mSelectionBGColor =
         sc->GetVisitedDependentColor(eCSSProperty_background_color);
-      mSelectionTextColor = sc->GetVisitedDependentColor(eCSSProperty_color);
+      mSelectionTextColor = sc->GetVisitedDependentColor(sc->GetTextFillColorProp());
       mHasSelectionShadow =
         nsRuleNode::HasAuthorSpecifiedRules(sc,
                                             NS_AUTHOR_SPECIFIED_TEXT_SHADOW,
@@ -3840,13 +3767,15 @@ nsTextPaintStyle::InitSelectionColorsAndShadow()
   if (mResolveColors) {
     // On MacOS X, we don't exchange text color and BG color.
     if (mSelectionTextColor == NS_DONT_CHANGE_COLOR) {
-      nsCSSProperty property = mFrame->IsSVGText() ? eCSSProperty_fill :
-                                                     eCSSProperty_color;
+      nsCSSProperty property = mFrame->IsSVGText()
+                               ? eCSSProperty_fill
+                               : mFrame->StyleContext()->GetTextFillColorProp();
       nscoord frameColor = mFrame->GetVisitedDependentColor(property);
       mSelectionTextColor = EnsureDifferentColors(frameColor, mSelectionBGColor);
     } else if (mSelectionTextColor == NS_CHANGE_COLOR_IF_SAME_AS_BG) {
-      nsCSSProperty property = mFrame->IsSVGText() ? eCSSProperty_fill :
-                                                     eCSSProperty_color;
+      nsCSSProperty property = mFrame->IsSVGText()
+                               ? eCSSProperty_fill
+                               : mFrame->StyleContext()->GetTextFillColorProp();
       nscolor frameColor = mFrame->GetVisitedDependentColor(property);
       if (frameColor == mSelectionBGColor) {
         mSelectionTextColor =
@@ -4540,21 +4469,8 @@ nsTextFrame::ClearTextRun(nsTextFrame* aStartContinuation,
   MOZ_ASSERT(checkmTextrun ? !mTextRun
                            : !Properties().Get(UninflatedTextRunProperty()));
 
-  // see comments in BuildTextRunForFrames...
-//  if (textRun->GetFlags() & gfxFontGroup::TEXT_IS_PERSISTENT) {
-//    NS_ERROR("Shouldn't reach here for now...");
-//    // the textrun's text may be referencing a DOM node that has changed,
-//    // so we'd better kill this textrun now.
-//    if (textRun->GetExpirationState()->IsTracked()) {
-//      gTextRuns->RemoveFromCache(textRun);
-//    }
-//    delete textRun;
-//    return;
-//  }
-
   if (!textRun->GetUserData()) {
-    // Remove it now because it's not doing anything useful
-    gTextRuns->RemoveFromCache(textRun);
+    // Delete it now because it's not doing anything useful
     delete textRun;
   }
 }
@@ -4683,6 +4599,16 @@ public:
 
   virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) override
   {
+    if (gfxPlatform::GetPlatform()->RespectsFontStyleSmoothing()) {
+      // On OS X, web authors can turn off subpixel text rendering using the
+      // CSS property -moz-osx-font-smoothing. If they do that, we don't need
+      // to use component alpha layers for the affected text.
+      nsTextFrame* f = static_cast<nsTextFrame*>(mFrame);
+      const nsStyleFont* fontStyle = f->StyleFont();
+      if (fontStyle->mFont.smoothing == NS_FONT_SMOOTHING_GRAYSCALE) {
+        return nsRect();
+      }
+    }
     bool snap;
     return GetBounds(aBuilder, &snap);
   }
@@ -5017,7 +4943,7 @@ nsTextFrame::GetTextDecorations(
       // la la</font></a> case. The link underline should be green.
       useOverride = true;
       overrideColor =
-        nsLayoutUtils::GetColor(f, eCSSProperty_text_decoration_color);
+        nsLayoutUtils::GetColor(f, GetTextDecorationColorProp(context));
     }
 
     nsBlockFrame* fBlock = nsLayoutUtils::GetAsBlock(f);
@@ -5074,7 +5000,7 @@ nsTextFrame::GetTextDecorations(
                   nsLayoutUtils::GetColor(f, eCSSProperty_fill) :
                   NS_SAME_AS_FOREGROUND_COLOR;
       } else {
-        color = nsLayoutUtils::GetColor(f, eCSSProperty_text_decoration_color);
+        color = nsLayoutUtils::GetColor(f, GetTextDecorationColorProp(context));
       }
 
       bool swapUnderlineAndOverline = vertical && IsUnderlineRight(f);
@@ -5148,14 +5074,14 @@ GetInflationForTextDecorations(nsIFrame* aFrame, nscoord aInflationMinFontSize)
 
 struct EmphasisMarkInfo
 {
-  nsAutoPtr<gfxTextRun> textRun;
+  UniquePtr<gfxTextRun> textRun;
   gfxFloat advance;
   gfxFloat baselineOffset;
 };
 
 NS_DECLARE_FRAME_PROPERTY_DELETABLE(EmphasisMarkProperty, EmphasisMarkInfo)
 
-static gfxTextRun*
+UniquePtr<gfxTextRun>
 GenerateTextRunForEmphasisMarks(nsTextFrame* aFrame, nsFontMetrics* aFontMetrics,
                                 WritingMode aWM, const nsStyleText* aStyleText)
 {
@@ -5823,10 +5749,11 @@ AddHyphenToMetrics(nsTextFrame* aTextFrame, gfxTextRun* aBaseTextRun,
                    DrawTarget* aDrawTarget)
 {
   // Fix up metrics to include hyphen
-  nsAutoPtr<gfxTextRun> hyphenTextRun(
-    GetHyphenTextRun(aBaseTextRun, aDrawTarget, aTextFrame));
-  if (!hyphenTextRun.get())
+  UniquePtr<gfxTextRun> hyphenTextRun =
+    GetHyphenTextRun(aBaseTextRun, aDrawTarget, aTextFrame);
+  if (!hyphenTextRun) {
     return;
+  }
 
   gfxTextRun::Metrics hyphenMetrics =
     hyphenTextRun->MeasureText(aBoundingBoxType, aDrawTarget);
@@ -6225,7 +6152,7 @@ nsTextFrame::DrawEmphasisMarks(gfxContext* aContext, WritingMode aWM,
       pt.x += info->baselineOffset;
     }
   }
-  mTextRun->DrawEmphasisMarks(aContext, info->textRun, info->advance,
+  mTextRun->DrawEmphasisMarks(aContext, info->textRun.get(), info->advance,
                               pt, aRange, aProvider);
 }
 
@@ -6632,8 +6559,9 @@ nsTextFrame::DrawTextRun(Range aRange, const gfxPoint& aTextBaselinePt,
   if (aParams.drawSoftHyphen) {
     // Don't use ctx as the context, because we need a reference context here,
     // ctx may be transformed.
-    nsAutoPtr<gfxTextRun> hyphenTextRun(GetHyphenTextRun(mTextRun, nullptr, this));
-    if (hyphenTextRun.get()) {
+    UniquePtr<gfxTextRun> hyphenTextRun =
+      GetHyphenTextRun(mTextRun, nullptr, this);
+    if (hyphenTextRun) {
       // For right-to-left text runs, the soft-hyphen is positioned at the left
       // of the text, minus its own width
       gfxFloat hyphenBaselineX = aTextBaselinePt.x +

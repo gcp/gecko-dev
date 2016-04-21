@@ -1706,7 +1706,7 @@ nsWindow::BeginResizeDrag(WidgetGUIEvent* aEvent,
 
   // tell Windows to start the resize
   ::PostMessage(toplevelWnd, WM_SYSCOMMAND, syscommand,
-                POINTTOPOINTS(aEvent->refPoint));
+                POINTTOPOINTS(aEvent->mRefPoint));
 
   return NS_OK;
 }
@@ -3830,15 +3830,13 @@ void nsWindow::InitEvent(WidgetGUIEvent& event, LayoutDeviceIntPoint* aPoint)
       cpos.y = GET_Y_LPARAM(pos);
 
       ::ScreenToClient(mWnd, &cpos);
-      event.refPoint.x = cpos.x;
-      event.refPoint.y = cpos.y;
+      event.mRefPoint = LayoutDeviceIntPoint(cpos.x, cpos.y);
     } else {
-      event.refPoint.x = 0;
-      event.refPoint.y = 0;
+      event.mRefPoint = LayoutDeviceIntPoint(0, 0);
     }
   } else {
     // use the point override if provided
-    event.refPoint = *aPoint;
+    event.mRefPoint = *aPoint;
   }
 
   event.AssignEventTime(CurrentMessageWidgetEventTime());
@@ -4230,7 +4228,7 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
       rect.x = 0;
       rect.y = 0;
 
-      if (rect.Contains(event.refPoint)) {
+      if (rect.Contains(event.mRefPoint)) {
         if (sCurrentWindow == nullptr || sCurrentWindow != this) {
           if ((nullptr != sCurrentWindow) && (!sCurrentWindow->mInDtor)) {
             LPARAM pos = sCurrentWindow->lParamToClient(lParamToScreen(lParam));
@@ -5667,7 +5665,8 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
         touchPoint = gestureinfo->ptsLocation;
         touchPoint.ScreenToClient(mWnd);
         WidgetGestureNotifyEvent gestureNotifyEvent(true, eGestureNotify, this);
-        gestureNotifyEvent.refPoint = LayoutDeviceIntPoint::FromUnknownPoint(touchPoint);
+        gestureNotifyEvent.mRefPoint =
+          LayoutDeviceIntPoint::FromUnknownPoint(touchPoint);
         nsEventStatus status;
         DispatchEvent(&gestureNotifyEvent, status);
         mDisplayPanFeedback = gestureNotifyEvent.displayPanFeedback;
@@ -5800,6 +5799,7 @@ nsWindow::FinishLiveResizing(ResizeState aNewState)
     }
   }
   mResizeState = aNewState;
+  ForcePresent();
 }
 
 /**************************************************************
@@ -6896,23 +6896,6 @@ nsWindow::OnDPIChanged(int32_t x, int32_t y, int32_t width, int32_t height)
   double newScale = GetDefaultScaleInternal();
 
   if (mResizeState != RESIZING && mSizeMode == nsSizeMode_Normal) {
-    // We want to try and maintain the size of the client area, rather than
-    // the overall size of the window including non-client area, so we prefer
-    // to calculate the new size instead of using Windows' suggested values.
-    if (oldScale > 0.0) {
-      double ratio = newScale / oldScale;
-      LayoutDeviceIntRect cr, sr;
-      GetClientBounds(cr);
-      GetScreenBounds(sr);
-      int32_t w = sr.width - cr.width + NSToIntRound(cr.width * ratio);
-      int32_t h = sr.height - cr.height + NSToIntRound(cr.height * ratio);
-      // Adjust x and y to preserve the center point of the suggested rect.
-      x -= (w - width) / 2;
-      y -= (h - height) / 2;
-      width = w;
-      height = h;
-    }
-
     // Limit the position (if not in the middle of a drag-move) & size,
     // if it would overflow the destination screen
     nsCOMPtr<nsIScreenManager> sm = do_GetService(sScreenManagerContractID);

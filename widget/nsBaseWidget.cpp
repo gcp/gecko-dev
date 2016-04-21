@@ -1197,6 +1197,18 @@ nsBaseWidget::DispatchInputEvent(WidgetInputEvent* aEvent)
   return status;
 }
 
+void
+nsBaseWidget::DispatchEventToAPZOnly(mozilla::WidgetInputEvent* aEvent)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  if (mAPZC) {
+    MOZ_ASSERT(APZThreadUtils::IsControllerThread());
+    uint64_t inputBlockId = 0;
+    ScrollableLayerGuid guid;
+    mAPZC->ReceiveInputEvent(*aEvent, &guid, &inputBlockId);
+  }
+}
+
 nsIDocument*
 nsBaseWidget::GetDocument() const
 {
@@ -3037,8 +3049,8 @@ nsBaseWidget::debug_DumpEvent(FILE *                aFileOut,
           (void *) aWidget,
           aWidgetName,
           aWindowID,
-          aGuiEvent->refPoint.x,
-          aGuiEvent->refPoint.y);
+          aGuiEvent->mRefPoint.x,
+          aGuiEvent->mRefPoint.y);
 }
 //////////////////////////////////////////////////////////////
 /* static */ void
