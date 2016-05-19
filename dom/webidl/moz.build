@@ -357,14 +357,12 @@ WEBIDL_FILES = [
     'PannerNode.webidl',
     'ParentNode.webidl',
     'Performance.webidl',
-    'PerformanceCompositeTiming.webidl',
     'PerformanceEntry.webidl',
     'PerformanceMark.webidl',
     'PerformanceMeasure.webidl',
     'PerformanceNavigation.webidl',
     'PerformanceObserver.webidl',
     'PerformanceObserverEntryList.webidl',
-    'PerformanceRenderTiming.webidl',
     'PerformanceResourceTiming.webidl',
     'PerformanceTiming.webidl',
     'PeriodicWave.webidl',
@@ -822,6 +820,7 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     'UDPMessageEvent.webidl',
     'UserProximityEvent.webidl',
     'USSDReceivedEvent.webidl',
+    'WebGLContextEvent.webidl',
 ]
 
 if CONFIG['MOZ_WEBRTC']:

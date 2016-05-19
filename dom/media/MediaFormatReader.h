@@ -62,7 +62,7 @@ public:
   // For Media Resource Management
   void ReleaseMediaResources() override;
 
-  nsresult ResetDecode() override;
+  nsresult ResetDecode(TargetQueues aQueues) override;
 
   RefPtr<ShutdownPromise> Shutdown() override;
 
@@ -174,7 +174,6 @@ private:
   void DrainComplete(TrackType aTrack);
 
   bool ShouldSkip(bool aSkipToNextKeyframe, media::TimeUnit aTimeThreshold);
-  void ResetDemuxers();
 
   size_t SizeOfQueue(TrackType aTrack);
 
@@ -322,7 +321,7 @@ private:
     uint64_t mNumSamplesOutputTotalSinceTelemetry;
     uint64_t mNumSamplesSkippedTotalSinceTelemetry;
 
-    // These get overriden in the templated concrete class.
+    // These get overridden in the templated concrete class.
     // Indicate if we have a pending promise for decoded frame.
     // Rejecting the promise will stop the reader from decoding ahead.
     virtual bool HasPromise() const = 0;
@@ -508,6 +507,10 @@ private:
 
   // Seeking objects.
   bool IsSeeking() const { return mPendingSeekTime.isSome(); }
+  bool IsVideoSeeking() const
+  {
+    return IsSeeking() && mOriginalSeekTarget.IsVideoOnly();
+  }
   void ScheduleSeek();
   void AttemptSeek();
   void OnSeekFailed(TrackType aTrack, DemuxerFailureReason aFailure);
@@ -528,8 +531,10 @@ private:
 
   void ReportDroppedFramesTelemetry();
 
+  // The SeekTarget that was last given to Seek()
+  SeekTarget mOriginalSeekTarget;
   // Temporary seek information while we wait for the data
-  Maybe<SeekTarget> mOriginalSeekTarget;
+  Maybe<media::TimeUnit> mFallbackSeekTime;
   Maybe<media::TimeUnit> mPendingSeekTime;
   MozPromiseHolder<SeekPromise> mSeekPromise;
 

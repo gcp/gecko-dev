@@ -47,7 +47,7 @@ builds:
   linux64:
     platforms:
       - Linux64
-    extra-builds:
+    extra-builds:  # see RIDEALONG_BUILDS in `mach taskgraph`
       - sm-plain
       - sm-arm-sim
       - sm-compacting
@@ -81,6 +81,12 @@ builds:
     types:
       debug:
         task: tasks/builds/haz_shell_linux.yml
+  linux64-pgo:
+    platforms:
+      - Linux64 PGO
+    types:
+      opt:
+        task: tasks/builds/opt_linux64_pgo.yml
   macosx64:
     platforms:
       - MacOSX64
@@ -393,7 +399,7 @@ tasks:
         - '**/.eslintignore'
         - '**/*eslintrc*'
         # The plugin implementing custom checks.
-        - 'testing/eslint-plugin-mozilla/**'
+        - 'testing/eslint/eslint-plugin-mozilla/**'
         # Other misc lint related files.
         - 'tools/lint/**'
   android-api-15-gradle-dependencies:

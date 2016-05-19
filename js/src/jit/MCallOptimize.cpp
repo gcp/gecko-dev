@@ -2516,7 +2516,8 @@ IonBuilder::inlineUnsafeSetReservedSlot(CallInfo& callInfo)
 
     callInfo.setImplicitlyUsedUnchecked();
 
-    MStoreFixedSlot* store = MStoreFixedSlot::New(alloc(), callInfo.getArg(0), slot, callInfo.getArg(2));
+    MStoreFixedSlot* store =
+        MStoreFixedSlot::NewBarriered(alloc(), callInfo.getArg(0), slot, callInfo.getArg(2));
     current->add(store);
     current->push(store);
 
@@ -3267,6 +3268,9 @@ IonBuilder::inlineSimd(CallInfo& callInfo, JSFunction* target, SimdType type)
       case SimdOperation::Fn_minNum:
         return inlineSimdBinary<MSimdBinaryArith>(callInfo, native, MSimdBinaryArith::Op_minNum,
                                                   type);
+      case SimdOperation::Fn_addSaturate:
+      case SimdOperation::Fn_subSaturate:
+        MOZ_CRASH("NYI");
 
         // Binary bitwise.
       case SimdOperation::Fn_and:

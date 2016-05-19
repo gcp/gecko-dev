@@ -64,20 +64,8 @@
             label="&openLinkCmdInContainerTab.label;"
             accesskey="&openLinkCmdInContainerTab.accesskey;"
             hidden="true">
-        <menupopup oncommand="gContextMenu.openLinkInTab(event);">
-          <menuitem label="&userContextPersonal.label;"
-                    usercontextid="1"
-                    accesskey="&userContextPersonal.accesskey;"/>
-          <menuitem label="&userContextWork.label;"
-                    usercontextid="2"
-                    accesskey="&userContextWork.accesskey;"/>
-          <menuitem label="&userContextBanking.label;"
-                    usercontextid="3"
-                    accesskey="&userContextBanking.accesskey;"/>
-          <menuitem label="&userContextShopping.label;"
-                    usercontextid="4"
-                    accesskey="&userContextShopping.accesskey;"/>
-        </menupopup>
+        <menupopup oncommand="gContextMenu.openLinkInTab(event);"
+                   onpopupshowing="return createUserContextMenu(event, false);" />
       </menu>
 
       <menuitem id="context-openlink"
@@ -130,7 +118,7 @@
                 label="&mediaUnmute.label;"
                 accesskey="&mediaUnmute.accesskey;"
                 oncommand="gContextMenu.mediaCommand('unmute');"/>
-      <menu id="context-media-playbackrate" label="&mediaPlaybackRate.label;" accesskey="&mediaPlaybackRate.accesskey;">
+      <menu id="context-media-playbackrate" label="&mediaPlaybackRate2.label;" accesskey="&mediaPlaybackRate2.accesskey;">
         <menupopup>
           <menuitem id="context-media-playbackrate-050x"
                     label="&mediaPlaybackRate050x2.label;"
@@ -165,6 +153,11 @@
                     oncommand="gContextMenu.mediaCommand('playbackRate', 2.0);"/>
         </menupopup>
       </menu>
+      <menuitem id="context-media-loop"
+                label="&mediaLoop.label;"
+                accesskey="&mediaLoop.accesskey;"
+                type="checkbox"
+                oncommand="gContextMenu.mediaCommand('loop');"/>
       <menuitem id="context-media-showcontrols"
                 label="&mediaShowControls.label;"
                 accesskey="&mediaShowControls.accesskey;"

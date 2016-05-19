@@ -303,7 +303,7 @@
 
           this.moveTabTo(aTab, this._numPinnedTabs - 1);
           aTab.removeAttribute("pinned");
-          aTab.style.MozMarginStart = "";
+          aTab.style.marginInlineStart = "";
           this.tabContainer._unlockTabSizing();
           this.tabContainer._positionPinnedTabs();
           this.tabContainer.adjustTabstrip();
@@ -5221,20 +5221,20 @@
             for (let i = numPinned - 1; i >= 0; i--) {
               let tab = this.childNodes[i];
               width += tab.getBoundingClientRect().width;
-              tab.style.MozMarginStart = - (width + scrollButtonWidth + paddingStart) + "px";
+              tab.style.marginInlineStart = - (width + scrollButtonWidth + paddingStart) + "px";
             }
 
-            this.style.MozPaddingStart = width + paddingStart + "px";
+            this.style.paddingInlineStart = width + paddingStart + "px";
 
           } else {
             this.removeAttribute("positionpinnedtabs");
 
             for (let i = 0; i < numPinned; i++) {
               let tab = this.childNodes[i];
-              tab.style.MozMarginStart = "";
+              tab.style.marginInlineStart = "";
             }
 
-            this.style.MozPaddingStart = "";
+            this.style.paddingInlineStart = "";
           }
 
           if (this._lastNumPinned != numPinned) {
@@ -5364,6 +5364,7 @@
           switch (aEvent.type) {
             case "load":
               this.updateVisibility();
+              TabsInTitlebar.init();
               break;
             case "resize":
               if (aEvent.target != window)
@@ -5987,7 +5988,7 @@
           newMargin *= -1;
 
         ind.style.transform = "translate(" + Math.round(newMargin) + "px)";
-        ind.style.MozMarginStart = (-ind.clientWidth) + "px";
+        ind.style.marginInlineStart = (-ind.clientWidth) + "px";
       ]]></handler>
 
       <handler event="drop"><![CDATA[
@@ -6596,6 +6597,15 @@
     <handlers>
       <handler event="popupshowing">
       <![CDATA[
+        if (event.target.getAttribute('id') == "alltabs_containersMenuTab") {
+          createUserContextMenu(event);
+          return;
+        }
+
+        let containersEnabled = Services.prefs.getBoolPref("privacy.userContext.enabled");
+        document.getElementById("alltabs-popup-separator-1").hidden = !containersEnabled;
+        document.getElementById("alltabs_containersTab").hidden = !containersEnabled;
+
         document.getElementById("alltabs_undoCloseTab").disabled =
           SessionStore.getClosedTabCount(window) == 0;
 
@@ -6616,6 +6626,10 @@
 
       <handler event="popuphidden">
       <![CDATA[
+        if (event.target.getAttribute('id') == "alltabs_containersMenuTab") {
+          return;
+        }
+
         // clear out the menu popup and remove the listeners
         for (let i = this.childNodes.length - 1; i > 0; i--) {
           let menuItem = this.childNodes[i];

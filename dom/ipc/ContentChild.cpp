@@ -43,6 +43,7 @@
 #include "mozilla/ipc/FileDescriptorUtils.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/ipc/ProcessChild.h"
+#include "mozilla/ipc/PSendStreamChild.h"
 #include "mozilla/ipc/TestShellChild.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/layers/APZChild.h"
@@ -109,6 +110,7 @@
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsContentPermissionHelper.h"
+#include "nsPrintingProxy.h"
 
 #include "IHistory.h"
 #include "nsNetUtil.h"
@@ -713,6 +715,11 @@ ContentChild::Init(MessageLoop* aIOLoop,
     NuwaAddConstructor(ResetTransports, nullptr);
   }
 #endif
+#ifdef NS_PRINTING
+  // Force the creation of the nsPrintingProxy so that it's IPC counterpart,
+  // PrintingParent, is always available for printing initiated from the parent.
+  RefPtr<nsPrintingProxy> printingProxy = nsPrintingProxy::GetInstance();
+#endif
 
   return true;
 }
@@ -932,13 +939,13 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
     renderFrame = nullptr;
   }
 
-  ShowInfo showInfo(EmptyString(), false, false, true, 0, 0);
+  ShowInfo showInfo(EmptyString(), false, false, true, false, 0, 0);
   auto* opener = nsPIDOMWindowOuter::From(aParent);
   nsIDocShell* openerShell;
   if (opener && (openerShell = opener->GetDocShell())) {
     nsCOMPtr<nsILoadContext> context = do_QueryInterface(openerShell);
     showInfo = ShowInfo(EmptyString(), false,
-                        context->UsePrivateBrowsing(), true,
+                        context->UsePrivateBrowsing(), true, false,
                         aTabOpener->mDPI, aTabOpener->mDefaultScale);
   }
 
@@ -1890,6 +1897,19 @@ ContentChild::AllocPPrintingChild()
 bool
 ContentChild::DeallocPPrintingChild(PPrintingChild* printing)
 {
+  return true;
+}
+
+PSendStreamChild*
+ContentChild::AllocPSendStreamChild()
+{
+  MOZ_CRASH("PSendStreamChild actors should be manually constructed!");
+}
+
+bool
+ContentChild::DeallocPSendStreamChild(PSendStreamChild* aActor)
+{
+  delete aActor;
   return true;
 }
 

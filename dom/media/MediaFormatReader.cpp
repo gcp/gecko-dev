@@ -168,13 +168,10 @@ MediaFormatReader::InitLayersBackendType()
   mLayersBackendType = layerManager->GetCompositorBackendType();
 }
 
-static bool sIsEMEEnabled = false;
-
 nsresult
 MediaFormatReader::Init()
 {
   MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
-  PDMFactory::Init();
 
   InitLayersBackendType();
 
@@ -182,12 +179,6 @@ MediaFormatReader::Init()
     new FlushableTaskQueue(GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER));
   mVideo.mTaskQueue =
     new FlushableTaskQueue(GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER));
-
-  static bool sSetupPrefCache = false;
-  if (!sSetupPrefCache) {
-    sSetupPrefCache = true;
-    Preferences::AddBoolVarCache(&sIsEMEEnabled, "media.eme.enabled", false);
-  }
 
   return NS_OK;
 }
@@ -276,6 +267,11 @@ MediaFormatReader::OnDemuxerInitDone(nsresult)
 
   UniquePtr<MetadataTags> tags(MakeUnique<MetadataTags>());
 
+  RefPtr<PDMFactory> platform;
+  if (!IsWaitingOnCDMResource()) {
+    platform = new PDMFactory();
+  }
+
   // To decode, we need valid video and a place to put it.
   bool videoActive = !!mDemuxer->GetNumberTracks(TrackInfo::kVideoTrack) &&
     GetImageContainer();
@@ -287,14 +283,26 @@ MediaFormatReader::OnDemuxerInitDone(nsresult)
       mMetadataPromise.Reject(ReadMetadataFailureReason::METADATA_ERROR, __func__);
       return;
     }
-    mInfo.mVideo = *mVideo.mTrackDemuxer->GetInfo()->GetAsVideoInfo();
-    UniquePtr<TrackInfo> info(mVideo.mTrackDemuxer->GetInfo());
-    for (const MetadataTag& tag : info->mTags) {
-      tags->Put(tag.mKey, tag.mValue);
+
+    UniquePtr<TrackInfo> videoInfo = mVideo.mTrackDemuxer->GetInfo();
+    videoActive = videoInfo && videoInfo->IsValid();
+    if (videoActive) {
+      if (platform && !platform->SupportsMimeType(videoInfo->mMimeType, nullptr)) {
+        // We have no decoder for this track. Error.
+        mMetadataPromise.Reject(ReadMetadataFailureReason::METADATA_ERROR, __func__);
+        return;
+      }
+      mInfo.mVideo = *videoInfo->GetAsVideoInfo();
+      for (const MetadataTag& tag : videoInfo->mTags) {
+        tags->Put(tag.mKey, tag.mValue);
+      }
+      mVideo.mCallback = new DecoderCallback(this, TrackInfo::kVideoTrack);
+      mVideo.mTimeRanges = mVideo.mTrackDemuxer->GetBuffered();
+      mTrackDemuxersMayBlock |= mVideo.mTrackDemuxer->GetSamplesMayBlock();
+    } else {
+      mVideo.mTrackDemuxer->BreakCycles();
+      mVideo.mTrackDemuxer = nullptr;
     }
-    mVideo.mCallback = new DecoderCallback(this, TrackInfo::kVideoTrack);
-    mVideo.mTimeRanges = mVideo.mTrackDemuxer->GetBuffered();
-    mTrackDemuxersMayBlock |= mVideo.mTrackDemuxer->GetSamplesMayBlock();
   }
 
   bool audioActive = !!mDemuxer->GetNumberTracks(TrackInfo::kAudioTrack);
@@ -304,9 +312,13 @@ MediaFormatReader::OnDemuxerInitDone(nsresult)
       mMetadataPromise.Reject(ReadMetadataFailureReason::METADATA_ERROR, __func__);
       return;
     }
+
     UniquePtr<TrackInfo> audioInfo = mAudio.mTrackDemuxer->GetInfo();
     // We actively ignore audio tracks that we know we can't play.
-    audioActive = audioInfo && audioInfo->IsValid();
+    audioActive = audioInfo && audioInfo->IsValid() &&
+                  (!platform ||
+                   platform->SupportsMimeType(audioInfo->mMimeType, nullptr));
+
     if (audioActive) {
       mInfo.mAudio = *audioInfo->GetAsAudioInfo();
       for (const MetadataTag& tag : audioInfo->mTags) {
@@ -597,11 +609,13 @@ RefPtr<MediaDecoderReader::MediaDataPromise>
 MediaFormatReader::RequestAudioData()
 {
   MOZ_ASSERT(OnTaskQueue());
-  MOZ_DIAGNOSTIC_ASSERT(mSeekPromise.IsEmpty(), "No sample requests allowed while seeking");
-  MOZ_DIAGNOSTIC_ASSERT(!mAudio.mSeekRequest.Exists() ||
-                        mAudio.mTimeThreshold.isSome());
   MOZ_DIAGNOSTIC_ASSERT(!mAudio.HasPromise(), "No duplicate sample requests");
-  MOZ_DIAGNOSTIC_ASSERT(!IsSeeking(), "called mid-seek");
+  MOZ_DIAGNOSTIC_ASSERT(IsVideoSeeking() || mSeekPromise.IsEmpty(),
+                        "No sample requests allowed while seeking");
+  MOZ_DIAGNOSTIC_ASSERT(IsVideoSeeking() ||
+                        !mAudio.mSeekRequest.Exists() ||
+                        mAudio.mTimeThreshold.isSome());
+  MOZ_DIAGNOSTIC_ASSERT(IsVideoSeeking() || !IsSeeking(), "called mid-seek");
   LOGV("");
 
   if (!HasAudio()) {
@@ -821,13 +835,17 @@ MediaFormatReader::UpdateReceivedNewData(TrackType aTrack)
     return false;
   }
 
-  if (!mSeekPromise.IsEmpty()) {
+  if (!mSeekPromise.IsEmpty() &&
+      (!IsVideoSeeking() || aTrack == TrackInfo::kVideoTrack)) {
     MOZ_ASSERT(!decoder.HasPromise());
-    MOZ_DIAGNOSTIC_ASSERT(!mAudio.mTimeThreshold && !mVideo.mTimeThreshold,
+    MOZ_DIAGNOSTIC_ASSERT((IsVideoSeeking() || !mAudio.mTimeThreshold) &&
+                          !mVideo.mTimeThreshold,
                           "InternalSeek must have been aborted when Seek was first called");
-    MOZ_DIAGNOSTIC_ASSERT(!mAudio.HasWaitingPromise() && !mVideo.HasWaitingPromise(),
+    MOZ_DIAGNOSTIC_ASSERT((IsVideoSeeking() || !mAudio.HasWaitingPromise()) &&
+                          !mVideo.HasWaitingPromise(),
                           "Waiting promises must have been rejected when Seek was first called");
-    if (mVideo.mSeekRequest.Exists() || mAudio.mSeekRequest.Exists()) {
+    if (mVideo.mSeekRequest.Exists() ||
+        (!IsVideoSeeking() && mAudio.mSeekRequest.Exists())) {
       // Already waiting for a seek to complete. Nothing more to do.
       return true;
     }
@@ -1283,7 +1301,7 @@ MediaFormatReader::WaitForData(MediaData::Type aType)
 }
 
 nsresult
-MediaFormatReader::ResetDecode()
+MediaFormatReader::ResetDecode(TargetQueues aQueues)
 {
   MOZ_ASSERT(OnTaskQueue());
   LOGV("");
@@ -1292,40 +1310,32 @@ MediaFormatReader::ResetDecode()
   mSkipRequest.DisconnectIfExists();
 
   // Do the same for any data wait promises.
-  mAudio.mWaitingPromise.RejectIfExists(WaitForDataRejectValue(MediaData::AUDIO_DATA, WaitForDataRejectValue::CANCELED), __func__);
+  if (aQueues == AUDIO_VIDEO) {
+    mAudio.mWaitingPromise.RejectIfExists(WaitForDataRejectValue(MediaData::AUDIO_DATA, WaitForDataRejectValue::CANCELED), __func__);
+  }
   mVideo.mWaitingPromise.RejectIfExists(WaitForDataRejectValue(MediaData::VIDEO_DATA, WaitForDataRejectValue::CANCELED), __func__);
 
   // Reset miscellaneous seeking state.
   mPendingSeekTime.reset();
 
-  ResetDemuxers();
-
   if (HasVideo()) {
+    mVideo.ResetDemuxer();
+    mVideo.ResetState();
     Reset(TrackInfo::kVideoTrack);
     if (mVideo.HasPromise()) {
       mVideo.RejectPromise(CANCELED, __func__);
     }
   }
-  if (HasAudio()) {
+
+  if (HasAudio() && aQueues == AUDIO_VIDEO) {
+    mAudio.ResetDemuxer();
+    mAudio.ResetState();
     Reset(TrackInfo::kAudioTrack);
     if (mAudio.HasPromise()) {
       mAudio.RejectPromise(CANCELED, __func__);
     }
   }
-  return MediaDecoderReader::ResetDecode();
-}
-
-void
-MediaFormatReader::ResetDemuxers()
-{
-  if (HasVideo()) {
-    mVideo.ResetDemuxer();
-    mVideo.ResetState();
-  }
-  if (HasAudio()) {
-    mAudio.ResetDemuxer();
-    mAudio.ResetState();
-  }
+  return MediaDecoderReader::ResetDecode(aQueues);
 }
 
 void
@@ -1487,10 +1497,10 @@ MediaFormatReader::Seek(SeekTarget aTarget, int64_t aUnused)
 
   MOZ_DIAGNOSTIC_ASSERT(mSeekPromise.IsEmpty());
   MOZ_DIAGNOSTIC_ASSERT(!mVideo.HasPromise());
-  MOZ_DIAGNOSTIC_ASSERT(!mAudio.HasPromise());
+  MOZ_DIAGNOSTIC_ASSERT(aTarget.IsVideoOnly() || !mAudio.HasPromise());
   MOZ_DIAGNOSTIC_ASSERT(mPendingSeekTime.isNothing());
   MOZ_DIAGNOSTIC_ASSERT(mVideo.mTimeThreshold.isNothing());
-  MOZ_DIAGNOSTIC_ASSERT(mAudio.mTimeThreshold.isNothing());
+  MOZ_DIAGNOSTIC_ASSERT(aTarget.IsVideoOnly() || mAudio.mTimeThreshold.isNothing());
 
   if (!mInfo.mMediaSeekable && !mInfo.mMediaSeekableOnlyInBufferedRanges) {
     LOG("Seek() END (Unseekable)");
@@ -1501,8 +1511,8 @@ MediaFormatReader::Seek(SeekTarget aTarget, int64_t aUnused)
     return SeekPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
   }
 
-  mOriginalSeekTarget = Some(aTarget);
-  mPendingSeekTime = Some(aTarget.GetTime());
+  mOriginalSeekTarget = aTarget;
+  mFallbackSeekTime = mPendingSeekTime = Some(aTarget.GetTime());
 
   RefPtr<SeekPromise> p = mSeekPromise.Ensure(__func__);
 
@@ -1531,7 +1541,20 @@ MediaFormatReader::AttemptSeek()
   if (mPendingSeekTime.isNothing()) {
     return;
   }
-  ResetDemuxers();
+
+  if (HasVideo()) {
+    mVideo.ResetDemuxer();
+    mVideo.ResetState();
+  }
+
+  // Don't reset the audio demuxer not state when seeking video only
+  // as it will cause the audio to seek back to the beginning
+  // resulting in out-of-sync audio from video.
+  if (HasAudio() && !mOriginalSeekTarget.IsVideoOnly()) {
+    mAudio.ResetDemuxer();
+    mAudio.ResetState();
+  }
+
   if (HasVideo()) {
     DoVideoSeek();
   } else if (HasAudio()) {
@@ -1554,8 +1577,8 @@ MediaFormatReader::OnSeekFailed(TrackType aTrack, DemuxerFailureReason aResult)
 
   if (aResult == DemuxerFailureReason::WAITING_FOR_DATA) {
     if (HasVideo() && aTrack == TrackType::kAudioTrack &&
-        mOriginalSeekTarget.isSome() &&
-        mPendingSeekTime.ref() != mOriginalSeekTarget.ref().GetTime()) {
+        mFallbackSeekTime.isSome() &&
+        mPendingSeekTime.ref() != mFallbackSeekTime.ref()) {
       // We have failed to seek audio where video seeked to earlier.
       // Attempt to seek instead to the closest point that we know we have in
       // order to limit A/V sync discrepency.
@@ -1571,11 +1594,11 @@ MediaFormatReader::OnSeekFailed(TrackType aTrack, DemuxerFailureReason aResult)
         }
       }
       if (nextSeekTime.isNothing() ||
-          nextSeekTime.ref() > mOriginalSeekTarget.ref().GetTime()) {
-        nextSeekTime = Some(mOriginalSeekTarget.ref().GetTime());
+          nextSeekTime.ref() > mFallbackSeekTime.ref()) {
+        nextSeekTime = Some(mFallbackSeekTime.ref());
         LOG("Unable to seek audio to video seek time. A/V sync may be broken");
       } else {
-        mOriginalSeekTarget.reset();
+        mFallbackSeekTime.reset();
       }
       mPendingSeekTime = nextSeekTime;
       DoAudioSeek();
@@ -1608,9 +1631,9 @@ MediaFormatReader::OnVideoSeekCompleted(media::TimeUnit aTime)
   LOGV("Video seeked to %lld", aTime.ToMicroseconds());
   mVideo.mSeekRequest.Complete();
 
-  if (HasAudio()) {
-    MOZ_ASSERT(mPendingSeekTime.isSome() && mOriginalSeekTarget.isSome());
-    if (mOriginalSeekTarget.ref().IsFast()) {
+  if (HasAudio() && !mOriginalSeekTarget.IsVideoOnly()) {
+    MOZ_ASSERT(mPendingSeekTime.isSome());
+    if (mOriginalSeekTarget.IsFast()) {
       // We are performing a fast seek. We need to seek audio to where the
       // video seeked to, to ensure proper A/V sync once playback resume.
       mPendingSeekTime = Some(aTime);

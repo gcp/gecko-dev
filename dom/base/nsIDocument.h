@@ -857,6 +857,13 @@ public:
                          mozilla::ErrorResult& aError);
   void RemoveAnonymousContent(mozilla::dom::AnonymousContent& aContent,
                               mozilla::ErrorResult& aError);
+  /**
+   * If aNode is a descendant of anonymous content inserted by
+   * InsertAnonymousContent, this method returns the root element of the
+   * inserted anonymous content (in other words, the clone of the aElement
+   * that was passed to InsertAnonymousContent).
+   */
+  Element* GetAnonRootIfInAnonymousContentContainer(nsINode* aNode) const;
   nsTArray<RefPtr<mozilla::dom::AnonymousContent>>& GetAnonymousContents() {
     return mAnonymousContents;
   }
@@ -2560,11 +2567,16 @@ public:
   // Not const because all the full-screen goop is not const
   virtual bool FullscreenEnabled() = 0;
   virtual Element* GetFullscreenElement() = 0;
-  bool MozFullScreen()
+  bool Fullscreen()
   {
     return !!GetFullscreenElement();
   }
   void ExitFullscreen();
+  bool FullscreenEnabledInternal() const { return mFullscreenEnabled; }
+  void SetFullscreenEnabled(bool aEnabled)
+  {
+    mFullscreenEnabled = aEnabled;
+  }
   Element* GetMozPointerLockElement();
   void MozExitPointerLock()
   {
@@ -3023,6 +3035,10 @@ protected:
 
   // Do we currently have an event posted to call FlushUserFontSet?
   bool mPostedFlushUserFontSet : 1;
+
+  // Whether fullscreen is enabled for this document. This corresponds
+  // to the "fullscreen enabled flag" in the HTML spec.
+  bool mFullscreenEnabled : 1;
 
   enum Type {
     eUnknown, // should never be used

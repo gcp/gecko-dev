@@ -521,6 +521,16 @@ private:
       rv.SuppressException();
       return false;
     }
+
+    WorkerGlobalScope* globalScope = aWorkerPrivate->GlobalScope();
+    if (NS_WARN_IF(!globalScope)) {
+      // We never got as far as calling GetOrCreateGlobalScope, or it failed.
+      // We have no way to enter a compartment, hence no sane way to report this
+      // error.  :(
+      rv.SuppressException();
+      return false;
+    }
+
     // Make sure to propagate exceptions from rv onto aCx, so that they will get
     // reported after we return.  We do this for all failures on rv, because now
     // we're using rv to track all the state we care about.
@@ -529,10 +539,8 @@ private:
     // set it up that way in our Run(), since we had not created the global at
     // that point yet.  So we need to enter the compartment of our global,
     // because setting a pending exception on aCx involves wrapping into its
-    // current compartment.  Luckily we have a global now (else how would we
-    // have a JS exception?) so we can just enter its compartment.
-    JSAutoCompartment ac(aCx,
-                         aWorkerPrivate->GlobalScope()->GetGlobalJSObject());
+    // current compartment.  Luckily we have a global now.
+    JSAutoCompartment ac(aCx, globalScope->GetGlobalJSObject());
     if (rv.MaybeSetPendingException(aCx)) {
       return false;
     }
@@ -656,6 +664,10 @@ class MessageEventRunnable final : public WorkerRunnable
   // This is only used for messages dispatched to a service worker.
   UniquePtr<ServiceWorkerClientInfo> mEventSource;
 
+  // This is only used to hold service workers alive while dispatching the
+  // message event.
+  nsMainThreadPtrHandle<nsISupports> mKeepAliveToken;
+
 public:
   MessageEventRunnable(WorkerPrivate* aWorkerPrivate,
                        TargetAndBusyBehavior aBehavior)
@@ -666,9 +678,11 @@ public:
   }
 
   void
-  SetMessageSource(UniquePtr<ServiceWorkerClientInfo>&& aSource)
+  SetServiceWorkerData(UniquePtr<ServiceWorkerClientInfo>&& aSource,
+                       const nsMainThreadPtrHandle<nsISupports>& aKeepAliveToken)
   {
     mEventSource = Move(aSource);
+    mKeepAliveToken = aKeepAliveToken;
   }
 
   bool
@@ -1836,6 +1850,12 @@ TimerThreadEventTarget::Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint
 }
 
 NS_IMETHODIMP
+TimerThreadEventTarget::DelayedDispatch(already_AddRefed<nsIRunnable>&&, uint32_t)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
 TimerThreadEventTarget::IsOnCurrentThread(bool* aIsOnCurrentThread)
 {
   MOZ_ASSERT(aIsOnCurrentThread);
@@ -2935,6 +2955,7 @@ WorkerPrivateParent<Derived>::PostMessageInternal(
                                             JS::Handle<JS::Value> aMessage,
                                             const Optional<Sequence<JS::Value>>& aTransferable,
                                             UniquePtr<ServiceWorkerClientInfo>&& aClientInfo,
+                                            const nsMainThreadPtrHandle<nsISupports>& aKeepAliveToken,
                                             ErrorResult& aRv)
 {
   AssertIsOnParentThread();
@@ -2996,7 +3017,7 @@ WorkerPrivateParent<Derived>::PostMessageInternal(
     return;
   }
 
-  runnable->SetMessageSource(Move(aClientInfo));
+  runnable->SetServiceWorkerData(Move(aClientInfo), aKeepAliveToken);
 
   if (!runnable->Dispatch()) {
     aRv.Throw(NS_ERROR_FAILURE);
@@ -3010,7 +3031,7 @@ WorkerPrivateParent<Derived>::PostMessage(
                              const Optional<Sequence<JS::Value>>& aTransferable,
                              ErrorResult& aRv)
 {
-  PostMessageInternal(aCx, aMessage, aTransferable, nullptr, aRv);
+  PostMessageInternal(aCx, aMessage, aTransferable, nullptr, nullptr, aRv);
 }
 
 template <class Derived>
@@ -3019,10 +3040,12 @@ WorkerPrivateParent<Derived>::PostMessageToServiceWorker(
                              JSContext* aCx, JS::Handle<JS::Value> aMessage,
                              const Optional<Sequence<JS::Value>>& aTransferable,
                              UniquePtr<ServiceWorkerClientInfo>&& aClientInfo,
+                             const nsMainThreadPtrHandle<nsISupports>& aKeepAliveToken,
                              ErrorResult& aRv)
 {
   AssertIsOnMainThread();
-  PostMessageInternal(aCx, aMessage, aTransferable, Move(aClientInfo), aRv);
+  PostMessageInternal(aCx, aMessage, aTransferable, Move(aClientInfo),
+                      aKeepAliveToken, aRv);
 }
 
 template <class Derived>
@@ -4527,7 +4550,15 @@ WorkerPrivate::DoRunLoop(JSContext* aCx)
         WaitForWorkerEvents();
       }
 
-      ProcessAllControlRunnablesLocked();
+      auto result = ProcessAllControlRunnablesLocked();
+      if (result != ProcessAllControlRunnablesResult::Nothing) {
+        // NB: There's no JS on the stack here, so Abort vs MayContinue is
+        // irrelevant
+
+        // The state of the world may have changed, recheck it.
+        normalRunnablesPending = NS_HasPendingEvents(mThread);
+        // The debugger queue doesn't get cleared, so we can ignore that.
+      }
 
       currentStatus = mStatus;
     }
@@ -4653,7 +4684,9 @@ WorkerPrivate::OnProcessNextEvent()
   // runnables here.
   if (recursionDepth > 1 &&
       mSyncLoopStack.Length() < recursionDepth - 1) {
-    ProcessAllControlRunnables();
+    Unused << ProcessAllControlRunnables();
+    // There's no running JS, and no state to revalidate, so we can ignore the
+    // return value.
   }
 }
 
@@ -4791,7 +4824,10 @@ WorkerPrivate::InterruptCallback(JSContext* aCx)
 
   for (;;) {
     // Run all control events now.
-    mayContinue = ProcessAllControlRunnables();
+    auto result = ProcessAllControlRunnables();
+    if (result == ProcessAllControlRunnablesResult::Abort) {
+      mayContinue = false;
+    }
 
     bool mayFreeze = mFrozen;
     if (mayFreeze) {
@@ -5027,13 +5063,13 @@ WorkerPrivate::WaitForWorkerEvents(PRIntervalTime aInterval)
   mBlockedForMemoryReporter = false;
 }
 
-bool
+WorkerPrivate::ProcessAllControlRunnablesResult
 WorkerPrivate::ProcessAllControlRunnablesLocked()
 {
   AssertIsOnWorkerThread();
   mMutex.AssertCurrentThreadOwns();
 
-  bool result = true;
+  auto result = ProcessAllControlRunnablesResult::Nothing;
 
   for (;;) {
     // Block here if the memory reporter is trying to run.
@@ -5068,9 +5104,13 @@ WorkerPrivate::ProcessAllControlRunnablesLocked()
 
     MOZ_ASSERT(event);
     if (NS_FAILED(static_cast<nsIRunnable*>(event)->Run())) {
-      result = false;
+      result = ProcessAllControlRunnablesResult::Abort;
     }
 
+    if (result == ProcessAllControlRunnablesResult::Nothing) {
+      // We ran at least one thing.
+      result = ProcessAllControlRunnablesResult::MayContinue;
+    }
     event->Release();
   }
 
@@ -5406,11 +5446,25 @@ WorkerPrivate::RunCurrentSyncLoop()
           WaitForWorkerEvents();
         }
 
-        ProcessAllControlRunnablesLocked();
+        auto result = ProcessAllControlRunnablesLocked();
+        if (result != ProcessAllControlRunnablesResult::Nothing) {
+          // XXXkhuey how should we handle Abort here? See Bug 1003730.
 
-        // NB: If we processed a NotifyRunnable, we might have run non-control
-        // runnables, one of which may have shut down the sync loop.
-        if (normalRunnablesPending || loopInfo->mCompleted) {
+          // The state of the world may have changed. Recheck it.
+          normalRunnablesPending = NS_HasPendingEvents(mThread);
+
+          // NB: If we processed a NotifyRunnable, we might have run
+          // non-control runnables, one of which may have shut down the
+          // sync loop.
+          if (loopInfo->mCompleted) {
+            break;
+          }
+        }
+
+        // If we *didn't* run any control runnables, this should be unchanged.
+        MOZ_ASSERT(!loopInfo->mCompleted);
+
+        if (normalRunnablesPending) {
           break;
         }
       }
@@ -5639,6 +5693,8 @@ WorkerPrivate::EnterDebuggerEventLoop()
       }
 
       ProcessAllControlRunnablesLocked();
+
+      // XXXkhuey should we abort JS on the stack here if we got Abort above?
     }
 
     if (debuggerRunnablesPending) {
@@ -6730,6 +6786,14 @@ EventTarget::Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlags
   }
 
   return NS_OK;
+}
+
+template <class Derived>
+NS_IMETHODIMP
+WorkerPrivateParent<Derived>::
+EventTarget::DelayedDispatch(already_AddRefed<nsIRunnable>&&, uint32_t)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 template <class Derived>

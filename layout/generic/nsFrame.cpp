@@ -92,6 +92,7 @@
 
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/EffectCompositor.h"
+#include "mozilla/EffectSet.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
@@ -700,7 +701,7 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot)
     }
   }
 
-  if (HasCSSAnimations() || HasCSSTransitions()) {
+  if (EffectSet::GetEffectSet(this)) {
     // If no new frame for this element is created by the end of the
     // restyling process, stop animations and transitions for this frame
     if (presContext->RestyleManager()->IsGecko()) {
@@ -1502,7 +1503,7 @@ nsIFrame::UpdateVisibilitySynchronously()
   }
 
   if (presShell->AssumeAllFramesVisible()) {
-    presShell->MarkFrameVisibleInDisplayPort(this);
+    presShell->MarkFrameVisible(this, VisibilityCounter::IN_DISPLAYPORT);
     return;
   }
 
@@ -1543,7 +1544,7 @@ nsIFrame::UpdateVisibilitySynchronously()
   }
 
   if (visible) {
-    presShell->MarkFrameVisibleInDisplayPort(this);
+    presShell->MarkFrameVisible(this, VisibilityCounter::IN_DISPLAYPORT);
   } else {
     presShell->MarkFrameNonvisible(this);
   }
@@ -1600,7 +1601,7 @@ nsIFrame::DisableVisibilityTracking()
   }
 
   // We were visible, so send an OnVisibilityChange() notification.
-  OnVisibilityChange(Visibility::NONVISIBLE);
+  OnVisibilityChange(previousVisibility, Visibility::NONVISIBLE);
 }
 
 void
@@ -1636,7 +1637,7 @@ nsIFrame::DecVisibilityCount(VisibilityCounter aCounter,
   }
 
   // Our visibility just changed, so send an OnVisibilityChange() notification.
-  OnVisibilityChange(newVisibility, aNonvisibleAction);
+  OnVisibilityChange(previousVisibility, newVisibility, aNonvisibleAction);
 }
 
 void
@@ -1667,16 +1668,21 @@ nsIFrame::IncVisibilityCount(VisibilityCounter aCounter)
   }
 
   // Our visibility just changed, so send an OnVisibilityChange() notification.
-  OnVisibilityChange(newVisibility);
+  OnVisibilityChange(previousVisibility, newVisibility);
 }
 
 void
-nsIFrame::OnVisibilityChange(Visibility aNewVisibility,
+nsIFrame::OnVisibilityChange(Visibility aOldVisibility,
+                             Visibility aNewVisibility,
                              Maybe<OnNonvisible> aNonvisibleAction
                                /* = Nothing() */)
 {
   // XXX(seth): In bug 1218990 we'll implement visibility tracking for CSS
   // images here.
+  MOZ_ASSERT(aOldVisibility != Visibility::UNTRACKED,
+             "Should've started at Visibility::NONVISIBLE");
+  MOZ_ASSERT(aNewVisibility != Visibility::UNTRACKED,
+             "Shouldn't notify for Visibility::UNTRACKED");
 }
 
 static nsIFrame*
@@ -2505,7 +2511,8 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     buildingDisplayList.SetReferenceFrameAndCurrentOffset(outerReferenceFrame,
       GetOffsetToCrossDoc(outerReferenceFrame));
 
-    if (!aBuilder->IsForGenerateGlyphPath()) {
+    if (!aBuilder->IsForGenerateGlyphMask() &&
+        !aBuilder->IsForPaintingSelectionBG()) {
       nsDisplayTransform *transformItem =
         new (aBuilder) nsDisplayTransform(aBuilder, this, &resultList, dirtyRect);
       resultList.AppendNewToTop(transformItem);
@@ -2599,7 +2606,8 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   if (aBuilder->IsBackgroundOnly())
     return;
 
-  if (aBuilder->IsForGenerateGlyphPath()) {
+  if (aBuilder->IsForGenerateGlyphMask() ||
+      aBuilder->IsForPaintingSelectionBG()) {
     if (nsGkAtoms::textFrame != aChild->GetType() && aChild->IsLeaf()) {
       return;
     }
@@ -2720,7 +2728,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   // within the displayport.
   if (aBuilder->IsPaintingToWindow() && child->TrackingVisibility()) {
     nsIPresShell* shell = child->PresContext()->PresShell();
-    shell->MarkFrameVisibleInDisplayPort(child);
+    shell->MarkFrameVisible(child, VisibilityCounter::IN_DISPLAYPORT);
   }
 
   // Child is composited if it's transformed, partially transparent, or has
@@ -3263,7 +3271,7 @@ nsFrame::HandlePress(nsPresContext* aPresContext,
 #endif
 
   RefPtr<nsFrameSelection> fc = const_cast<nsFrameSelection*>(frameselection);
-  if (mouseEvent->clickCount > 1) {
+  if (mouseEvent->mClickCount > 1) {
     // These methods aren't const but can't actually delete anything,
     // so no need for nsWeakFrame.
     fc->SetDragState(true);
@@ -3462,16 +3470,16 @@ nsFrame::HandleMultiplePress(nsPresContext* aPresContext,
     return NS_OK;
   }
 
-  if (mouseEvent->clickCount == 4) {
+  if (mouseEvent->mClickCount == 4) {
     beginAmount = endAmount = eSelectParagraph;
-  } else if (mouseEvent->clickCount == 3) {
+  } else if (mouseEvent->mClickCount == 3) {
     if (Preferences::GetBool("browser.triple_click_selects_paragraph")) {
       beginAmount = endAmount = eSelectParagraph;
     } else {
       beginAmount = eSelectBeginLine;
       endAmount = eSelectEndLine;
     }
-  } else if (mouseEvent->clickCount == 2) {
+  } else if (mouseEvent->mClickCount == 2) {
     // We only want inline frames; PeekBackwardAndForward dislikes blocks
     beginAmount = endAmount = eSelectWord;
   } else {
@@ -4718,15 +4726,35 @@ nsFrame::ComputeSize(nsRenderingContext *aRenderingContext,
   result.ISize(aWM) = std::max(minISize, result.ISize(aWM));
 
   // Compute block-axis size
-  // (but not if we're auto-height or if we recieved the "eUseAutoHeight"
-  // flag -- then, we'll just stick with the height that we already calculated
+  // (but not if we have auto bsize or if we recieved the "eUseAutoBSize"
+  // flag -- then, we'll just stick with the bsize that we already calculated
   // in the initial ComputeAutoSize() call.)
-  if (!nsLayoutUtils::IsAutoBSize(*blockStyleCoord, aCBSize.BSize(aWM)) &&
-      !(aFlags & nsIFrame::eUseAutoHeight)) {
-    result.BSize(aWM) =
-      nsLayoutUtils::ComputeBSizeValue(aCBSize.BSize(aWM),
-                                       boxSizingAdjust.BSize(aWM),
-                                       *blockStyleCoord);
+  if (!(aFlags & nsIFrame::eUseAutoBSize)) {
+    if (!nsLayoutUtils::IsAutoBSize(*blockStyleCoord, aCBSize.BSize(aWM))) {
+      result.BSize(aWM) =
+        nsLayoutUtils::ComputeBSizeValue(aCBSize.BSize(aWM),
+                                         boxSizingAdjust.BSize(aWM),
+                                         *blockStyleCoord);
+    } else if (MOZ_UNLIKELY(isGridItem) &&
+               blockStyleCoord->GetUnit() == eStyleUnit_Auto &&
+               !IS_TRUE_OVERFLOW_CONTAINER(this)) {
+      // 'auto' block-size for grid-level box - apply 'stretch' as needed:
+      auto cbSize = aCBSize.BSize(aWM);
+      if (cbSize != NS_AUTOHEIGHT &&
+          !StyleMargin()->HasBlockAxisAuto(aWM)) {
+        auto blockAxisAlignment =
+          !aWM.IsOrthogonalTo(GetParent()->GetWritingMode()) ?
+            StylePosition()->ComputedAlignSelf(StyleContext()->GetParent()) :
+            StylePosition()->ComputedJustifySelf(StyleContext()->GetParent());
+        if (blockAxisAlignment == NS_STYLE_ALIGN_NORMAL ||
+            blockAxisAlignment == NS_STYLE_ALIGN_STRETCH) {
+          result.BSize(aWM) = std::max(nscoord(0), cbSize -
+                                                   aPadding.BSize(aWM) -
+                                                   aBorder.BSize(aWM) -
+                                                   aMargin.BSize(aWM));
+        }
+      }
+    }
   }
 
   const nsStyleCoord& maxBSizeCoord = stylePos->MaxBSize(aWM);

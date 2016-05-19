@@ -274,6 +274,12 @@ static_assert(JS_ARRAY_LENGTH(slotsToThingKind) == SLOTS_TO_THING_KIND_LIMIT,
 #define CHECK_THING_SIZE(...) { __VA_ARGS__ }; /* Define the array. */         \
     MOZ_FOR_EACH(CHECK_THING_SIZE_INNER, (), (__VA_ARGS__ 0x20))
 
+#define CHECK_ZEAL(name, value)                                                \
+    static_assert(ZealMode::Limit >= ZealMode::name,                           \
+                  "ZealMode::Limit shouldn't be smaller than " #name);
+JS_FOR_EACH_ZEAL_MODE(CHECK_ZEAL)
+#undef CHECK_ZEAL
+
 const uint32_t Arena::ThingSizes[] = CHECK_THING_SIZE(
     sizeof(JSFunction),         /* AllocKind::FUNCTION            */
     sizeof(FunctionExtended),   /* AllocKind::FUNCTION_EXTENDED   */
@@ -1190,25 +1196,26 @@ GCRuntime::getZealBits(uint32_t* zealBits, uint32_t* frequency, uint32_t* schedu
 
 const char* gc::ZealModeHelpText =
     "  Specifies how zealous the garbage collector should be. Some of these modes can\n"
-    "  be set simultaneously, e.g. in the shell, gczeal(2); gczeal(4); will activate\n"
-    "  both modes 2 and 4.\n"
+    "  be set simultaneously, by passing multiple level options, e.g. \"2;4\" will activate\n"
+    "  both modes 2 and 4. Modes can be specified by name or number.\n"
     "  \n"
     "  Values:\n"
-    "    0: Normal amount of collection (resets all modes)\n"
-    "    1: Collect when roots are added or removed\n"
-    "    2: Collect when every N allocations (default: 100)\n"
-    "    3: Collect when the window paints (browser only)\n"
-    "    4: Verify pre write barriers between instructions\n"
-    "    5: Verify pre write barriers between paints\n"
-    "    6: Verify stack rooting\n"
-    "    7: Collect the nursery every N nursery allocations\n"
-    "    8: Incremental GC in two slices: 1) mark roots 2) finish collection\n"
-    "    9: Incremental GC in two slices: 1) mark all 2) new marking and finish\n"
-    "   10: Incremental GC in multiple slices\n"
-    "   11: Verify incremental marking\n"
-    "   12: Always use the individual element post-write barrier, regardless of elements size\n"
-    "   13: Check internal hashtables on minor GC\n"
-    "   14: Perform a shrinking collection every N allocations\n";
+    "    0: (None) Normal amount of collection (resets all modes)\n"
+    "    1: (Poke) Collect when roots are added or removed\n"
+    "    2: (Alloc) Collect when every N allocations (default: 100)\n"
+    "    3: (FrameGC) Collect when the window paints (browser only)\n"
+    "    4: (VerifierPre) Verify pre write barriers between instructions\n"
+    "    5: (FrameVerifierPre) Verify pre write barriers between paints\n"
+    "    6: (StackRooting) Verify stack rooting\n"
+    "    7: (GenerationalGC) Collect the nursery every N nursery allocations\n"
+    "    8: (IncrementalRootsThenFinish) Incremental GC in two slices: 1) mark roots 2) finish collection\n"
+    "    9: (IncrementalMarkAllThenFinish) Incremental GC in two slices: 1) mark all 2) new marking and finish\n"
+    "   10: (IncrementalMultipleSlices) Incremental GC in multiple slices\n"
+    "   11: (IncrementalMarkingValidator) Verify incremental marking\n"
+    "   12: (ElementsBarrier) Always use the individual element post-write barrier, regardless of elements size\n"
+    "   13: (CheckHashTablesOnMinorGC) Check internal hashtables on minor GC\n"
+    "   14: (Compact) Perform a shrinking collection every N allocations\n"
+    "   15: (CheckHeapOnMovingGC) Walk the heap to check all pointers have been updated\n";
 
 void
 GCRuntime::setZeal(uint8_t zeal, uint32_t frequency)
@@ -1255,26 +1262,63 @@ GCRuntime::setNextScheduled(uint32_t count)
 bool
 GCRuntime::parseAndSetZeal(const char* str)
 {
-    int zeal = -1;
     int frequency = -1;
+    bool foundFrequency = false;
+    mozilla::Vector<int> zeals;
 
-    if (isdigit(str[0])) {
-        zeal = atoi(str);
+    static const struct {
+        const char* const zealMode;
+        size_t length;
+        uint32_t zeal;
+    } zealModes[] = {
+#define ZEAL_MODE(name, value) {#name, sizeof(#name) - 1, value},
+        JS_FOR_EACH_ZEAL_MODE(ZEAL_MODE)
+#undef ZEAL_MODE
+        {"None", 4, 0}
+    };
 
-        const char* p = strchr(str, ',');
-        if (!p)
-            frequency = JS_DEFAULT_ZEAL_FREQ;
-        else
-            frequency = atoi(p + 1);
-    }
+    do {
+        int zeal = -1;
 
-    if (zeal < 0 || zeal > int(ZealMode::Limit) || frequency <= 0) {
-        fprintf(stderr, "Format: JS_GC_ZEAL=level[,N]\n");
-        fputs(ZealModeHelpText, stderr);
-        return false;
-    }
+        const char* p = nullptr;
+        if (isdigit(str[0])) {
+            zeal = atoi(str);
 
-    setZeal(zeal, frequency);
+            size_t offset = strspn(str, "0123456789");
+            p = str + offset;
+        } else {
+            for (auto z : zealModes) {
+                if (!strncmp(str, z.zealMode, z.length)) {
+                    zeal = z.zeal;
+                    p = str + z.length;
+                    break;
+                }
+            }
+        }
+        if (p) {
+            if (!*p || *p == ';') {
+                frequency = JS_DEFAULT_ZEAL_FREQ;
+            } else if (*p == ',') {
+                frequency = atoi(p + 1);
+                foundFrequency = true;
+            }
+        }
+
+        if (zeal < 0 || zeal > int(ZealMode::Limit) || frequency <= 0) {
+            fprintf(stderr, "Format: JS_GC_ZEAL=level(;level)*[,N]\n");
+            fputs(ZealModeHelpText, stderr);
+            return false;
+        }
+
+        if (!zeals.emplaceBack(zeal)) {
+            return false;
+        }
+    } while (!foundFrequency &&
+             (str = strchr(str, ';')) != nullptr &&
+             str++);
+
+    for (auto z : zeals)
+        setZeal(z, frequency);
     return true;
 }
 
@@ -2468,7 +2512,6 @@ GCRuntime::sweepZoneAfterCompacting(Zone* zone)
         c->sweepRegExps();
         c->sweepSavedStacks();
         c->sweepGlobalObject(fop);
-        c->sweepObjectPendingMetadata();
         c->sweepSelfHostingScriptSource();
         c->sweepDebugScopes();
         c->sweepJitCompartment(fop);
@@ -3340,7 +3383,7 @@ GCRuntime::triggerZoneGC(Zone* zone, JS::gcreason::Reason reason)
 
 #ifdef JS_GC_ZEAL
     if (hasZealMode(ZealMode::Alloc)) {
-        triggerGC(reason);
+        MOZ_RELEASE_ASSERT(triggerGC(reason));
         return true;
     }
 #endif
@@ -3353,7 +3396,7 @@ GCRuntime::triggerZoneGC(Zone* zone, JS::gcreason::Reason reason)
             fullGCForAtomsRequested_ = true;
             return false;
         }
-        triggerGC(reason);
+        MOZ_RELEASE_ASSERT(triggerGC(reason));
         return true;
     }
 
@@ -3889,7 +3932,14 @@ GCRuntime::sweepZones(FreeOp* fop, bool destroyingRuntime)
                                     !zone->hasMarkedCompartments();
             if (zoneIsDead || destroyingRuntime)
             {
+                // We have just finished sweeping, so we should have freed any
+                // empty arenas back to their Chunk for future allocation.
                 zone->arenas.checkEmptyFreeLists();
+
+                // We are about to delete the Zone; this will leave the Zone*
+                // in the arena header dangling if there are any arenas
+                // remaining at this point.
+                zone->arenas.checkEmptyArenaLists();
 
                 if (callback)
                     callback(zone);
@@ -3904,6 +3954,37 @@ GCRuntime::sweepZones(FreeOp* fop, bool destroyingRuntime)
         *write++ = zone;
     }
     zones.shrinkTo(write - zones.begin());
+}
+
+#ifdef DEBUG
+static const char*
+AllocKindToAscii(AllocKind kind)
+{
+    switch(kind) {
+#define MAKE_CASE(name, _) case AllocKind:: name: return #name;
+      FOR_EACH_ALLOCKIND(MAKE_CASE)
+#undef MAKE_CASE
+      case AllocKind::LIMIT: MOZ_FALLTHROUGH;
+      default: MOZ_CRASH("Unknown AllocKind in AllocKindToAscii");
+    }
+}
+#endif // DEBUG
+
+void
+ArenaLists::checkEmptyArenaList(AllocKind kind)
+{
+#ifdef DEBUG
+    if (!arenaLists[kind].isEmpty()) {
+        for (Arena* current = arenaLists[kind].head(); current; current = current->next) {
+            for (ArenaCellIterUnderFinalize i(current); !i.done(); i.next()) {
+                Cell* t = i.get<Cell>();
+                MOZ_ASSERT(t->asTenured().isMarked(), "unmarked cells should have been finalized");
+                fprintf(stderr, "ERROR: GC found live Cell %p of kind %s at shutdown\n",
+                        t, AllocKindToAscii(kind));
+            }
+        }
+    }
+#endif // DEBUG
 }
 
 void
@@ -4280,8 +4361,8 @@ GCRuntime::markWeakReferences(gcstats::Phase phase)
     marker.enterWeakMarkingMode();
 
     // TODO bug 1167452: Make weak marking incremental
-    SliceBudget budget = SliceBudget::unlimited();
-    marker.drainMarkStack(budget);
+    auto unlimited = SliceBudget::unlimited();
+    MOZ_RELEASE_ASSERT(marker.drainMarkStack(unlimited));
 
     for (;;) {
         bool markedAny = false;
@@ -4300,7 +4381,7 @@ GCRuntime::markWeakReferences(gcstats::Phase phase)
             break;
 
         auto unlimited = SliceBudget::unlimited();
-        marker.drainMarkStack(unlimited);
+        MOZ_RELEASE_ASSERT(marker.drainMarkStack(unlimited));
     }
     MOZ_ASSERT(marker.isDrained());
 
@@ -4327,7 +4408,7 @@ GCRuntime::markGrayReferences(gcstats::Phase phase)
             (*op)(&marker, grayRootTracer.data);
     }
     auto unlimited = SliceBudget::unlimited();
-    marker.drainMarkStack(unlimited);
+    MOZ_RELEASE_ASSERT(marker.drainMarkStack(unlimited));
 }
 
 void
@@ -4488,9 +4569,9 @@ js::gc::MarkingValidator::nonIncrementalMark()
 
         gc->markRuntime(gcmarker, GCRuntime::MarkRuntime);
 
-        auto unlimited = SliceBudget::unlimited();
         gc->incrementalState = MARK;
-        gc->marker.drainMarkStack(unlimited);
+        auto unlimited = SliceBudget::unlimited();
+        MOZ_RELEASE_ASSERT(gc->marker.drainMarkStack(unlimited));
     }
 
     gc->incrementalState = SWEEP;
@@ -4951,7 +5032,7 @@ MarkIncomingCrossCompartmentPointers(JSRuntime* rt, const uint32_t color)
     }
 
     auto unlimited = SliceBudget::unlimited();
-    rt->gc.marker.drainMarkStack(unlimited);
+    MOZ_RELEASE_ASSERT(rt->gc.marker.drainMarkStack(unlimited));
 }
 
 static bool
@@ -5294,7 +5375,6 @@ GCRuntime::beginSweepingZoneGroup()
 
             for (GCCompartmentGroupIter c(rt); !c.done(); c.next()) {
                 c->sweepGlobalObject(&fop);
-                c->sweepObjectPendingMetadata();
                 c->sweepDebugScopes();
                 c->sweepJitCompartment(&fop);
                 c->sweepTemplateObjects();
@@ -5813,6 +5893,10 @@ GCRuntime::compactPhase(JS::gcreason::Reason reason, SliceBudget& sliceBudget)
 
 #ifdef DEBUG
     CheckHashTablesAfterMovingGC(rt);
+#endif
+#ifdef JS_GC_ZEAL
+    if (rt->hasZealMode(ZealMode::CheckHeapOnMovingGC))
+        CheckHeapAfterMovingGC(rt);
 #endif
 
     return zonesToMaybeCompact.isEmpty() ? Finished : NotFinished;
@@ -6778,11 +6862,18 @@ GCRuntime::onOutOfMallocMemory(const AutoLockGC& lock)
 void
 GCRuntime::minorGCImpl(JS::gcreason::Reason reason, Nursery::ObjectGroupList* pretenureGroups)
 {
+    if (rt->mainThread.suppressGC)
+        return;
+
     minorGCTriggerReason = JS::gcreason::NO_REASON;
     TraceLoggerThread* logger = TraceLoggerForMainThread(rt);
     AutoTraceLog logMinorGC(logger, TraceLogger_MinorGC);
     nursery.collect(rt, reason, pretenureGroups);
-    MOZ_ASSERT_IF(!rt->mainThread.suppressGC, nursery.isEmpty());
+    MOZ_ASSERT(nursery.isEmpty());
+
+    AutoLockGC lock(rt);
+    for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next())
+        maybeAllocTriggerZoneGC(zone, lock);
 }
 
 // Alternate to the runtime-taking form that allows marking object groups as

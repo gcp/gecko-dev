@@ -2502,6 +2502,10 @@ nsDocShell::GetFullscreenAllowed(bool* aFullscreenAllowed)
   // Assume false until we determine otherwise...
   *aFullscreenAllowed = false;
 
+  // If it is sandboxed, fullscreen is not allowed.
+  if (mSandboxFlags & SANDBOXED_FULLSCREEN) {
+    return NS_OK;
+  }
   nsCOMPtr<nsPIDOMWindowOuter> win = GetWindow();
   if (!win) {
     return NS_OK;
@@ -2519,6 +2523,10 @@ nsDocShell::GetFullscreenAllowed(bool* aFullscreenAllowed)
                                nsGkAtoms::allowfullscreen) &&
         !frameElement->HasAttr(kNameSpaceID_None,
                                nsGkAtoms::mozallowfullscreen)) {
+      return NS_OK;
+    }
+    nsIDocument* doc = frameElement->GetUncomposedDoc();
+    if (!doc || !doc->FullscreenEnabledInternal()) {
       return NS_OK;
     }
   }
@@ -2956,7 +2964,7 @@ nsDocShell::GetSessionStorageForPrincipal(nsIPrincipal* aPrincipal,
     return NS_ERROR_UNEXPECTED;
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> domWin = do_GetInterface(GetAsSupports(this));
+  nsCOMPtr<nsPIDOMWindowOuter> domWin = GetWindow();
 
   if (aCreate) {
     return manager->CreateStorage(domWin->GetCurrentInnerWindow(), aPrincipal,
@@ -7353,6 +7361,19 @@ nsDocShell::OnRedirectStateChange(nsIChannel* aOldChannel,
 {
   NS_ASSERTION(aStateFlags & STATE_REDIRECTING,
                "Calling OnRedirectStateChange when there is no redirect");
+
+  // If mixed content is allowed for the old channel, we forward
+  // the permission to the new channel if it has the same origin
+  // as the old one.
+  if (mMixedContentChannel && mMixedContentChannel == aOldChannel) {
+    nsresult rv = nsContentUtils::CheckSameOrigin(mMixedContentChannel, aNewChannel);
+    if (NS_SUCCEEDED(rv)) {
+      SetMixedContentChannel(aNewChannel); // Same origin: forward permission.
+    } else {
+      SetMixedContentChannel(nullptr); // Different origin: clear mMixedContentChannel.
+    }
+  }
+
   if (!(aStateFlags & STATE_IS_DOCUMENT)) {
     return;  // not a toplevel document
   }
@@ -9960,7 +9981,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
   // possible frameloader initialization before loading a new page.
   nsCOMPtr<nsIDocShellTreeItem> parent = GetParentDocshell();
   if (parent) {
-    nsCOMPtr<nsIDocument> doc = do_GetInterface(parent);
+    nsCOMPtr<nsIDocument> doc = parent->GetDocument();
     if (doc) {
       doc->TryCancelFrameLoaderInitialization(this);
     }
@@ -14079,6 +14100,23 @@ nsDocShell::GetOriginAttributes(JSContext* aCx,
 void
 nsDocShell::SetOriginAttributes(const DocShellOriginAttributes& aAttrs)
 {
+  MOZ_ASSERT(mChildList.Length() == 0);
+
+  // TODO: Bug 1273058 - mContentViewer should be null when setting origin
+  // attributes.
+  if (mContentViewer) {
+    nsIDocument* doc = mContentViewer->GetDocument();
+    if (doc) {
+      nsIURI* uri = doc->GetDocumentURI();
+      MOZ_ASSERT(uri);
+      if (uri) {
+        nsAutoCString uriSpec;
+        uri->GetSpec(uriSpec);
+        MOZ_ASSERT(uriSpec.EqualsLiteral("about:blank"));
+      }
+    }
+  }
+
   mOriginAttributes = aAttrs;
 }
 
@@ -14434,4 +14472,11 @@ nsDocShell::GetTabChild()
   nsCOMPtr<nsIDocShellTreeOwner> owner(mTreeOwner);
   nsCOMPtr<nsITabChild> tc = do_GetInterface(owner);
   return tc.forget();
+}
+
+nsICommandManager*
+nsDocShell::GetCommandManager()
+{
+  NS_ENSURE_SUCCESS(EnsureCommandHandler(), nullptr);
+  return mCommandManager;
 }

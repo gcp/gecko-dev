@@ -15,6 +15,8 @@ import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.distribution.DistributionStoreCallback;
 import org.mozilla.gecko.search.SearchEngineManager;
+import org.mozilla.gecko.sync.ExtendedJSONObject;
+import org.mozilla.gecko.telemetry.measurements.SearchCountMeasurements;
 import org.mozilla.gecko.telemetry.pingbuilders.TelemetryCorePingBuilder;
 import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
@@ -72,18 +74,27 @@ public class UploadTelemetryCorePingCallback implements SearchEngineManager.Sear
 
                 // Each profile can have different telemetry data so we intentionally grab the shared prefs for the profile.
                 final SharedPreferences sharedPrefs = GeckoSharedPrefs.forProfileName(activity, profile.getName());
-                final int sequenceNumber = TelemetryCorePingBuilder.getAndIncrementSequenceNumber(sharedPrefs);
-                final TelemetryCorePingBuilder pingBuilder = new TelemetryCorePingBuilder(activity, sequenceNumber)
+                final TelemetryCorePingBuilder pingBuilder = new TelemetryCorePingBuilder(activity)
                         .setClientID(clientID)
                         .setDefaultSearchEngine(TelemetryCorePingBuilder.getEngineIdentifier(engine))
-                        .setProfileCreationDate(TelemetryCorePingBuilder.getProfileCreationDate(activity, profile));
-                final String distributionId = sharedPrefs.getString(DistributionStoreCallback.PREF_DISTRIBUTION_ID, null);
-                if (distributionId != null) {
-                    pingBuilder.setOptDistributionID(distributionId);
-                }
+                        .setProfileCreationDate(TelemetryCorePingBuilder.getProfileCreationDate(activity, profile))
+                        .setSequenceNumber(TelemetryCorePingBuilder.getAndIncrementSequenceNumber(sharedPrefs));
+                maybeSetOptionalMeasurements(sharedPrefs, pingBuilder);
 
                 activity.getTelemetryDispatcher().queuePingForUpload(activity, pingBuilder);
             }
         });
+    }
+
+    private static void maybeSetOptionalMeasurements(final SharedPreferences sharedPrefs, final TelemetryCorePingBuilder pingBuilder) {
+        final String distributionId = sharedPrefs.getString(DistributionStoreCallback.PREF_DISTRIBUTION_ID, null);
+        if (distributionId != null) {
+            pingBuilder.setOptDistributionID(distributionId);
+        }
+
+        final ExtendedJSONObject searchCounts = SearchCountMeasurements.getAndZeroSearch(sharedPrefs);
+        if (searchCounts.size() > 0) {
+            pingBuilder.setOptSearchCounts(searchCounts);
+        }
     }
 }

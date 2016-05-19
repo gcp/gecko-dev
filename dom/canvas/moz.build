@@ -6,8 +6,8 @@
 
 TEST_DIRS += ['compiledtest']
 
-# Number changes to this file to avoid bug 1081323 (clobber after changing a manifest):
-# 12
+# Change the following line to avoid bug 1081323 (clobber after changing a manifest):
+# Add test for webglcontextcreationerror.
 
 MOCHITEST_MANIFESTS += [
     'test/crash/mochitest.ini',
@@ -186,6 +186,9 @@ CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 CXXFLAGS += CONFIG['TK_CFLAGS']
 
 LOCAL_INCLUDES += CONFIG['SKIA_INCLUDES']
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']
 
 if CONFIG['_MSC_VER']:
     # This is intended as a temporary workaround to unblock compilation

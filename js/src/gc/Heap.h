@@ -53,6 +53,7 @@ extern bool
 CurrentThreadIsIonCompiling();
 #endif
 
+// The return value indicates if anything was unmarked.
 extern bool
 UnmarkGrayCellRecursively(gc::Cell* cell, JS::TraceKind kind);
 
@@ -112,6 +113,34 @@ enum class AllocKind {
     LIMIT,
     LAST = LIMIT - 1
 };
+
+#define FOR_EACH_ALLOCKIND(D) \
+ /* PrettyName             TypeName */ \
+    D(FUNCTION,            JSFunction) \
+    D(FUNCTION_EXTENDED,   JSFunction) \
+    D(OBJECT0,             JSObject) \
+    D(OBJECT0_BACKGROUND,  JSObject) \
+    D(OBJECT2,             JSObject) \
+    D(OBJECT2_BACKGROUND,  JSObject) \
+    D(OBJECT4,             JSObject) \
+    D(OBJECT4_BACKGROUND,  JSObject) \
+    D(OBJECT8,             JSObject) \
+    D(OBJECT8_BACKGROUND,  JSObject) \
+    D(OBJECT12,            JSObject) \
+    D(OBJECT12_BACKGROUND, JSObject) \
+    D(OBJECT16,            JSObject) \
+    D(OBJECT16_BACKGROUND, JSObject) \
+    D(SCRIPT,              JSScript) \
+    D(LAZY_SCRIPT,         js::LazyScript) \
+    D(SHAPE,               js::Shape) \
+    D(ACCESSOR_SHAPE,      js::AccessorShape) \
+    D(BASE_SHAPE,          js::BaseShape) \
+    D(OBJECT_GROUP,        js::ObjectGroup) \
+    D(FAT_INLINE_STRING,   JSFatInlineString) \
+    D(STRING,              JSString) \
+    D(EXTERNAL_STRING,     JSExternalString) \
+    D(SYMBOL,              JS::Symbol) \
+    D(JITCODE,             js::JitCode)
 
 static_assert(int(AllocKind::FIRST) == 0, "Various places depend on AllocKind starting at 0, "
                                           "please audit them carefully!");
@@ -267,6 +296,7 @@ class TenuredCell : public Cell
 
     // Mark bit management.
     MOZ_ALWAYS_INLINE bool isMarked(uint32_t color = BLACK) const;
+    // The return value indicates if the cell went from unmarked to marked.
     MOZ_ALWAYS_INLINE bool markIfUnmarked(uint32_t color = BLACK) const;
     MOZ_ALWAYS_INLINE void unmark(uint32_t color) const;
     MOZ_ALWAYS_INLINE void copyMarkBitsFrom(const TenuredCell* src);
@@ -849,6 +879,7 @@ struct ChunkBitmap
         return *word & mask;
     }
 
+    // The return value indicates if the cell went from unmarked to marked.
     MOZ_ALWAYS_INLINE bool markIfUnmarked(const Cell* cell, uint32_t color) {
         uintptr_t* word, mask;
         getMarkWordAndMask(cell, BLACK, &word, &mask);
@@ -967,7 +998,7 @@ struct Chunk
     void releaseArena(JSRuntime* rt, Arena* arena, const AutoLockGC& lock);
     void recycleArena(Arena* arena, SortedArenaList& dest, size_t thingsPerArena);
 
-    bool decommitOneFreeArena(JSRuntime* rt, AutoLockGC& lock);
+    MOZ_MUST_USE bool decommitOneFreeArena(JSRuntime* rt, AutoLockGC& lock);
     void decommitAllArenasWithoutUnlocking(const AutoLockGC& lock);
 
     static Chunk* allocate(JSRuntime* rt);

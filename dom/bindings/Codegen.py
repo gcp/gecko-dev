@@ -1872,22 +1872,25 @@ class MemberCondition:
 
     pref: The name of the preference.
     func: The name of the function.
+    secureContext: A bool indicating whether a secure context is required.
     available: A string indicating where we should be available.
     checkAnyPermissions: An integer index for the anypermissions_* to use.
     checkAllPermissions: An integer index for the allpermissions_* to use.
     nonExposedGlobals: A set of names of globals.  Can be empty, in which case
                        it's treated the same way as None.
     """
-    def __init__(self, pref=None, func=None, available=None,
+    def __init__(self, pref=None, func=None, secureContext=False, available=None,
                  checkAnyPermissions=None, checkAllPermissions=None,
                  nonExposedGlobals=None):
         assert pref is None or isinstance(pref, str)
         assert func is None or isinstance(func, str)
+        assert isinstance(secureContext, bool)
         assert available is None or isinstance(available, str)
         assert checkAnyPermissions is None or isinstance(checkAnyPermissions, int)
         assert checkAllPermissions is None or isinstance(checkAllPermissions, int)
         assert nonExposedGlobals is None or isinstance(nonExposedGlobals, set)
         self.pref = pref
+        self.secureContext = secureContext
 
         def toFuncPtr(val):
             if val is None:
@@ -1914,6 +1917,7 @@ class MemberCondition:
 
     def __eq__(self, other):
         return (self.pref == other.pref and self.func == other.func and
+                self.secureContext == other.secureContext and
                 self.available == other.available and
                 self.checkAnyPermissions == other.checkAnyPermissions and
                 self.checkAllPermissions == other.checkAllPermissions and
@@ -1924,6 +1928,7 @@ class MemberCondition:
 
     def hasDisablers(self):
         return (self.pref is not None or
+                self.secureContext or
                 self.func != "nullptr" or
                 self.available != "nullptr" or
                 self.checkAnyPermissions != "nullptr" or
@@ -2012,6 +2017,7 @@ class PropertyDefiner:
                                           "Pref"),
             PropertyDefiner.getStringAttr(interfaceMember,
                                           "Func"),
+            interfaceMember.getExtendedAttribute("SecureContext") is not None,
             getAvailableInTestFunc(interfaceMember),
             descriptor.checkAnyPermissionsIndicesForMembers.get(interfaceMember.identifier.name),
             descriptor.checkAllPermissionsIndicesForMembers.get(interfaceMember.identifier.name),
@@ -2058,7 +2064,7 @@ class PropertyDefiner:
         disablersTemplate = dedent(
             """
             static PrefableDisablers %s_disablers%d = {
-              true, %s, %s, %s, %s, %s
+              true, %s, %s, %s, %s, %s, %s
             };
             """)
         prefableWithDisablersTemplate = '  { &%s_disablers%d, &%s_specs[%d] }'
@@ -2078,6 +2084,7 @@ class PropertyDefiner:
                                      (name, len(specs), name, len(specs)))
                 disablers.append(disablersTemplate %
                                  (name, len(specs),
+                                  toStringBool(condition.secureContext),
                                   condition.nonExposedGlobals,
                                   condition.func,
                                   condition.available,
@@ -2548,7 +2555,8 @@ class AttrDefiner(PropertyDefiner):
         def setter(attr):
             if (attr.readonly and
                 attr.getExtendedAttribute("PutForwards") is None and
-                attr.getExtendedAttribute("Replaceable") is None):
+                attr.getExtendedAttribute("Replaceable") is None and
+                attr.getExtendedAttribute("LenientSetter") is None):
                 return "JSNATIVE_WRAPPER(nullptr)"
             if self.static:
                 accessor = 'set_' + IDLToCIdentifier(attr.identifier.name)
@@ -3330,6 +3338,8 @@ class CGConstructorEnabled(CGAbstractMethod):
         if func:
             assert isinstance(func, list) and len(func) == 1
             conditions.append("%s(aCx, aObj)" % func[0])
+        if iface.getExtendedAttribute("SecureContext"):
+            conditions.append("mozilla::dom::IsSecureContextOrObjectIsFromSecureContext(aCx, aObj)")
         availableIn = getAvailableInTestFunc(iface)
         if availableIn:
             conditions.append("%s(aCx, aObj)" % availableIn)
@@ -8832,6 +8842,24 @@ class CGSpecializedReplaceableSetter(CGSpecializedSetter):
                 attrName)
 
 
+class CGSpecializedLenientSetter(CGSpecializedSetter):
+    """
+    A class for generating the code for a specialized attribute setter with
+    LenientSetter that the JIT can call with lower overhead.
+    """
+    def __init__(self, descriptor, attr):
+        CGSpecializedSetter.__init__(self, descriptor, attr)
+
+    def definition_body(self):
+        attrName = self.attr.identifier.name
+        # JS_DefineProperty can only deal with ASCII
+        assert all(ord(c) < 128 for c in attrName)
+        return dedent("""
+            DeprecationWarning(cx, obj, nsIDocument::eLenientSetter);
+            return true;
+            """)
+
+
 def memberReturnsNewObject(member):
     return member.getExtendedAttribute("NewObject") is not None
 
@@ -8969,7 +8997,8 @@ class CGMemberJITInfo(CGThing):
                                         [self.member.type], None)
             if (not self.member.readonly or
                 self.member.getExtendedAttribute("PutForwards") is not None or
-                self.member.getExtendedAttribute("Replaceable") is not None):
+                self.member.getExtendedAttribute("Replaceable") is not None or
+                self.member.getExtendedAttribute("LenientSetter") is not None):
                 setterinfo = ("%s_setterinfo" %
                               IDLToCIdentifier(self.member.identifier.name))
                 # Actually a JSJitSetterOp, but JSJitGetterOp is first in the
@@ -11838,7 +11867,8 @@ def memberProperties(m, descriptor):
                 props.isCrossOriginSetter = True
             elif descriptor.needsSpecialGenericOps():
                 props.isGenericSetter = True
-        elif m.getExtendedAttribute("Replaceable"):
+        elif (m.getExtendedAttribute("Replaceable") or
+              m.getExtendedAttribute("LenientSetter")):
             if descriptor.needsSpecialGenericOps():
                 props.isGenericSetter = True
 
@@ -11950,6 +11980,8 @@ class CGDescriptor(CGThing):
                         crossOriginSetters.add(m.identifier.name)
                 elif m.getExtendedAttribute("Replaceable"):
                     cgThings.append(CGSpecializedReplaceableSetter(descriptor, m))
+                elif m.getExtendedAttribute("LenientSetter"):
+                    cgThings.append(CGSpecializedLenientSetter(descriptor, m))
                 if (not m.isStatic() and
                     descriptor.interface.hasInterfacePrototypeObject()):
                     cgThings.append(CGMemberJITInfo(descriptor, m))
