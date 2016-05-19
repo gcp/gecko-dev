@@ -145,6 +145,7 @@ SandboxBrokerClient::DoCall(const Request* aReq, const char* aPath,
 int
 SandboxBrokerClient::Open(const char* aPath, int aFlags)
 {
+  printf("[content] Broker: requesting open('%s')\n", aPath);
   Request req = { SANDBOX_FILE_OPEN, aFlags };
   int maybeFd = DoCall(&req, aPath, nullptr, true);
   if (maybeFd >= 0) {
@@ -153,28 +154,38 @@ SandboxBrokerClient::Open(const char* aPath, int aFlags)
       fcntl(maybeFd, F_SETFD, 0);
     }
   }
+  printf("[content] Broker: open('%s') = %d\n", aPath, maybeFd);
   return maybeFd;
 }
 
 int
 SandboxBrokerClient::Access(const char* aPath, int aMode)
 {
+  printf("[content] Broker: requesting access('%s')\n", aPath);
   Request req = { SANDBOX_FILE_ACCESS, aMode };
-  return DoCall(&req, aPath, nullptr, false);
+  int maybeFd = DoCall(&req, aPath, nullptr, false);
+  printf("[content] Broker: access('%s') = %d\n", aPath, maybeFd);
+  return maybeFd;
 }
 
 int
 SandboxBrokerClient::Stat(const char* aPath, struct stat* aStat)
 {
+  printf("[content] Broker: requesting stat('%s')\n", aPath);
   Request req = { SANDBOX_FILE_STAT, 0 };
-  return DoCall(&req, aPath, aStat, false);
+  int maybeFd = DoCall(&req, aPath, aStat, false);
+  printf("[content] Broker: stat('%s') = %d\n", aPath, maybeFd);
+  return maybeFd;
 }
 
 int
 SandboxBrokerClient::LStat(const char* aPath, struct stat* aStat)
 {
+  printf("[content] Broker: requesting lstat('%s')\n", aPath);
   Request req = { SANDBOX_FILE_STAT, O_NOFOLLOW };
-  return DoCall(&req, aPath, aStat, false);
+  int maybeFd = DoCall(&req, aPath, aStat, false);
+  printf("[content] Broker: lstat('%s') = %d\n", aPath, maybeFd);
+  return maybeFd;
 }
 
 } // namespace mozilla

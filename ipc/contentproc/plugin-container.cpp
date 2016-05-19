@@ -63,6 +63,258 @@
 #include "ipc/Nuwa.h"
 #endif
 
+#if 1
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/inotify.h>
+#include <dlfcn.h>
+#include <execinfo.h>
+#include <unistd.h>
+
+void print_stacktrace()
+{
+  void *buffer[100];
+  int nptrs = backtrace(buffer, 100);
+  char **strings = backtrace_symbols(buffer, nptrs);
+  if (!strings)
+    return;
+
+  for (int i=0; i<nptrs; i++)
+    printf("%s\n", strings[i]);
+
+  free(strings);
+}
+
+extern "C" MOZ_EXPORT int chmod(const char *pathname, mode_t mode)
+{
+  static auto real_func = (int (*)(const char*, mode_t))
+    dlsym(RTLD_NEXT, "chmod");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling chmod()...\n");
+
+  int ret = real_func(pathname, mode);
+
+  printf("[content] chmod('%s', 0x%08x) = %d\n", pathname, mode, ret);
+
+  return ret;
+}
+
+extern "C" MOZ_EXPORT int mkdir(const char *pathname, mode_t mode)
+{
+  static auto real_func = (int (*)(const char*, mode_t))
+    dlsym(RTLD_NEXT, "mkdir");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling mkdir()...\n");
+
+  int ret = real_func(pathname, mode);
+
+  printf("[content] mkdir('%s', 0x%08x) = %d\n", pathname, mode, ret);
+
+  if (strcmp("/home/user/.config/pulse", pathname))
+    print_stacktrace();
+
+  return ret;
+}
+
+extern "C" MOZ_EXPORT int rmdir(const char *pathname)
+{
+  static auto real_func = (int (*)(const char*))
+    dlsym(RTLD_NEXT, "rmdir");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling rmdir()...\n");
+
+  int ret = real_func(pathname);
+
+  printf("[content] rmdir('%s') = %d\n", pathname, ret);
+  return ret;
+}
+
+extern "C" MOZ_EXPORT int rename(const char *oldpath, const char *newpath)
+{
+  static auto real_func = (int (*)(const char*, const char*))
+    dlsym(RTLD_NEXT, "rename");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling rename()...\n");
+
+  int ret = real_func(oldpath, newpath);
+
+  printf("[content] rename('%s', '%s') = %d\n", oldpath, newpath, ret);
+  return ret;
+}
+
+extern "C" MOZ_EXPORT int symlink(const char *target, const char *linkpath)
+{
+  static auto real_func = (int (*)(const char*, const char*))
+    dlsym(RTLD_NEXT, "symlink");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling symlink()...\n");
+
+  int ret = real_func(target, linkpath);
+
+  printf("[content] symlink('%s', '%s') = %d\n", target, linkpath, ret);
+  return ret;
+}
+
+extern "C" MOZ_EXPORT int open(const char *pathname, int flags)
+{
+  static auto real_func = (int (*)(const char*, int))
+    dlsym(RTLD_NEXT, "open");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling open()...\n");
+
+  int ret = real_func(pathname, flags);
+
+  printf("[content] open('%s', 0x%08x) = %d\n", pathname, flags, ret);
+  return ret;
+}
+
+extern "C" MOZ_EXPORT int openat(int dirfd, const char *pathname, int flags)
+{
+  static auto real_func = (int (*)(int, const char*, int))
+    dlsym(RTLD_NEXT, "openat");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling openat()...\n");
+
+  int ret = real_func(dirfd, pathname, flags);
+
+  printf("[content] openat(0x%08x, '%s', 0x%08x) = %d\n", dirfd, pathname, flags, ret);
+  return ret;
+}
+
+extern "C" MOZ_EXPORT int access(const char *pathname, int mode)
+{
+  static auto real_func = (int (*)(const char*, int))
+    dlsym(RTLD_NEXT, "access");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling access()...\n");
+
+  int ret = real_func(pathname, mode);
+
+  printf("[content] access('%s', 0x%08x) = %d\n", pathname, mode, ret);
+  return ret;
+}
+
+extern "C" MOZ_EXPORT int faccessat(int dirfd, const char *pathname, int mode, int flags)
+{
+  static auto real_func = (int (*)(int, const char*, int, int))
+    dlsym(RTLD_NEXT, "faccessat");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling faccessat()...\n");
+
+  int ret = real_func(dirfd, pathname, mode, flags);
+
+  printf("[content] faccessat(0x%08x, '%s', 0x%08x, 0x%08x) = %d\n", dirfd, pathname, mode, flags, ret);
+  return ret;
+}
+
+#if 0
+extern "C" MOZ_EXPORT int stat(const char *pathname, struct stat *buf)
+{
+  static auto real_func = (int (*)(const char*, struct stat*))
+    dlsym(RTLD_NEXT, "stat");
+
+  if (!real_func)
+    return -1;
+
+  int ret = real_func(pathname, buf);
+
+  printf("[content] stat('%s', %p) = %d\n", pathname, buf, ret);
+  return ret;
+}
+#endif
+
+extern "C" MOZ_EXPORT int lstat(const char *pathname, struct stat *buf)
+{
+  static auto real_func = (int (*)(const char*, struct stat*))
+    dlsym(RTLD_NEXT, "lstat");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling lstat()...\n");
+
+  int ret = real_func(pathname, buf);
+
+  printf("[content] lstat('%s', %p) = %d\n", pathname, buf, ret);
+  return ret;
+}
+
+extern "C" MOZ_EXPORT int fstatat(int dirfd, const char *pathname, struct stat *buf, int flags)
+{
+  static auto real_func = (int (*)(int, const char*, struct stat*, int))
+    dlsym(RTLD_NEXT, "fststat");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling fststat()...\n");
+
+  int ret = real_func(dirfd, pathname, buf, flags);
+
+  printf("[content] fststat(0x%08x, '%s', %p, 0x%08x) = %d\n", dirfd, pathname, buf, flags, ret);
+  return ret;
+}
+
+extern "C" MOZ_EXPORT int statfs(const char *path, struct statfs *buf)
+{
+  static auto real_func = (int (*)(const char*, struct statfs*))
+    dlsym(RTLD_NEXT, "statfs");
+
+  if (!real_func)
+    return -1;
+
+  printf("[content] calling statfs()...\n");
+
+  int ret = real_func(path, buf);
+
+  printf("[content] statfs('%s', %p) = %d\n", path, buf, ret);
+  return ret;
+}
+
+extern "C" MOZ_EXPORT int inotify_add_watch(int fd, const char *pathname, uint32_t mask)
+{
+  static auto real_func = (int (*)(int, const char*, uint32_t))
+    dlsym(RTLD_NEXT, "inotify_add_watch");
+
+  if (!real_func)
+    return -1;
+
+  print_stacktrace();
+  int ret = real_func(fd, pathname, mask);
+
+  printf("[content] inotify_add_watch(0x%08x, '%s', 0x%08x) = %d\n", fd, pathname, mask, ret);
+  return ret;
+}
+
+#endif
+
 #ifdef MOZ_WIDGET_GONK
 static void
 InitializeBinder(void *aDummy) {

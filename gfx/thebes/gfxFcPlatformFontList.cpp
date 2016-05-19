@@ -900,6 +900,7 @@ gfxFcPlatformFontList::gfxFcPlatformFontList()
 {
     // if the rescan interval is set, start the timer
     int rescanInterval = FcConfigGetRescanInterval(nullptr);
+#if 0 // disable font rescanning for now
     if (rescanInterval) {
         mLastConfig = FcConfigGetCurrent();
         mCheckFontUpdatesTimer = do_CreateInstance("@mozilla.org/timer;1");
@@ -912,6 +913,7 @@ gfxFcPlatformFontList::gfxFcPlatformFontList()
             NS_WARNING("Failure to create font updates timer");
         }
     }
+#endif
 
 #ifdef MOZ_BUNDLED_FONTS
     mBundledFontsInitialized = false;

@@ -1463,6 +1463,8 @@ ContentChild::RecvSetProcessSandbox(const MaybeFileDesc& aBroker)
             do_GetService(NS_PROTOCOLPROXYSERVICE_CONTRACTID, &rv);
 
   CubebUtils::GetCubebContext();
+
+  printf("[content] enabling seccomp\n");
 #endif
   int brokerFd = -1;
   if (aBroker.type() == MaybeFileDesc::TFileDescriptor) {
